@@ -43,6 +43,32 @@ React + Vite 기반 매치업 앱.
 
 ---
 
+## 웹에 배포하기 (Vercel / Netlify)
+
+코드를 GitHub에 푸시한 뒤, 아래 중 하나로 배포하면 브라우저에서 앱을 열어볼 수 있습니다.
+
+### Vercel (추천)
+
+1. [vercel.com](https://vercel.com) 가입 후 **Add New → Project**
+2. GitHub 저장소 `vics` 선택 → **Import**
+3. **Environment Variables**에 추가:
+   - `VITE_SUPABASE_URL` = Supabase 프로젝트 URL
+   - `VITE_SUPABASE_ANON_KEY` = Supabase Anon Key
+4. **Deploy** 클릭 → 완료 후 `https://vics-xxx.vercel.app` 주소로 접속
+
+### Netlify
+
+1. [netlify.com](https://netlify.com) 가입 후 **Add new site → Import an existing project**
+2. GitHub 저장소 `vics` 선택
+3. Build 설정은 자동 감지됨. **Environment variables**에 추가:
+   - `VITE_SUPABASE_URL` = Supabase 프로젝트 URL
+   - `VITE_SUPABASE_ANON_KEY` = Supabase Anon Key
+4. **Deploy site** → 완료 후 `https://xxx.netlify.app` 주소로 접속
+
+> 이후 `git push`할 때마다 자동으로 재배포됩니다.
+
+---
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:
