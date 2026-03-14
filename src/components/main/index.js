@@ -1,0 +1,5 @@
+export { MainMatchupCard } from './MainMatchupCard'
+export { MainRankingBoard } from './MainRankingBoard'
+export { MainCardSkeleton } from './MainCardSkeleton'
+export { MainTabBar } from './MainTabBar'
+export { MainPagination } from './MainPagination'
