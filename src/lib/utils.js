@@ -42,13 +42,13 @@ export function calcPercent(a, b) {
 
 // ── 포인트/레벨 시스템 ───────────────────────────────────────────────
 export const LEVELS = [
-  { level: 1, name: '뉴비',    min: 0,    emoji: '🌱', color: 'text-gray-500',   bg: 'bg-gray-100'   },
-  { level: 2, name: '도전자',  min: 100,  emoji: '⚡', color: 'text-blue-500',   bg: 'bg-blue-50'    },
-  { level: 3, name: '투사',    min: 300,  emoji: '🔥', color: 'text-green-600',  bg: 'bg-green-50'   },
-  { level: 4, name: '전사',    min: 700,  emoji: '⚔️', color: 'text-orange-500', bg: 'bg-orange-50'  },
-  { level: 5, name: '영웅',    min: 1500, emoji: '🏆', color: 'text-purple-500', bg: 'bg-purple-50'  },
-  { level: 6, name: '전설',    min: 3000, emoji: '💎', color: 'text-red-500',    bg: 'bg-red-50'     },
-  { level: 7, name: '챔피언',  min: 6000, emoji: '👑', color: 'text-yellow-600', bg: 'bg-yellow-50'  },
+  { level: 1, name: '', min: 0,    emoji: '🌱', color: 'text-gray-500',   bg: 'bg-gray-100'   },
+  { level: 2, name: '', min: 100,  emoji: '⚡', color: 'text-blue-500',   bg: 'bg-blue-50'    },
+  { level: 3, name: '', min: 300,  emoji: '🔥', color: 'text-green-600',  bg: 'bg-green-50'   },
+  { level: 4, name: '', min: 700,  emoji: '⚔️', color: 'text-orange-500', bg: 'bg-orange-50'  },
+  { level: 5, name: '', min: 1500, emoji: '🏆', color: 'text-purple-500', bg: 'bg-purple-50'  },
+  { level: 6, name: '', min: 3000, emoji: '💎', color: 'text-red-500',    bg: 'bg-red-50'     },
+  { level: 7, name: '', min: 6000, emoji: '👑', color: 'text-yellow-600', bg: 'bg-yellow-50'  },
 ]
 
 export function getLevel(points = 0) {

@@ -20,7 +20,6 @@ export function LevelBadge({ points = 0, variant = 'badge', className }) {
       >
         <span>{level.emoji}</span>
         <span>Lv.{level.level}</span>
-        <span className="font-medium">{level.name}</span>
       </span>
     )
   }
@@ -35,7 +34,7 @@ export function LevelBadge({ points = 0, variant = 'badge', className }) {
             <span className="text-2xl">{current.emoji}</span>
             <div>
               <p className={cn('text-sm font-black', current.color)}>
-                Lv.{current.level} {current.name}
+                Lv.{current.level}
               </p>
               <p className="text-xs text-gray-400">{points.toLocaleString()} pt</p>
             </div>
@@ -44,7 +43,7 @@ export function LevelBadge({ points = 0, variant = 'badge', className }) {
             <div className="text-right">
               <p className="text-xs text-gray-400">다음 레벨</p>
               <p className="text-xs font-semibold text-gray-500">
-                {next.emoji} {next.name} ({next.min.toLocaleString()}pt)
+                {next.emoji} Lv.{next.level} ({next.min.toLocaleString()}pt)
               </p>
             </div>
           )}

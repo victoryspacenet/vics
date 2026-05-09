@@ -1,28 +1,26 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import {
   ChevronDown, TrendingUp, TrendingDown, Minus,
   ChevronRight, Flame, Plus, Menu, X,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { safeMediaUrl } from '../lib/sanitize'
+import { getCachedRanking, setCachedRanking } from '../lib/rankingCache'
 import { useAuthStore } from '../store/authStore'
-import { formatNumber, getLevel } from '../lib/utils'
+import { formatNumber, getLevel, cn } from '../lib/utils'
 import { useUIStore } from '../store/uiStore'
 import { RankingCelebrationModal } from '../components/ranking/RankingCelebrationModal'
+import { RankTrackBadge } from '../components/ranking/RankTrackBadge'
 import { Avatar } from '../components/ui/Avatar'
+import { FeaturedBadgeSpan } from '../components/ui/FeaturedBadge'
 import { LevelBadge } from '../components/ui/LevelBadge'
-
-// ── 상수 ─────────────────────────────────────────────────────────────
-const CATEGORIES = [
-  { id: 'all',    label: '전체 랭킹', icon: '🏆', lnbLabel: '전체 랭킹' },
-  { id: '패션',   label: '패션',      icon: '👗' },
-  { id: '맛집',   label: '맛집',      icon: '🍔' },
-  { id: '게임',   label: '게임',      icon: '🎮' },
-  { id: 'IT/테크', label: 'IT/테크',  icon: '💻' },
-  { id: '연예인', label: '연예인',    icon: '⭐' },
-  { id: 'OOTD',   label: 'OOTD',     icon: '📸' },
-  { id: '스포츠', label: '스포츠',    icon: '⚽' },
-]
+import {
+  getInitialMobileTabCategoryIds,
+  readMobileTabCache,
+  writeMobileTabCache,
+  fetchTopMobileTabCategoryIds,
+} from '../lib/rankingMobileTabs'
+import { getRankingCategoryNavItems } from '../lib/categoryAdminStorage'
 
 const PERIOD_OPTIONS = [
   { id: 'weekly',  label: '이번 주' },
@@ -30,20 +28,26 @@ const PERIOD_OPTIONS = [
   { id: 'all',     label: '전체'    },
 ]
 const TYPE_OPTIONS = [
-  { id: 'creator', label: '매치업 생성' },
-  { id: 'voter',   label: '매치업 투표' },
+  { id: 'creator', label: '👑 The Champion', sub: '매치업 생성자' },
+  { id: 'voter',   label: '🔮 The Oracle',   sub: '매치업 투표자' },
 ]
-const SORT_OPTIONS = [
-  { id: 'points',   label: '포인트순'  },
-  { id: 'winrate',  label: '승률순'    },
+const CREATOR_SORT_OPTIONS = [
+  { id: 'points',   label: '포인트'     },
+  { id: 'votes',    label: '투표받은 수' },
+]
+const VOTER_SORT_OPTIONS = [
+  { id: 'points',   label: '포인트'     },
+  { id: 'hitrate',  label: '적중률순'   },
 ]
 
-// ── 승률 계산 ────────────────────────────────────────────────────────
-function calcWinRate(wins, losses) {
-  const total = (wins || 0) + (losses || 0)
-  if (!total) return null
-  return Math.round(((wins || 0) / total) * 100)
-}
+/** 랭킹 LNB·드로어 — 바탕 흰색 */
+const MZ_SB =
+  'rounded-2xl border border-gray-100 bg-white shadow-sm'
+
+const LNB_ROW_ON =
+  'bg-gradient-to-r from-pink-200/90 via-fuchsia-200/85 to-violet-200/90 text-fuchsia-950 font-black shadow-sm shadow-pink-200/30 border border-white/70'
+const LNB_ROW_OFF =
+  'text-pink-700/90 hover:text-fuchsia-800 hover:bg-pink-50/90 hover:shadow-sm'
 
 // ── 드롭다운 컴포넌트 ────────────────────────────────────────────────
 function Dropdown({ label, options, value, onChange }) {
@@ -61,21 +65,21 @@ function Dropdown({ label, options, value, onChange }) {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-700 hover:border-gray-400 transition-colors whitespace-nowrap"
+        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap border border-pink-200 bg-white text-fuchsia-900 shadow-sm shadow-pink-100/50 hover:bg-pink-50 hover:border-pink-300 transition-colors"
       >
         {selected?.label || label}
         <ChevronDown size={12} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <div className="absolute top-full mt-1.5 left-0 bg-white border border-gray-200 rounded-xl shadow-lg z-30 min-w-[120px] overflow-hidden">
+        <div className="absolute top-full mt-1.5 left-0 rounded-xl border border-pink-200 bg-white shadow-lg shadow-pink-200/40 z-[60] min-w-[120px] overflow-hidden">
           {options.map((opt) => (
             <button
               key={opt.id}
               onClick={() => { onChange(opt.id); setOpen(false) }}
               className={`w-full text-left px-4 py-2.5 text-xs font-bold transition-colors ${
                 value === opt.id
-                  ? 'bg-[#22282E] text-white'
-                  : 'text-gray-600 hover:bg-gray-50'
+                  ? 'bg-gradient-to-r from-pink-200 to-fuchsia-200 text-fuchsia-950'
+                  : 'text-gray-700 bg-white hover:bg-pink-50'
               }`}
             >
               {opt.label}
@@ -103,35 +107,38 @@ function ChangeBadge({ change }) {
   )
 }
 
+// ── 적중률 계산 (The Oracle) ────────────────────────────────────────
+function calcHitRate(hits, total) {
+  if (!total || total === 0) return null
+  return Math.round(((hits || 0) / total) * 100)
+}
+
 // ── TOP 3 포디움 ─────────────────────────────────────────────────────
-function Podium({ users, category }) {
+function Podium({ users, category, typeTab, sortBy, categories }) {
   if (!users || users.filter(Boolean).length < 1) return null
   const [second, first, third] = [users[1], users[0], users[2]]
-  const catLabel = CATEGORIES.find((c) => c.id === category)
+  const catLabel = categories.find((c) => c.id === category)
+  const typeOpt = TYPE_OPTIONS.find((t) => t.id === typeTab)
 
   return (
-    <div className="bg-gradient-to-b from-amber-50 via-white to-white rounded-3xl border border-amber-100 px-4 pt-5 pb-0 mb-4 overflow-hidden">
+    <div className="bg-gradient-to-b from-violet-50/90 via-fuchsia-50/50 to-amber-50/70 rounded-3xl border border-violet-200/40 ring-1 ring-amber-100/50 px-4 pt-5 pb-0 mb-4 overflow-hidden">
       <div className="flex items-center gap-2 mb-5">
         <Flame size={15} className="text-amber-500" />
         <p className="text-sm font-black text-[#22282E]">
-          TOP 3{catLabel && catLabel.id !== 'all' ? ` ${catLabel.icon} ${catLabel.label}` : ''} 랭커
+          TOP 3 {typeOpt?.label || ''}{catLabel && catLabel.id !== 'all' ? ` ${catLabel.label}` : ''} 랭커
         </p>
       </div>
       <div className="flex items-end justify-center gap-1">
-        {/* 2위 */}
-        <PodiumCard user={second} rank={2} />
-        {/* 1위 */}
-        <PodiumCard user={first}  rank={1} />
-        {/* 3위 */}
-        <PodiumCard user={third}  rank={3} />
+        <PodiumCard user={second} rank={2} typeTab={typeTab} sortBy={sortBy} />
+        <PodiumCard user={first}  rank={1} typeTab={typeTab} sortBy={sortBy} />
+        <PodiumCard user={third}  rank={3} typeTab={typeTab} sortBy={sortBy} />
       </div>
     </div>
   )
 }
 
-function PodiumCard({ user: u, rank }) {
+function PodiumCard({ user: u, rank, typeTab, sortBy }) {
   if (!u) return <div className="flex-1" />
-  const wr    = calcWinRate(u.wins, u.losses)
   const lv    = getLevel(u.points || 0)
   const cfg   = {
     1: { base: 'h-24',   gradient: 'from-amber-400 to-yellow-500', ring: 'ring-2 ring-amber-400', av: 'w-16 h-16', medal: '🥇', textColor: 'text-amber-600' },
@@ -139,20 +146,28 @@ function PodiumCard({ user: u, rank }) {
     3: { base: 'h-12',   gradient: 'from-orange-300 to-amber-500', ring: 'ring-2 ring-orange-300', av: 'w-12 h-12', medal: '🥉', textColor: 'text-orange-500' },
   }[rank]
 
+  const isCreator = typeTab === 'creator'
+  const statLabel = isCreator
+    ? (sortBy === 'points' ? `${formatNumber(u.points || 0)}P` : `${formatNumber(u.total_votes_received || 0)}표`)
+    : (sortBy === 'points' ? `${formatNumber(u.points || 0)}P` : calcHitRate(u.vote_hits, u.vote_total) !== null ? `적중률 ${calcHitRate(u.vote_hits, u.vote_total)}%` : '-')
+
   return (
     <div className="flex flex-col items-center gap-1 flex-1">
       <span className="text-xl">{cfg.medal}</span>
       <div className={`${cfg.av} rounded-full overflow-hidden ${cfg.ring} shadow-md flex-shrink-0`}>
         {u.avatar_url
-          ? <img src={u.avatar_url} alt={u.nickname} className="w-full h-full object-cover" />
+          ? <img src={safeMediaUrl(u.avatar_url)} alt={u.nickname} className="w-full h-full object-cover" />
           : <div className="w-full h-full bg-gradient-to-br from-gray-200 to-gray-300 flex items-center justify-center">
               <span className="font-black text-gray-500 text-base">{u.nickname?.[0]?.toUpperCase()}</span>
             </div>
         }
       </div>
-      <p className="text-xs font-black text-[#22282E] text-center truncate w-full px-1">{u.nickname}</p>
-      <p className="text-[10px] text-gray-400">{lv.emoji} {lv.name}</p>
-      {wr !== null && <p className={`text-xs font-black ${cfg.textColor}`}>승률 {wr}%</p>}
+      <p className="text-xs font-black text-[#22282E] text-center truncate w-full px-1 flex items-center justify-center gap-0.5">
+        <span className="truncate">{u.nickname}</span>
+        <FeaturedBadgeSpan badgeId={u.featured_badge} />
+      </p>
+      <p className="text-[10px] text-gray-400">{lv.emoji} Lv.{lv.level}</p>
+      <p className={`text-xs font-black ${cfg.textColor}`}>{statLabel}</p>
       <div className={`w-full ${cfg.base} bg-gradient-to-b ${cfg.gradient} rounded-t-xl flex items-start justify-center pt-2`}>
         <span className="text-xs font-black text-white/90">{rank}위</span>
       </div>
@@ -160,17 +175,46 @@ function PodiumCard({ user: u, rank }) {
   )
 }
 
+// ── 순위 행 스켈레톤 ───────────────────────────────────────────────────
+function RankRowSkeleton() {
+  return (
+    <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 border-b border-violet-100/40 last:border-0">
+      <div className="w-7 sm:w-8 h-5 bg-gray-100 rounded flex-shrink-0" />
+      <div className="flex items-center gap-2 flex-[2] min-w-0">
+        <div className="w-8 h-8 rounded-full bg-gray-100 flex-shrink-0" />
+        <div className="flex-1 min-w-0 space-y-1">
+          <div className="h-3.5 w-20 bg-gray-100 rounded" />
+          <div className="h-2.5 w-14 bg-gray-100 rounded" />
+        </div>
+      </div>
+      <div className="flex-1 hidden sm:block">
+        <div className="h-3 w-10 bg-gray-100 rounded mx-auto" />
+      </div>
+      <div className="flex-1 hidden md:block">
+        <div className="h-3 w-8 bg-gray-100 rounded mx-auto" />
+      </div>
+      <div className="flex-1 flex justify-end">
+        <div className="h-3 w-12 bg-gray-100 rounded" />
+      </div>
+      <div className="w-8 h-4 bg-gray-100 rounded flex-shrink-0" />
+    </div>
+  )
+}
+
 // ── 순위 테이블 행 ───────────────────────────────────────────────────
-function RankRow({ entry, rank, isMe }) {
+function RankRow({ entry, rank, isMe, typeTab, sortBy }) {
   const lv = getLevel(entry.points || 0)
-  const wr = calcWinRate(entry.wins, entry.losses)
-  const matchupCount = entry.total_matchups || 0
+  const isCreator = typeTab === 'creator'
+  const hitRate = calcHitRate(entry.vote_hits, entry.vote_total)
+
+  const creatorStat = entry.total_votes_received || 0
+  const oracleP = entry.oracle_points || 0
 
   return (
-    <div className={`flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 border-b border-gray-50 last:border-0 transition-colors ${
-      isMe ? 'bg-lime-50/80 border-l-[3px] border-l-lime-400' : 'hover:bg-gray-50/80'
-    }`}>
-      {/* 순위 */}
+    <div className={cn(
+      'flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 border-b border-violet-100/45 last:border-0 transition-colors',
+      isMe ? 'bg-lime-50/80 border-l-[3px] border-l-lime-400' : 'hover:bg-violet-50/45'
+    )}>
       <div className="w-7 sm:w-8 text-center flex-shrink-0">
         {rank <= 3
           ? <span className="text-base">{['🥇','🥈','🥉'][rank - 1]}</span>
@@ -178,49 +222,69 @@ function RankRow({ entry, rank, isMe }) {
         }
       </div>
 
-      {/* 아바타 + 이름 */}
       <div className="flex items-center gap-2 flex-[2] min-w-0">
-        <div className="w-8 h-8 rounded-full overflow-hidden ring-2 ring-gray-100 flex-shrink-0">
+        <div className={`w-8 h-8 rounded-full overflow-hidden flex-shrink-0 ${
+          rank <= 3 ? (typeTab === 'creator' ? 'ring-2 ring-amber-400 ring-offset-1' : 'ring-2 ring-violet-400 ring-offset-1') : 'ring-2 ring-gray-100'
+        }`}>
           {entry.avatar_url
-            ? <img src={entry.avatar_url} alt={entry.nickname} className="w-full h-full object-cover" />
+            ? <img src={safeMediaUrl(entry.avatar_url)} alt={entry.nickname} className="w-full h-full object-cover" />
             : <div className="w-full h-full bg-gradient-to-br from-gray-200 to-gray-300 flex items-center justify-center">
                 <span className="text-[11px] font-black text-gray-500">{entry.nickname?.[0]?.toUpperCase()}</span>
               </div>
           }
         </div>
         <div className="min-w-0">
-          <p className={`text-xs font-black truncate ${isMe ? 'text-lime-700' : 'text-[#22282E]'}`}>
-            {isMe && <span className="text-lime-500 mr-1 text-[9px]">나</span>}
-            {entry.nickname}
-          </p>
-          <p className="text-[9px] text-gray-400">{lv.emoji} {lv.name}</p>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className={`text-xs font-black truncate flex items-center gap-0.5 min-w-0 ${isMe ? 'text-lime-700' : 'text-[#22282E]'}`}>
+              {isMe && <span className="text-lime-500 mr-1 text-[9px] shrink-0">나</span>}
+              <span className="truncate">{entry.nickname}</span>
+              <FeaturedBadgeSpan badgeId={entry.featured_badge} />
+            </p>
+            {rank <= 3 && <RankTrackBadge track={typeTab} rank={rank} />}
+          </div>
+          <p className="text-[9px] text-gray-400">{lv.emoji} Lv.{lv.level}</p>
         </div>
       </div>
 
-      {/* 승률 */}
+      {/* Creator: 투표받은 수 / Voter: 적중률 */}
       <div className="flex-1 text-center hidden sm:block">
-        {wr !== null
-          ? <span className={`text-xs font-black ${wr >= 70 ? 'text-emerald-500' : wr >= 50 ? 'text-[#22282E]' : 'text-gray-400'}`}>
-              {wr}%
-            </span>
-          : <span className="text-[10px] text-gray-300">-</span>
+        {isCreator
+          ? <span className="text-xs font-bold text-gray-600">{formatNumber(creatorStat)}표</span>
+          : hitRate !== null
+            ? <span className={`text-xs font-black ${hitRate >= 70 ? 'text-emerald-500' : hitRate >= 50 ? 'text-[#22282E]' : 'text-gray-400'}`}>{hitRate}%</span>
+            : <span className="text-[10px] text-gray-300">-</span>
         }
       </div>
 
-      {/* 매치업 수 */}
+      {/* Creator: 생성 수 / Voter: 적중P */}
       <div className="flex-1 text-center hidden md:block">
-        <span className="text-xs font-bold text-gray-500">{matchupCount}회</span>
+        {isCreator
+          ? <span className="text-xs font-bold text-gray-500">{entry.total_matchups || 0}개</span>
+          : <span className="text-xs font-bold text-violet-600">{formatNumber(oracleP)}P</span>
+        }
       </div>
 
-      {/* 포인트 */}
+      {/* 상단 정렬 옵션에 연동된 값 컬럼 */}
       <div className="flex-1 text-right">
-        <span className="text-xs font-black text-[#22282E] tabular-nums">
-          {formatNumber(entry.points || 0)}
-        </span>
-        <span className="text-[9px] text-gray-400 ml-0.5">P</span>
+        {sortBy === 'points' && (
+          <>
+            <span className="text-xs font-black text-[#22282E] tabular-nums">{formatNumber(entry.points || 0)}</span>
+            <span className="text-[9px] text-gray-400 ml-0.5">P</span>
+          </>
+        )}
+        {sortBy === 'votes' && (
+          <>
+            <span className="text-xs font-black text-[#22282E] tabular-nums">{formatNumber(creatorStat)}</span>
+            <span className="text-[9px] text-gray-400 ml-0.5">표</span>
+          </>
+        )}
+        {sortBy === 'hitrate' && (
+          hitRate !== null
+            ? <span className={`text-xs font-black tabular-nums ${hitRate >= 70 ? 'text-emerald-500' : hitRate >= 50 ? 'text-[#22282E]' : 'text-gray-400'}`}>{hitRate}%</span>
+            : <span className="text-[10px] text-gray-300">-</span>
+        )}
       </div>
 
-      {/* 변동 */}
       <div className="w-8 flex items-center justify-end flex-shrink-0">
         <ChangeBadge change={entry._change} />
       </div>
@@ -236,48 +300,93 @@ export function RankingPage() {
   const [category,  setCategory]  = useState('all')
   const [period,    setPeriod]    = useState('weekly')
   const [typeTab,   setTypeTab]   = useState('creator')
-  const [sortBy,    setSortBy]    = useState('points')
+  const [sortBy,    setSortBy]    = useState('votes')
   const [lnbOpen,   setLnbOpen]   = useState(false)  // 모바일 LNB
 
   const [rankings,     setRankings]     = useState([])
   const [myRank,       setMyRank]       = useState(null)
-  const [hallOfFameUsers, setHallOfFameUsers] = useState([])
+  const [hallOfFameUsers, setHallOfFameUsers] = useState({ champion: [], oracle: [] })
   const [loading,      setLoading]      = useState(true)
   const [page,         setPage]         = useState(0)
-  const [hasMore,      setHasMore]      = useState(true)
+  const [totalCount,   setTotalCount]   = useState(0)
   const [showCelebration, setShowCelebration] = useState(false)
+  const [mobileTabCategoryIds, setMobileTabCategoryIds] = useState(getInitialMobileTabCategoryIds)
+  const [catNavTick, setCatNavTick] = useState(0)
 
-  const loaderRef = useRef(null)
+  const rankingCategories = useMemo(() => {
+    void catNavTick
+    try {
+      return getRankingCategoryNavItems()
+    } catch {
+      return [{ id: 'all', icon: '🏆', label: '전체 랭킹' }]
+    }
+  }, [catNavTick])
+
+  useEffect(() => {
+    const bump = () => setCatNavTick((t) => t + 1)
+    window.addEventListener('vics_categories_changed', bump)
+    window.addEventListener('storage', bump)
+    return () => {
+      window.removeEventListener('vics_categories_changed', bump)
+      window.removeEventListener('storage', bump)
+    }
+  }, [])
+
+  useEffect(() => {
+    const ids = new Set(rankingCategories.map((c) => c.id))
+    if (!ids.has(category)) setCategory('all')
+  }, [rankingCategories, category])
+
   const PAGE_SIZE = 20
 
-  // 필터 변경 시 리셋
+  // typeTab 변경 시 sortBy를 해당 트랙의 기본값으로 초기화
+  useEffect(() => {
+    setSortBy(typeTab === 'creator' ? 'votes' : 'hitrate')
+  }, [typeTab])
+
   useEffect(() => {
     setRankings([])
     setPage(0)
-    setHasMore(true)
+    setTotalCount(0)
     setMyRank(null)
   }, [category, period, typeTab, sortBy])
 
   useEffect(() => { loadRankings() }, [category, period, typeTab, sortBy, page])
 
-  // 무한 스크롤
+  // 명예의 전당 (트랙별 TOP 3)
   useEffect(() => {
-    const obs = new IntersectionObserver(
-      ([e]) => { if (e.isIntersecting && hasMore && !loading) setPage((p) => p + 1) },
-      { threshold: 0.1 }
-    )
-    if (loaderRef.current) obs.observe(loaderRef.current)
-    return () => obs.disconnect()
-  }, [hasMore, loading])
-
-  // 명예의 전당 (TOP 3 유저)
-  useEffect(() => {
-    supabase.from('profiles')
-      .select('id, nickname, avatar_url, points')
-      .order('points', { ascending: false })
-      .limit(3)
-      .then(({ data }) => setHallOfFameUsers(data || []))
+    Promise.all([
+      supabase.from('profiles').select('id, nickname, avatar_url, points, total_votes_received, featured_badge').order('total_votes_received', { ascending: false }).limit(3),
+      supabase.from('profiles').select('id, nickname, avatar_url, points, vote_hits, vote_total, hit_rate, featured_badge').gte('vote_total', 1).order('hit_rate', { ascending: false }).limit(3),
+    ]).then(([creators, voters]) => {
+      setHallOfFameUsers({
+        champion: creators.data || [],
+        oracle: voters.data || [],
+      })
+    }).catch(() => {
+      supabase.from('profiles').select('id, nickname, avatar_url, points, total_votes_received, featured_badge').order('total_votes_received', { ascending: false }).limit(3)
+        .then(({ data }) => setHallOfFameUsers({ champion: data || [], oracle: [] }))
+    })
   }, [])
+
+  /** 모바일 가로 탭: 전체 매치업 누적 집계 상위 3 카테고리 (캐시는 KST 당일 단위) */
+  useEffect(() => {
+    if (readMobileTabCache()?.ids?.length === 3) return
+    const validIds = rankingCategories.map((c) => c.id).filter((id) => id !== 'all')
+    let cancelled = false
+    ;(async () => {
+      const ids = await fetchTopMobileTabCategoryIds(validIds)
+      if (cancelled) return
+      setMobileTabCategoryIds(ids)
+      writeMobileTabCache(ids)
+    })()
+    return () => { cancelled = true }
+  }, [rankingCategories])
+
+  const mobileRankingTabIds = useMemo(
+    () => ['all', ...mobileTabCategoryIds],
+    [mobileTabCategoryIds]
+  )
 
   // TOP 10 축하 모달: 내 순위가 ≤ 10 일 때 세션 당 1회 표시
   useEffect(() => {
@@ -291,43 +400,55 @@ export function RankingPage() {
   }, [myRank, user, period])
 
   const loadRankings = async () => {
+    const cacheKey = `ranking_${category}_${typeTab}_${sortBy}_${page}`
+    const cached = getCachedRanking(cacheKey)
+    if (cached?.data) {
+      const { rows, myRank: cachedMyRank, total } = cached.data
+      setRankings(rows)
+      if (cachedMyRank) setMyRank(cachedMyRank)
+      if (total != null) setTotalCount(total)
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     try {
       const from = page * PAGE_SIZE
       const to   = from + PAGE_SIZE - 1
-      const orderCol = sortBy === 'winrate' ? 'wins' : sortBy === 'matchups' ? 'total_matchups' : 'points'
+      const isCreator = typeTab === 'creator'
+      const orderCol = sortBy === 'votes' ? 'total_votes_received' : sortBy === 'hitrate' ? 'hit_rate' : 'points'
+      const selectCols = 'id, nickname, avatar_url, points, total_matchups, total_votes_received, creator_wins, creator_win_streak, vote_hits, vote_total, oracle_points, hit_rate, featured_badge'
 
-      const { data } = await supabase
+      let query = supabase
         .from('profiles')
-        .select('id, nickname, avatar_url, points, total_matchups, wins, losses')
-        .order(orderCol, { ascending: false })
+        .select(selectCols, { count: 'exact' })
+        .order(orderCol, { ascending: false, nullsFirst: false })
         .range(from, to)
 
-      const rows = (data || []).map((r, i) => {
-        const seed   = (r.points || 0) % 6
-        const change = seed === 0 ? 'NEW' : seed === 1 ? 0 : seed === 2 ? 1 : seed === 3 ? -1 : seed === 4 ? 2 : -2
-        return { ...r, _change: (from + i) < 3 ? 0 : change }
-      })
+      if (!isCreator && orderCol === 'hit_rate') query = query.gte('vote_total', 1)
 
-      if (rows.length < PAGE_SIZE) setHasMore(false)
-      if (page === 0) {
-        setRankings(rows)
-        // 내 순위 계산
-        if (user?.id && profile) {
-          const myIdx = rows.findIndex((r) => r.id === user.id)
-          if (myIdx !== -1) {
-            setMyRank({ rank: from + myIdx + 1, data: rows[myIdx] })
-          } else {
-            const { count } = await supabase
-              .from('profiles')
-              .select('id', { count: 'exact', head: true })
-              .gt(orderCol, profile[orderCol] || 0)
-            setMyRank({ rank: (count || 0) + 1, data: { ...profile, _change: null } })
-          }
+      const { data, count } = await query
+      const rows = data || []
+      const total = count ?? 0
+      setRankings(rows)
+      if (total) setTotalCount(total)
+
+      let savedMyRank = null
+      if (user?.id && profile) {
+        const myIdx = rows.findIndex((r) => r.id === user.id)
+        if (myIdx !== -1) {
+          savedMyRank = { rank: from + myIdx + 1, data: rows[myIdx] }
+        } else if (page === 0) {
+          const myVal = profile[orderCol] ?? (orderCol === 'hit_rate' && profile.vote_total > 0 ? (profile.vote_hits || 0) / (profile.vote_total || 1) * 100 : 0)
+          let countQuery = supabase.from('profiles').select('id', { count: 'exact', head: true }).gt(orderCol, myVal)
+          if (!isCreator && orderCol === 'hit_rate') countQuery = countQuery.gte('vote_total', 1)
+          const { count: above } = await countQuery
+          savedMyRank = { rank: (above || 0) + 1, data: { ...profile, _change: null } }
         }
-      } else {
-        setRankings((prev) => [...prev, ...rows])
+        if (savedMyRank) setMyRank(savedMyRank)
       }
+
+      setCachedRanking(cacheKey, { rows, myRank: savedMyRank, total })
     } catch (err) {
       console.error(err)
     } finally {
@@ -337,7 +458,7 @@ export function RankingPage() {
 
   const handleCreate = () => { user ? openCreateDrawer() : openLoginModal() }
 
-  const activeCat = CATEGORIES.find((c) => c.id === category)
+  const activeCat = rankingCategories.find((c) => c.id === category)
   const top3      = [rankings[1], rankings[0], rankings[2]]
 
   // ── LNB 내용 (공통) ────────────────────────────────────────────────
@@ -345,16 +466,14 @@ export function RankingPage() {
     <div className="space-y-1">
       {/* 랭킹 센터 헤더 */}
       <div className="px-3 py-3 mb-1">
-        <p className="text-xs font-black text-gray-400 uppercase tracking-widest">랭킹 센터</p>
+        <p className="text-xs font-black text-pink-400 uppercase tracking-widest">랭킹 센터</p>
       </div>
 
       {/* 전체 랭킹 */}
       <button
-        onClick={() => { setCategory('all'); setLnbOpen(false) }}
-        className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-bold transition-all ${
-          category === 'all'
-            ? 'bg-[#22282E] text-white'
-            : 'text-gray-600 hover:bg-gray-100'
+        onClick={() => { setCategory('all') }}
+        className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all ${
+          category === 'all' ? LNB_ROW_ON : LNB_ROW_OFF
         }`}
       >
         <span>🏆</span>전체 랭킹
@@ -362,48 +481,76 @@ export function RankingPage() {
 
       {/* 카테고리별 */}
       <div>
-        <p className="px-3 py-2 text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-1">
+        <p className="px-3 py-2 text-[10px] font-black text-pink-400 uppercase tracking-widest flex items-center gap-1">
           <ChevronRight size={10} />카테고리별
         </p>
-        {CATEGORIES.filter((c) => c.id !== 'all').map((cat) => (
+        {rankingCategories.filter((c) => c.id !== 'all').map((cat) => (
           <button
             key={cat.id}
-            onClick={() => { setCategory(cat.id); setLnbOpen(false) }}
-            className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-bold transition-all ${
-              category === cat.id
-                ? 'bg-[#22282E] text-white'
-                : 'text-gray-600 hover:bg-gray-100'
+            onClick={() => { setCategory(cat.id) }}
+            className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all ${
+              category === cat.id ? LNB_ROW_ON : LNB_ROW_OFF
             }`}
+            style={
+              cat.pointColor && category !== cat.id
+                ? { borderLeft: `3px solid ${cat.pointColor}` }
+                : undefined
+            }
           >
-            <span>{cat.icon}</span>{cat.label}
-            {category === cat.id && <ChevronRight size={12} className="ml-auto" />}
+            {cat.iconImageUrl ? (
+              <img src={cat.iconImageUrl} alt="" className="h-5 w-5 shrink-0 rounded object-cover" />
+            ) : cat.icon ? (
+              <span className="shrink-0 text-base leading-none">{cat.icon}</span>
+            ) : null}
+            <span className="min-w-0 truncate">{cat.label}</span>
+            {category === cat.id && <ChevronRight size={12} className="ml-auto shrink-0" />}
           </button>
         ))}
       </div>
 
-      {/* 명예의 전당 (TOP 3 유저) */}
-      <div className="mt-4 pt-4 border-t border-gray-100">
-        <p className="px-3 py-2 text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-1">
+      {/* 명예의 전당 (트랙별 TOP 3) */}
+      <div className="mt-4 pt-4 border-t border-pink-100/60">
+        <p className="px-3 py-2 text-[10px] font-black text-pink-400 uppercase tracking-widest flex items-center gap-1">
           <Flame size={10} className="text-orange-400" />명예의 전당
         </p>
-        {hallOfFameUsers.length > 0
-          ? hallOfFameUsers.map((u, i) => (
-              <div key={u.id} className="flex items-center gap-2 px-3 py-2.5 rounded-xl hover:bg-gray-50 transition-colors">
-                <span className="text-xs font-black text-gray-400 flex-shrink-0 w-5">
-                  {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`}
-                </span>
-                <Avatar src={u.avatar_url} alt={u.nickname} size="xs" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-bold text-gray-700 truncate">{u.nickname || '사용자'}</p>
-                  <div className="flex items-center gap-1">
-                    <LevelBadge points={u.points || 0} variant="badge" className="text-[10px] px-1 py-0" />
-                    <span className="text-[10px] text-gray-400">{formatNumber(u.points || 0)}P</span>
+        {hallOfFameUsers?.champion?.length > 0 || hallOfFameUsers?.oracle?.length > 0 ? (
+          <div className="space-y-3">
+            <div>
+              <p className="px-3 py-1 text-[9px] font-bold text-amber-600">👑 Champion</p>
+              {(hallOfFameUsers.champion || []).map((u, i) => (
+                <div key={u.id} className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-amber-50/50 transition-colors">
+                  <span className="text-xs font-black text-amber-500 w-5">{['🥇','🥈','🥉'][i]}</span>
+                  <Avatar src={u.avatar_url} alt={u.nickname} size="xs" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold text-fuchsia-900/80 truncate flex items-center gap-0.5">
+                      <span className="truncate">{u.nickname || '사용자'}</span>
+                      <FeaturedBadgeSpan badgeId={u.featured_badge} />
+                    </p>
+                    <span className="text-[10px] text-fuchsia-400/90">{formatNumber(u.total_votes_received || 0)}표</span>
                   </div>
                 </div>
-              </div>
-            ))
-          : <p className="px-3 text-xs text-gray-400">데이터 로딩 중…</p>
-        }
+              ))}
+            </div>
+            <div>
+              <p className="px-3 py-1 text-[9px] font-bold text-violet-600">🔮 Oracle</p>
+              {(hallOfFameUsers.oracle || []).map((u, i) => (
+                <div key={u.id} className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-violet-50/50 transition-colors">
+                  <span className="text-xs font-black text-violet-500 w-5">{['🥇','🥈','🥉'][i]}</span>
+                  <Avatar src={u.avatar_url} alt={u.nickname} size="xs" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold text-fuchsia-900/80 truncate flex items-center gap-0.5">
+                      <span className="truncate">{u.nickname || '사용자'}</span>
+                      <FeaturedBadgeSpan badgeId={u.featured_badge} />
+                    </p>
+                    <span className="text-[10px] text-fuchsia-400/90">{calcHitRate(u.vote_hits, u.vote_total) !== null ? `${calcHitRate(u.vote_hits, u.vote_total)}% 적중` : '-'}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p className="px-3 text-xs text-fuchsia-400/90">데이터 로딩 중…</p>
+        )}
       </div>
 
       {/* 매치업 생성 버튼 */}
@@ -430,23 +577,39 @@ export function RankingPage() {
           <h1 className="text-lg font-black text-[#22282E]">RANKING</h1>
         </div>
         <button onClick={() => setLnbOpen(true)}
-          className="p-2 rounded-xl bg-white border border-gray-200 text-gray-600 hover:bg-gray-50">
+          className="p-2 rounded-xl border border-pink-100/70 bg-gradient-to-br from-white to-pink-50/50 text-fuchsia-700 hover:bg-white shadow-sm shadow-pink-100/40">
           <Menu size={18} />
         </button>
       </div>
 
-      {/* ── 모바일 카테고리 가로 스크롤 탭 ── */}
+      {/* ── 모바일 카테고리 가로 스크롤 탭 (전체 + 3개만, LNB는 전체 목록) ── */}
       <div className="flex gap-2 overflow-x-auto pb-1 mb-4 scrollbar-none lg:hidden">
-        {CATEGORIES.map((cat) => (
-          <button key={cat.id} onClick={() => setCategory(cat.id)}
-            className={`flex-shrink-0 flex items-center gap-1 px-3 py-1.5 text-xs font-black rounded-full border transition-all ${
+        {mobileRankingTabIds.map((id) => {
+          const cat = rankingCategories.find((c) => c.id === id)
+          if (!cat) return null
+          return (
+            <button key={cat.id} type="button" onClick={() => setCategory(cat.id)}
+            className={cn(
+              'flex-shrink-0 flex items-center gap-1 px-3 py-1.5 text-xs rounded-full border transition-all',
               category === cat.id
-                ? 'bg-[#22282E] text-white border-[#22282E]'
-                : 'bg-white text-gray-500 border-gray-200'
-            }`}>
-            <span>{cat.icon}</span>{cat.label}
-          </button>
-        ))}
+                ? LNB_ROW_ON
+                : 'border-pink-100/80 bg-white/90 text-pink-700/90 shadow-sm hover:bg-pink-50/80 hover:shadow-md'
+            )}
+            style={
+              cat.pointColor && category !== cat.id
+                ? { borderLeft: `3px solid ${cat.pointColor}` }
+                : undefined
+            }
+            >
+              {cat.iconImageUrl ? (
+                <img src={cat.iconImageUrl} alt="" className="h-4 w-4 shrink-0 rounded object-cover" />
+              ) : cat.icon ? (
+                <span className="shrink-0 text-sm leading-none">{cat.icon}</span>
+              ) : null}
+              <span className="truncate">{cat.label}</span>
+            </button>
+          )
+        })}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-5">
@@ -455,7 +618,7 @@ export function RankingPage() {
             LNB (데스크탑 고정 사이드바)
         ════════════════════════════════════════ */}
         <aside className="hidden lg:block">
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 sticky top-20">
+          <div className={`p-3 sticky top-20 ${MZ_SB}`}>
             <LNBContent />
           </div>
         </aside>
@@ -468,7 +631,15 @@ export function RankingPage() {
           {/* 섹션 헤더 */}
           <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h2 className="text-base font-black text-[#22282E] flex items-center gap-2">
-              {activeCat?.icon} {activeCat?.id === 'all' ? '전체 랭킹' : `${activeCat?.label || '전체'} 랭킹`}
+              {activeCat?.id === 'all' ? (
+                <>
+                  {activeCat.icon} {activeCat.label}
+                </>
+              ) : (
+                `${activeCat?.label || '전체'} 랭킹`
+              )}
+              <span className="text-xs font-bold text-gray-400">· {TYPE_OPTIONS.find((t) => t.id === typeTab)?.label}</span>
+              <span className="text-[10px] font-medium text-gray-400">· 일 1회 업데이트</span>
             </h2>
             {/* 드롭다운 필터 3종 */}
             <div className="flex items-center gap-2 flex-wrap">
@@ -479,14 +650,14 @@ export function RankingPage() {
                 onChange={setPeriod}
               />
               <Dropdown
-                label="유형"
+                label="트랙"
                 options={TYPE_OPTIONS}
                 value={typeTab}
                 onChange={setTypeTab}
               />
               <Dropdown
                 label="정렬"
-                options={SORT_OPTIONS}
+                options={typeTab === 'creator' ? CREATOR_SORT_OPTIONS : VOTER_SORT_OPTIONS}
                 value={sortBy}
                 onChange={setSortBy}
               />
@@ -495,42 +666,46 @@ export function RankingPage() {
 
           {/* TOP 3 포디움 */}
           {rankings.length >= 3 && (
-            <Podium users={top3} category={category} />
+            <Podium users={top3} category={category} typeTab={typeTab} sortBy={sortBy} categories={rankingCategories} />
           )}
 
-          {/* 순위 테이블 */}
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mb-4">
+          {/* 순위 테이블 (LNB와 별도 — 일반 카드) */}
+          <div className="rounded-2xl border border-violet-100/80 bg-white/95 shadow-sm shadow-violet-100/20 overflow-hidden mb-4">
 
             {/* 테이블 헤더 */}
-            <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 bg-gray-50 border-b border-gray-100 text-[10px] font-black text-gray-400 uppercase tracking-wider">
+            <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 bg-violet-100/35 border-b border-violet-200/40 text-[10px] font-black text-violet-600/80 uppercase tracking-wider">
               <div className="w-7 sm:w-8 text-center flex-shrink-0">#</div>
               <div className="flex-[2]">유저</div>
-              <div className="flex-1 text-center hidden sm:block">승률</div>
-              <div className="flex-1 text-center hidden md:block">
-                {typeTab === 'creator' ? '생성' : '투표'}
+              <div className="flex-1 text-center hidden sm:block">
+                {typeTab === 'creator' ? '투표받은 수' : '적중률'}
               </div>
-              <div className="flex-1 text-right">포인트</div>
+              <div className="flex-1 text-center hidden md:block">
+                {typeTab === 'creator' ? '생성' : '적중P'}
+              </div>
+              <div className="flex-1 text-right text-[10px] font-black text-gray-400 uppercase tracking-wider">
+                {sortBy === 'points' ? '포인트' : sortBy === 'votes' ? '투표받은 수' : '적중률'}
+              </div>
               <div className="w-8 text-right flex-shrink-0">변동</div>
             </div>
 
-            {/* Top 3 행 */}
-            {rankings.slice(0, 3).map((entry, i) => (
-              <RankRow key={entry.id} entry={entry} rank={i + 1} isMe={entry.id === user?.id} />
-            ))}
-
-            {/* 4위~ */}
-            {rankings.slice(3).map((entry, i) => (
-              <RankRow key={entry.id} entry={entry} rank={i + 4} isMe={entry.id === user?.id} />
-            ))}
+            {loading && rankings.length === 0
+              ? Array.from({ length: 10 }).map((_, i) => <RankRowSkeleton key={i} />)
+              : (
+                <>
+                  {rankings.slice(0, 3).map((entry, i) => (
+                    <RankRow key={entry.id} entry={entry} rank={i + 1} isMe={entry.id === user?.id} typeTab={typeTab} sortBy={sortBy} />
+                  ))}
+                  {rankings.slice(3).map((entry, i) => (
+                    <RankRow key={entry.id} entry={entry} rank={i + 4} isMe={entry.id === user?.id} typeTab={typeTab} sortBy={sortBy} />
+                  ))}
+                </>
+              )}
 
             {loading && (
               <div className="py-6 flex items-center justify-center gap-2 text-gray-400">
                 <div className="w-4 h-4 border-2 border-gray-200 border-t-[#22282E] rounded-full animate-spin" />
                 <span className="text-xs">불러오는 중…</span>
               </div>
-            )}
-            {!hasMore && rankings.length > 0 && (
-              <p className="py-4 text-center text-xs text-gray-400">전체 랭킹을 모두 불러왔어요 🏁</p>
             )}
             {rankings.length === 0 && !loading && (
               <div className="py-14 text-center">
@@ -540,7 +715,61 @@ export function RankingPage() {
             )}
           </div>
 
-          <div ref={loaderRef} className="h-4" />
+          {/* ── 페이지네이션 ── */}
+          {totalCount > PAGE_SIZE && (() => {
+            const totalPages = Math.ceil(totalCount / PAGE_SIZE)
+            const getPageNums = () => {
+              const pages = []
+              const delta = 2
+              const left = Math.max(0, page - delta)
+              const right = Math.min(totalPages - 1, page + delta)
+              if (left > 0) { pages.push(0); if (left > 1) pages.push('…') }
+              for (let i = left; i <= right; i++) pages.push(i)
+              if (right < totalPages - 1) { if (right < totalPages - 2) pages.push('…'); pages.push(totalPages - 1) }
+              return pages
+            }
+            const goTo = (p) => {
+              setPage(p)
+              window.scrollTo({ top: 0, behavior: 'smooth' })
+            }
+            return (
+              <div className="flex items-center justify-center gap-1.5 mt-4 mb-2 flex-wrap">
+                <button
+                  onClick={() => goTo(page - 1)}
+                  disabled={page === 0 || loading}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold border border-violet-200 bg-white text-fuchsia-700 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-violet-50 transition-colors"
+                >
+                  ← 이전
+                </button>
+                {getPageNums().map((p, i) =>
+                  p === '…' ? (
+                    <span key={`ellipsis-${i}`} className="px-1.5 text-xs text-gray-400 select-none">…</span>
+                  ) : (
+                    <button
+                      key={p}
+                      onClick={() => goTo(p)}
+                      disabled={loading}
+                      className={cn(
+                        'w-8 h-8 rounded-xl text-xs font-black border transition-colors',
+                        p === page
+                          ? 'bg-gradient-to-r from-pink-200 via-fuchsia-200 to-violet-200 border-fuchsia-300 text-fuchsia-900 shadow-sm'
+                          : 'border-violet-100 bg-white text-gray-600 hover:bg-violet-50'
+                      )}
+                    >
+                      {p + 1}
+                    </button>
+                  )
+                )}
+                <button
+                  onClick={() => goTo(page + 1)}
+                  disabled={page >= totalPages - 1 || loading}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold border border-violet-200 bg-white text-fuchsia-700 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-violet-50 transition-colors"
+                >
+                  다음 →
+                </button>
+              </div>
+            )
+          })()}
         </div>
       </div>
 
@@ -548,7 +777,7 @@ export function RankingPage() {
           내 랭킹 Sticky Bar (하단 고정)
       ════════════════════════════════════════ */}
       {user && myRank && (
-        <div className="fixed bottom-16 sm:bottom-4 left-0 right-0 z-30 px-3 max-w-screen-lg mx-auto pointer-events-none">
+        <div className="fixed bottom-16 lg:bottom-4 left-0 right-0 z-30 px-3 max-w-screen-lg mx-auto pointer-events-none">
           <div className="pointer-events-auto bg-white/95 backdrop-blur-md border border-lime-200 rounded-2xl shadow-xl shadow-lime-100/50 px-4 py-3 flex items-center gap-3">
             {/* 내 위치 */}
             <div className="flex-shrink-0 text-center">
@@ -561,19 +790,25 @@ export function RankingPage() {
             <div className="flex items-center gap-2 flex-1 min-w-0">
               <div className="w-8 h-8 rounded-full overflow-hidden ring-2 ring-lime-300 flex-shrink-0">
                 {profile?.avatar_url
-                  ? <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+                  ? <img src={safeMediaUrl(profile.avatar_url)} alt="" className="w-full h-full object-cover" />
                   : <div className="w-full h-full bg-lime-100 flex items-center justify-center">
                       <span className="text-xs font-black text-lime-600">{profile?.nickname?.[0]?.toUpperCase()}</span>
                     </div>
                 }
               </div>
               <div className="min-w-0">
-                <p className="text-xs font-black text-lime-700 truncate">{profile?.nickname}</p>
+                <p className="text-xs font-black text-lime-700 truncate flex items-center gap-0.5">
+                  <span className="truncate">{profile?.nickname}</span>
+                  <FeaturedBadgeSpan badgeId={profile?.featured_badge} />
+                </p>
                 <p className="text-[10px] text-gray-500">
                   {formatNumber(profile?.points || 0)}P
-                  {calcWinRate(profile?.wins, profile?.losses) !== null && (
-                    <span className="ml-2 text-emerald-500 font-bold">승률 {calcWinRate(profile.wins, profile.losses)}%</span>
-                  )}
+                  {typeTab === 'creator'
+                    ? (profile?.total_votes_received > 0 && <span className="ml-2 text-amber-500 font-bold">{formatNumber(profile.total_votes_received)}표</span>)
+                    : calcHitRate(profile?.vote_hits, profile?.vote_total) !== null && (
+                        <span className="ml-2 text-violet-500 font-bold">적중률 {calcHitRate(profile.vote_hits, profile.vote_total)}%</span>
+                      )
+                  }
                 </p>
               </div>
             </div>
@@ -602,10 +837,6 @@ export function RankingPage() {
               </button>
             )}
 
-            <Link to="/mypage"
-              className="flex-shrink-0 px-3 py-1.5 bg-lime-50 border border-lime-200 text-xs font-black text-lime-600 rounded-xl hover:bg-lime-100 transition-colors">
-              상세
-            </Link>
           </div>
         </div>
       )}
@@ -613,13 +844,19 @@ export function RankingPage() {
       {/* ── 모바일 LNB 드로어 ── */}
       {lnbOpen && (
         <>
-          <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={() => setLnbOpen(false)} />
-          <div className="fixed top-0 left-0 bottom-0 z-50 w-[min(18rem,90vw)] max-w-[18rem] bg-white shadow-2xl overflow-y-auto"
-            style={{ animation: 'fade-in-up 0.25s cubic-bezier(0.16,1,0.3,1) both' }}>
-            <div className="flex items-center justify-between px-4 py-4 border-b border-gray-100">
-              <p className="font-black text-[#22282E]">🏆 랭킹 센터</p>
-              <button onClick={() => setLnbOpen(false)} className="p-1.5 rounded-xl hover:bg-gray-100">
-                <X size={18} className="text-gray-500" />
+          <div
+            className="fixed inset-0 z-40 bg-gradient-to-br from-fuchsia-900/25 via-violet-900/20 to-pink-900/25 backdrop-blur-md backdrop-saturate-150"
+            onClick={() => setLnbOpen(false)}
+            aria-hidden
+          />
+          <div
+            className={`fixed top-0 left-0 bottom-0 z-50 w-[min(18rem,90vw)] max-w-[18rem] shadow-2xl shadow-gray-200/35 overflow-y-auto rounded-none rounded-r-2xl ${MZ_SB}`}
+            style={{ animation: 'fade-in-up 0.25s cubic-bezier(0.16,1,0.3,1) both' }}
+          >
+            <div className="flex items-center justify-between px-4 py-4 border-b border-pink-100/60">
+              <p className="font-black text-fuchsia-600">🏆 랭킹 센터</p>
+              <button type="button" onClick={() => setLnbOpen(false)} className="p-1.5 rounded-xl text-pink-400 hover:bg-white/80 transition-colors">
+                <X size={18} className="text-pink-300" />
               </button>
             </div>
             <div className="p-3">
@@ -637,6 +874,9 @@ export function RankingPage() {
           avatar_url={profile?.avatar_url}
           points={profile?.points}
           period={period}
+          typeTab={typeTab}
+          sortBy={sortBy}
+          userId={user?.id ?? null}
           top1={rankings[0] || null}
           profile={profile}
           onClose={() => setShowCelebration(false)}

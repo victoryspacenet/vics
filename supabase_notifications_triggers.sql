@@ -47,46 +47,10 @@ CREATE TRIGGER on_vote_notify
   FOR EACH ROW EXECUTE FUNCTION notify_on_vote();
 
 -- ─────────────────────────────────────────────
--- 2. 댓글 시 알림 (내 매치업에 댓글)
+-- 2. 댓글 알림 — 사용 안 함 (트리거·함수 제거)
 -- ─────────────────────────────────────────────
-CREATE OR REPLACE FUNCTION notify_on_comment()
-RETURNS TRIGGER AS $$
-DECLARE
-  v_creator_id  uuid;
-  v_matchup_title text;
-  v_commenter_nick text;
-BEGIN
-  SELECT m.user_id, m.title
-  INTO v_creator_id, v_matchup_title
-  FROM public.matchups m
-  WHERE m.id = NEW.matchup_id;
-
-  IF v_creator_id IS NULL OR v_creator_id = NEW.user_id THEN
-    RETURN NEW;
-  END IF;
-
-  SELECT nickname INTO v_commenter_nick
-  FROM public.profiles WHERE id = NEW.user_id;
-
-  INSERT INTO public.notifications
-    (user_id, type, title, body, related_matchup_id)
-  VALUES
-    (
-      v_creator_id,
-      'comment',
-      v_commenter_nick || '님이 댓글을 달았어요',
-      left(NEW.content, 40),
-      NEW.matchup_id
-    );
-
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
 DROP TRIGGER IF EXISTS on_comment_notify ON public.comments;
-CREATE TRIGGER on_comment_notify
-  AFTER INSERT ON public.comments
-  FOR EACH ROW EXECUTE FUNCTION notify_on_comment();
+DROP FUNCTION IF EXISTS notify_on_comment();
 
 -- ─────────────────────────────────────────────
 -- 3. 좋아요 시 알림 (내 매치업에 좋아요)

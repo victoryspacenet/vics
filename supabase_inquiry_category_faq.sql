@@ -1,0 +1,2 @@
+-- 카테고리별 도움말은 admin_settings 가 아니라 전용 테이블을 사용합니다.
+-- 새 프로젝트는 `supabase_inquiry_category_help.sql` 만 실행하면 됩니다.

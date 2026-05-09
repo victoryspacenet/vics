@@ -1,0 +1,6 @@
+-- =============================================
+-- 통합됨: `supabase_profiles_tier_rank_snapshot_rpc.sql` 만 실행하면 됩니다.
+-- - profiles_tier_rank_snapshot_for_ids (전체 + Champion/Oracle 주·월)
+-- - profiles_points_rank_snapshot_for_ids (하위 호환 래퍼)
+-- - profiles_goat_period_leaderboard (메인 Goat JSON)
+-- =============================================

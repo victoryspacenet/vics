@@ -2,9 +2,10 @@ import { X, Instagram, MessageCircle, Link2, Check } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { getTierInfo } from '../../lib/cardDraw'
 import { copyToClipboard } from '../../lib/utils'
+import { safeMediaUrl } from '../../lib/sanitize'
 import { useUIStore } from '../../store/uiStore'
 
-const HASHTAGS = '#VICTORYSPACE #내랭킹 #랭킹인증'
+const HASHTAGS = '#VictorySpace #내랭킹 #랭킹인증'
 
 function calcWinRate(wins, losses) {
   const total = (wins || 0) + (losses || 0)
@@ -66,14 +67,13 @@ export function RankingCardSaveCompleteModal({
           to   { opacity:1; transform:scale(1) translateY(0); }
         }
       `}</style>
-      <div
+        <div
         style={{
           position: 'fixed', inset: 0, zIndex: 65,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(10px)',
           padding: 16,
         }}
-        onClick={(e) => e.target === e.currentTarget && onClose()}
       >
         <div
           style={{
@@ -148,7 +148,7 @@ export function RankingCardSaveCompleteModal({
                   boxShadow: `0 0 0 2px ${tier.color}66`,
                 }}>
                   {thumbnail
-                    ? <img src={thumbnail} alt="카드" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ? <img src={safeMediaUrl(thumbnail)} alt="카드" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     : <div style={{
                         width: '100%', height: '100%',
                         background: `linear-gradient(135deg, ${tier.color}33, ${tier.color}11)`,
@@ -246,14 +246,6 @@ export function RankingCardSaveCompleteModal({
             >
               <Check size={16} /> 확인 (갤러리로)
             </Link>
-
-            {/* 이벤트 넛지 */}
-            <p style={{
-              color: 'rgba(255,255,255,0.35)', fontSize: 10, margin: '16px 0 0',
-              textAlign: 'center', lineHeight: 1.5,
-            }}>
-              * SNS 인증 시 선착순 100명에게<br />'명예 뱃지' 아이템 지급 중!
-            </p>
           </div>
         </div>
       </div>

@@ -13,6 +13,7 @@ create table if not exists public.profiles (
   nickname text unique not null,
   email text,
   avatar_url text,
+  avatar_ring_effect text default 'none',
   birthdate date,
   gender text check (gender in ('male', 'female', 'other')),
   points integer default 0,
@@ -46,6 +47,7 @@ create table if not exists public.matchups (
   right_text text,
   right_thumbnail_url text,
   right_label text,
+  right_user_id uuid references public.profiles(id) on delete set null,
 
   -- 투표 집계 (캐시)
   left_votes integer default 0,
@@ -85,6 +87,7 @@ create table if not exists public.comments (
   id uuid default uuid_generate_v4() primary key,
   user_id uuid references public.profiles(id) on delete cascade not null,
   matchup_id uuid references public.matchups(id) on delete cascade not null,
+  parent_id uuid references public.comments(id) on delete set null,
   content text not null,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
@@ -119,12 +122,14 @@ create table if not exists public.notifications (
 -- INDEXES (성능 최적화)
 -- =============================================
 create index if not exists matchups_user_id_idx on public.matchups(user_id);
+create index if not exists matchups_right_user_id_idx on public.matchups(right_user_id);
 create index if not exists matchups_created_at_idx on public.matchups(created_at desc);
 create index if not exists matchups_total_votes_idx on public.matchups(total_votes desc);
 create index if not exists matchups_status_idx on public.matchups(status);
 create index if not exists votes_matchup_id_idx on public.votes(matchup_id);
 create index if not exists votes_user_id_idx on public.votes(user_id);
 create index if not exists comments_matchup_id_idx on public.comments(matchup_id);
+create index if not exists comments_parent_id_idx on public.comments(parent_id);
 create index if not exists likes_matchup_id_idx on public.likes(matchup_id);
 create index if not exists profiles_points_idx on public.profiles(points desc);
 create index if not exists notifications_user_id_idx on public.notifications(user_id);
@@ -264,6 +269,9 @@ create policy "Users can update own profile" on public.profiles for update using
 create policy "Matchups are viewable by everyone" on public.matchups for select using (true);
 create policy "Authenticated users can create matchups" on public.matchups for insert with check (auth.uid() = user_id);
 create policy "Users can update own matchups" on public.matchups for update using (auth.uid() = user_id);
+create policy "Challenger completes open matchup" on public.matchups for update to authenticated
+  using (right_type is null)
+  with check (right_type is not null and right_user_id = (select auth.uid()));
 create policy "Users can delete own matchups" on public.matchups for delete using (auth.uid() = user_id);
 
 -- votes RLS

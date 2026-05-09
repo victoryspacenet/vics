@@ -2,11 +2,23 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { Users, ArrowRight, Heart, MessageCircle, Swords, Play } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { voteViaApi } from '../../lib/voteApi'
+import { VsBadge } from '../ui/VsBadge'
+import { MatchupThumbFrame } from '../ui/MatchupThumbFrame'
 import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
-import { formatDate, formatNumber, calcPercent } from '../../lib/utils'
+import { formatDate, formatNumber, calcPercent, cn } from '../../lib/utils'
+import { safeMediaUrl } from '../../lib/sanitize'
 import { LevelBadge } from '../ui/LevelBadge'
+import { TierBadge } from '../ui/TierBadge'
+import { getTier, tierAtLeast } from '../../lib/tiers'
 import { Avatar } from '../ui/Avatar'
+import { FeaturedBadgeSpan } from '../ui/FeaturedBadge'
+import { UserProfileLink } from '../ui/UserProfileLink'
+import { isFeedBannerHighlightActive } from '../../lib/bannerHighlightBoost'
+import { VIP_MATCHUP_SURFACE_CLASS } from '../../lib/matchupCreatorVipGlow'
+import { fandomTierHasDiamondListNicknameAura } from '../../lib/fandomTiers'
+import { FandomBronzeStarBadge } from '../fandom/FandomBronzeStarBadge'
 
 // variant별 스타일 맵
 const VARIANT_STYLE = {
@@ -87,13 +99,16 @@ export function FeedCard({ matchup: initialMatchup, variant: variantProp, rank, 
   }
 
   const handleVote = async (side) => {
-    if (!user) { openLoginModal(); return }
+    if (!user) return
     if (isVoting || !isComplete) return
     setIsVoting(true)
     try {
       if (!userVote) {
-        const { error } = await supabase.from('votes').insert({ user_id: user.id, matchup_id: matchup.id, side })
-        if (error) throw error
+        const result = await voteViaApi(matchup.id, side)
+        if (result.error) {
+          showToast(result.error, 'error')
+          return
+        }
         setUserVote(side)
         setMatchup((p) => ({
           ...p,
@@ -101,18 +116,9 @@ export function FeedCard({ matchup: initialMatchup, variant: variantProp, rank, 
           right_votes: side === 'right' ? (p.right_votes || 0) + 1 : p.right_votes,
           total_votes: (p.total_votes || 0) + 1,
         }))
-        showToast('투표 완료! +2pt 획득 🎉', 'success')
-        setTimeout(() => setVoteLocked(true), 5000)
+        showToast('투표 완료! 매치업 종료 후 결과에 따라 포인트가 지급돼요', 'success')
+        setVoteLocked(true)
         onVoteUpdate?.()
-      } else if (!voteLocked && userVote !== side) {
-        await supabase.from('votes').update({ side }).eq('user_id', user.id).eq('matchup_id', matchup.id)
-        setMatchup((p) => ({
-          ...p,
-          left_votes:  side === 'left'  ? (p.left_votes  || 0) + 1 : userVote === 'left'  ? (p.left_votes  || 0) - 1 : p.left_votes,
-          right_votes: side === 'right' ? (p.right_votes || 0) + 1 : userVote === 'right' ? (p.right_votes || 0) - 1 : p.right_votes,
-        }))
-        setUserVote(side)
-        showToast('투표가 변경됐어요', 'info')
       }
     } catch { showToast('투표 중 오류가 발생했어요', 'error') }
     finally { setIsVoting(false) }
@@ -120,7 +126,7 @@ export function FeedCard({ matchup: initialMatchup, variant: variantProp, rank, 
 
   const handleLike = async (e) => {
     e.preventDefault(); e.stopPropagation()
-    if (!user) { openLoginModal(); return }
+    if (!user) { openLoginModal('vote'); return }
     try {
       if (liked) {
         await supabase.from('likes').delete().eq('user_id', user.id).eq('matchup_id', matchup.id)
@@ -135,34 +141,64 @@ export function FeedCard({ matchup: initialMatchup, variant: variantProp, rank, 
   }
 
   const showVoteBar = userVote && isComplete
+  const bannerGlow = isFeedBannerHighlightActive(matchup)
+  const creatorRankInfo = matchup._creatorRankInfo || {}
+  const creatorTier = getTier(profile || {}, creatorRankInfo)
+  const premiumFrame =
+    !bannerGlow && profile?.id && tierAtLeast(creatorTier, 'vip')
 
   return (
-    <div className={`bg-white border rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden ${vs.border}`}>
+    <div
+      className={cn(
+        'border rounded-2xl lg:rounded-3xl transition-all duration-200 overflow-hidden',
+        bannerGlow
+          ? 'vics-feed-banner-highlight vics-feed-banner-highlight--feed-lg shadow-none lg:shadow-none'
+          : 'bg-gradient-to-br from-white via-white to-slate-50/55 shadow-sm lg:shadow-md hover:shadow-md lg:hover:shadow-lg hover:via-cyan-50/10',
+        !bannerGlow && vs.border,
+        premiumFrame && VIP_MATCHUP_SURFACE_CLASS,
+        premiumFrame && 'sm:scale-[1.008] sm:hover:scale-[1.01]',
+      )}
+    >
 
       {/* ── 카드 헤더 ── */}
-      <div className="px-4 pt-4 pb-2 flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
+      <div className="relative z-[6] px-4 pt-4 pb-2 lg:px-6 lg:pt-5 lg:pb-3 flex items-start justify-between gap-2 lg:gap-3">
+        <div className="flex items-center gap-2 lg:gap-2.5 min-w-0 flex-1 flex-wrap">
           {/* 변형 뱃지 */}
-          <span className={`shrink-0 text-[11px] font-black px-2 py-0.5 rounded-full ${listBadge ? vs.badge(variant === 'best' ? 1 : null) : vs.badge(rank)}`}>
+          <span className={`shrink-0 text-[11px] lg:text-xs font-black px-2 py-0.5 lg:px-2.5 lg:py-1 rounded-full ${listBadge ? vs.badge(variant === 'best' ? 1 : null) : vs.badge(rank)}`}>
             {listBadge ? LIST_BADGE_LABELS[variant] : vs.label(rank)}
           </span>
+          {bannerGlow && (
+            <span className="shrink-0 rounded-full border border-white/50 bg-gradient-to-r from-fuchsia-600 via-violet-600 to-cyan-600 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-white shadow-[0_0_14px_rgba(217,70,239,0.55)]">
+              네온 부스트
+            </span>
+          )}
+          {premiumFrame && creatorTier.id === 'vip' && (
+            <span className="shrink-0 rounded-full border border-violet-400/50 bg-violet-500/15 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-violet-700">
+              VIP
+            </span>
+          )}
+          {premiumFrame && creatorTier.id === 'goat' && (
+            <span className="shrink-0 rounded-full border border-amber-400/50 bg-amber-500/15 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-900">
+              GOAT
+            </span>
+          )}
           <Link
             to={`/matchup/${matchup.id}`}
-            className="text-sm font-black text-[#22282E] line-clamp-1 hover:underline flex-1 min-w-0"
+            className="text-sm lg:text-lg xl:text-xl font-black text-[#22282E] line-clamp-2 lg:line-clamp-1 hover:underline flex-1 min-w-0 leading-snug"
           >
             {matchup.title}
           </Link>
         </div>
-        <span className="text-[11px] text-gray-400 shrink-0 whitespace-nowrap">
+        <span className="text-[11px] lg:text-sm text-gray-400 shrink-0 whitespace-nowrap">
           {!listBadge && variant === 'new' ? `🆕 ${formatDate(matchup.created_at)} 생성됨` : formatDate(matchup.created_at)}
         </span>
       </div>
 
       {/* ── 추천: 태그 노출 (listBadge가 아닐 때만) ── */}
       {!listBadge && variant === 'hot' && matchup.tags?.length > 0 && (
-        <div className="px-4 pb-2 flex flex-wrap gap-1.5">
+        <div className="px-4 lg:px-6 pb-2 flex flex-wrap gap-1.5 lg:gap-2">
           {matchup.tags.slice(0, 4).map((tag) => (
-            <span key={tag} className="text-[10px] font-bold text-violet-500 bg-violet-50 px-2 py-0.5 rounded-full">
+            <span key={tag} className="text-[10px] lg:text-xs font-bold text-violet-500 bg-violet-50 px-2 py-0.5 lg:px-2.5 rounded-full">
               #{tag.replace(/\s/g, '_')}
             </span>
           ))}
@@ -170,15 +206,29 @@ export function FeedCard({ matchup: initialMatchup, variant: variantProp, rank, 
       )}
 
       {/* ── 작성자 ── */}
-      <div className="px-4 pb-2.5 flex items-center gap-1.5">
-        <Avatar src={profile?.avatar_url} alt={profile?.nickname} size="xs" />
-        <span className="text-xs text-gray-500 font-medium">{profile?.nickname || '사용자'}</span>
-        <LevelBadge points={profile?.points || 0} variant="badge" className="text-[10px] px-1.5 py-0" />
+      <div className="px-4 lg:px-6 pb-2.5 lg:pb-3 flex items-center gap-1.5 lg:gap-2">
+        <UserProfileLink userId={profile?.id} className="inline-flex shrink-0">
+          <Avatar src={profile?.avatar_url} alt={profile?.nickname} size="xs" className="lg:w-8 lg:h-8 lg:text-sm" />
+        </UserProfileLink>
+        <UserProfileLink
+          userId={profile?.id}
+          className={cn(
+            'text-xs lg:text-sm font-medium text-gray-500 min-w-0',
+            fandomTierHasDiamondListNicknameAura(profile?.fandom_tier) &&
+              'vics-fandom-diamond-nickname-aura text-slate-800',
+          )}
+        >
+          {profile?.nickname || '사용자'}
+        </UserProfileLink>
+        <FandomBronzeStarBadge tierId={profile?.fandom_tier} />
+        <FeaturedBadgeSpan badgeId={profile?.featured_badge} className="text-xs lg:text-sm translate-y-px" />
+        <LevelBadge points={profile?.points || 0} variant="badge" className="text-[10px] lg:text-[11px] px-1.5 py-0 lg:px-2" />
+        <TierBadge profile={profile} rankInfo={matchup._creatorRankInfo || {}} variant="compact" className="text-[9px] lg:text-[10px]" />
       </div>
 
-      {/* ── 썸네일 대결 영역 ── */}
-      <div className="px-3 pb-2">
-        <div className="relative grid grid-cols-2 gap-2 items-stretch">
+      {/* ── 썸네일 경쟁 영역 ── */}
+      <div className="px-3 lg:px-5 pb-2 lg:pb-3">
+        <div className="relative grid grid-cols-2 gap-2 lg:gap-4 xl:gap-5 items-stretch">
           {/* A 썸네일 */}
           <ThumbnailCell
             type={matchup.left_type}
@@ -187,6 +237,7 @@ export function FeedCard({ matchup: initialMatchup, variant: variantProp, rank, 
             text={matchup.left_text}
             label={matchup.left_label || 'A'}
             voted={userVote === 'left'}
+            side="left"
           />
 
           {/* B 썸네일 or 도전자 슬롯 */}
@@ -198,67 +249,66 @@ export function FeedCard({ matchup: initialMatchup, variant: variantProp, rank, 
               text={matchup.right_text}
               label={matchup.right_label || 'B'}
               voted={userVote === 'right'}
+              side="right"
             />
           ) : (
-            <div className="aspect-square bg-gray-50 rounded-xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center gap-1">
-              <Swords size={18} className="text-gray-300" />
-              <span className="text-[10px] text-gray-400 font-bold text-center leading-tight">도전자<br/>모집 중</span>
+            <div className="aspect-square bg-gray-50 rounded-xl lg:rounded-2xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center gap-1 lg:gap-2">
+              <Swords className="text-gray-300 w-[18px] h-[18px] lg:w-7 lg:h-7" />
+              <span className="text-[10px] lg:text-xs text-gray-400 font-bold text-center leading-tight">도전자<br/>모집 중</span>
             </div>
           )}
 
           {/* VS 중앙 배지 */}
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="w-9 h-9 rounded-full bg-white border-2 border-gray-200 flex items-center justify-center shadow-sm z-10">
-              <span className="text-[11px] font-black text-gray-400">VS</span>
-            </div>
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none scale-100 lg:scale-110 xl:scale-125">
+            <VsBadge size="lg" className="z-20" />
           </div>
         </div>
 
         {/* 투표율 바 (애니메이션) */}
         {showVoteBar && (
-          <div className="mt-2.5">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-black text-[#22282E] w-9 text-right shrink-0">{left}%</span>
-              <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden flex">
+          <div className="mt-2.5 lg:mt-3.5">
+            <div className="flex items-center gap-1.5 lg:gap-2">
+              <span className="text-xs lg:text-sm font-black text-fuchsia-700 w-9 lg:w-11 text-right shrink-0 tabular-nums">{left}%</span>
+              <div className="flex-1 h-2.5 lg:h-3.5 bg-gray-100 rounded-full overflow-hidden flex ring-1 ring-gray-200/80">
                 <div
-                  className="bg-gradient-to-r from-[#22282E] to-gray-600 h-full transition-all duration-700 ease-out"
+                  className={`bg-gradient-to-r from-fuchsia-500 via-pink-500 to-rose-400 h-full shadow-[0_0_10px_rgba(217,70,239,0.35)] ${barAnimated ? 'animate-vote-bar-rise' : ''}`}
                   style={{ width: barAnimated ? `${left}%` : '0%' }}
                 />
                 <div
-                  className="bg-gray-300 h-full transition-all duration-700 ease-out"
-                  style={{ width: barAnimated ? `${right}%` : '0%', transitionDelay: '50ms' }}
+                  className={`bg-gradient-to-r from-sky-400 to-blue-600 h-full shadow-[0_0_10px_rgba(14,165,233,0.35)] ${barAnimated ? 'animate-vote-bar-rise-delayed' : ''}`}
+                  style={{ width: barAnimated ? `${right}%` : '0%' }}
                 />
               </div>
-              <span className="text-xs font-black text-gray-400 w-9 shrink-0">{right}%</span>
+              <span className="text-xs lg:text-sm font-black text-sky-700 w-9 lg:w-11 shrink-0 tabular-nums">{right}%</span>
             </div>
           </div>
         )}
       </div>
 
       {/* ── 하단 액션 ── */}
-      <div className="px-4 pb-3.5 pt-2 flex items-center justify-between border-t border-gray-50">
-        <div className="flex items-center gap-3">
+      <div className="px-4 lg:px-6 pb-3.5 lg:pb-5 pt-2 lg:pt-3 flex items-center justify-between border-t border-gray-50">
+        <div className="flex items-center gap-3 lg:gap-4">
           {/* 참여자 */}
-          <div className="flex items-center gap-1 text-xs text-gray-400">
-            <Users size={11} />
+          <div className="flex items-center gap-1 lg:gap-1.5 text-xs lg:text-sm text-gray-400">
+            <Users className="w-[11px] h-[11px] lg:w-[14px] lg:h-[14px] shrink-0" />
             <span>{formatNumber(matchup.total_votes || 0)}</span>
           </div>
           {/* 좋아요 */}
           <button
             onClick={handleLike}
-            className={`flex items-center gap-1 text-xs font-medium transition-all active:scale-90 ${
+            className={`flex items-center gap-1 lg:gap-1.5 text-xs lg:text-sm font-medium transition-all active:scale-90 ${
               liked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'
             }`}
           >
-            <Heart size={12} fill={liked ? 'currentColor' : 'none'} />
+            <Heart className="w-3 h-3 lg:w-3.5 lg:h-3.5" fill={liked ? 'currentColor' : 'none'} />
             <span>{formatNumber(matchup.likes_count || 0)}</span>
           </button>
           {/* 댓글 */}
           <Link
             to={`/matchup/${matchup.id}#comments`}
-            className="flex items-center gap-1 text-xs text-gray-400 hover:text-[#22282E] transition-colors"
+            className="flex items-center gap-1 lg:gap-1.5 text-xs lg:text-sm text-gray-400 hover:text-[#22282E] transition-colors"
           >
-            <MessageCircle size={12} />
+            <MessageCircle className="w-3 h-3 lg:w-3.5 lg:h-3.5" />
             <span>{formatNumber(matchup.comments_count || 0)}</span>
           </Link>
         </div>
@@ -267,21 +317,21 @@ export function FeedCard({ matchup: initialMatchup, variant: variantProp, rank, 
         {!isComplete && user && matchup.user_id !== user.id ? (
           <button
             onClick={() => openChallengeDrawer(matchup)}
-            className="flex items-center gap-1 text-xs font-black text-white
-              bg-gradient-to-r from-[#22282E] to-gray-700
-              px-3 py-1.5 rounded-xl
-              hover:scale-[1.04] active:scale-[0.96] transition-all shadow-sm"
+            className="flex items-center gap-1 lg:gap-1.5 text-xs lg:text-sm font-black text-[#0f1f0f]
+              bg-gradient-to-r from-lime-400 via-emerald-400 to-teal-500
+              px-3 py-1.5 lg:px-4 lg:py-2 rounded-xl
+              hover:scale-[1.04] active:scale-[0.96] transition-all shadow-[0_0_18px_rgba(132,204,22,0.45)]"
           >
-            <Swords size={11} />
+            <Swords className="w-[11px] h-[11px] lg:w-3.5 lg:h-3.5" />
             도전하기
           </button>
         ) : (
           <Link
             to={`/matchup/${matchup.id}`}
-            className="flex items-center gap-1 text-xs font-bold text-[#22282E] bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-xl transition-colors"
+            className="flex items-center gap-1 lg:gap-1.5 text-xs lg:text-sm font-black text-white bg-gradient-to-r from-fuchsia-600 to-sky-500 hover:shadow-[0_0_18px_rgba(217,70,239,0.4)] px-3 py-1.5 lg:px-4 lg:py-2 rounded-xl transition-all"
           >
             {userVote ? '결과 보기' : '상세/투표'}
-            <ArrowRight size={11} />
+            <ArrowRight className="w-[11px] h-[11px] lg:w-3.5 lg:h-3.5" />
           </Link>
         )}
       </div>
@@ -290,57 +340,74 @@ export function FeedCard({ matchup: initialMatchup, variant: variantProp, rank, 
 }
 
 // ── 썸네일 셀 (목록 페이지: 클릭 투표 비활성화) ─────────────────────
-function ThumbnailCell({ type, url, thumbnail, text, label, voted }) {
+function ThumbnailCell({ type, url, thumbnail, text, label, voted, side = 'left' }) {
+  const ring =
+    side === 'left'
+      ? 'ring-[2.5px] ring-fuchsia-500 shadow-[0_0_18px_rgba(217,70,239,0.35)]'
+      : 'ring-[2.5px] ring-sky-500 shadow-[0_0_18px_rgba(14,165,233,0.35)]'
   return (
     <div
-      className={`relative aspect-square rounded-xl overflow-hidden bg-gray-50 w-full transition-all duration-200 ${
-        voted ? 'ring-[2.5px] ring-[#22282E] shadow-md' : ''
+      className={`relative aspect-square w-full transition-all duration-200 rounded-xl lg:rounded-2xl ${
+        voted ? ring : ''
       }`}
     >
-      {/* 콘텐츠 */}
-      {type === 'image' && (url || thumbnail) && (
-        <img
-          src={thumbnail || url}
-          alt={label}
-          className="w-full h-full object-cover"
-        />
-      )}
-      {type === 'video' && (
-        <>
-          {(thumbnail || url) && (
-            <img src={thumbnail || url} alt={label} className="w-full h-full object-cover" />
-          )}
-          <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-            <div className="w-8 h-8 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center">
-              <Play size={14} className="text-white fill-white ml-0.5" />
+      <MatchupThumbFrame side={side} className="h-full w-full rounded-xl lg:rounded-2xl">
+        {/* 콘텐츠 */}
+        {type === 'image' && (url || thumbnail) && (
+          <img
+            src={safeMediaUrl(thumbnail || url)}
+            alt={label}
+            className="h-full w-full object-cover"
+          />
+        )}
+        {type === 'video' && (
+          <>
+            {(thumbnail || url) && (
+              <img src={safeMediaUrl(thumbnail || url)} alt={label ?? ''} className="h-full w-full object-cover" />
+            )}
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/30">
+              <div className="flex h-8 w-8 lg:h-11 lg:w-11 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">
+                <Play className="ml-0.5 w-3.5 h-3.5 lg:w-5 lg:h-5 fill-white text-white" />
+              </div>
             </div>
+          </>
+        )}
+        {type === 'text' && (
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 p-3 lg:p-5">
+            <p className="line-clamp-4 lg:line-clamp-6 text-center text-xs lg:text-base font-semibold leading-relaxed text-[#22282E]">{text}</p>
           </div>
-        </>
-      )}
-      {type === 'text' && (
-        <div className="w-full h-full flex items-center justify-center p-3 bg-gradient-to-br from-gray-50 to-gray-100">
-          <p className="text-xs font-semibold text-center text-[#22282E] line-clamp-4 leading-relaxed">{text}</p>
-        </div>
-      )}
+        )}
 
-      {/* 그라데이션 오버레이 */}
-      {type !== 'text' && (
-        <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent pointer-events-none" />
-      )}
+        {/* 그라데이션 오버레이 */}
+        {type !== 'text' && (
+          <div className="pointer-events-none absolute inset-0 z-[8] bg-gradient-to-t from-black/50 via-transparent to-transparent" />
+        )}
 
-      {/* 라벨 (하단) */}
-      <div className="absolute bottom-2 left-2 right-2 flex items-end justify-between pointer-events-none">
-        <span className={`text-[11px] font-black px-1.5 py-0.5 rounded-md ${
-          type === 'text' ? 'bg-[#22282E]/80 text-white' : 'text-white drop-shadow-md'
+        {/* 라벨 (하단) */}
+        <div className="pointer-events-none absolute bottom-2 left-2 right-2 lg:bottom-3 lg:left-3 lg:right-3 z-10 flex items-end justify-between">
+        <span className={`text-[11px] lg:text-sm font-black px-1.5 py-0.5 lg:px-2 lg:py-1 rounded-md ${
+          type === 'text'
+            ? side === 'left'
+              ? 'bg-gradient-to-r from-fuchsia-600 to-pink-500 text-white'
+              : 'bg-gradient-to-r from-sky-500 to-blue-600 text-white'
+            : 'text-white drop-shadow-md'
         }`}>
           {label}
         </span>
         {/* 투표됨 체크 */}
         {voted && (
-          <span className="text-[11px] font-black bg-lime-400 text-lime-900 px-1.5 py-0.5 rounded-md">✓</span>
+          <span
+            className={`text-[11px] lg:text-sm font-black text-white px-1.5 py-0.5 lg:px-2 rounded-md ${
+              side === 'left'
+                ? 'bg-gradient-to-r from-fuchsia-600 to-pink-500'
+                : 'bg-gradient-to-r from-sky-500 to-blue-600'
+            }`}
+          >
+            ✓
+          </span>
         )}
       </div>
-
+      </MatchupThumbFrame>
     </div>
   )
 }

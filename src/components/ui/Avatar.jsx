@@ -1,6 +1,8 @@
 import { cn } from '../../lib/utils'
+import { safeMediaUrl } from '../../lib/sanitize'
 
 export function Avatar({ src, alt, size = 'md', className }) {
+  const safeSrc = safeMediaUrl(src)
   const sizes = {
     xs: 'w-6 h-6 text-xs',
     sm: 'w-8 h-8 text-sm',
@@ -19,8 +21,8 @@ export function Avatar({ src, alt, size = 'md', className }) {
         className
       )}
     >
-      {src ? (
-        <img src={src} alt={alt} className="w-full h-full object-cover" />
+      {safeSrc ? (
+        <img src={safeSrc} alt={alt ?? ''} className="w-full h-full object-cover" />
       ) : (
         <span>{initial}</span>
       )}

@@ -1,42 +1,48 @@
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { X, Palette, Flame, ChevronRight, Sparkles } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { formatNumber, getLevel } from '../../lib/utils'
+import { getTier } from '../../lib/tiers'
+import { safeMediaUrl } from '../../lib/sanitize'
+import { supabase } from '../../lib/supabase'
+import { rankingCelebrationAmountForRank } from '../../lib/rankingCelebrationRewards'
+import { useUIStore } from '../../store/uiStore'
+import { useAuthStore } from '../../store/authStore'
 import { RankingCardEditor } from './RankingCardEditor'
 
-// ── 순위별 테마 설정 ─────────────────────────────────────────────────
+// ── 순위별 테마 (축하 P 금액은 rankingCelebrationAmountForRank · DB RPC와 동기) ──
 const RANK_CFG = {
   1:  {
-    medal: '🥇', title: 'CHAMPION',
+    medal: '🏅', title: 'TOP 10',
     bg:   'from-amber-950 via-yellow-900 to-[#0f0d00]',
     glow: 'rgba(251,191,36,0.35)',
     accent: '#FCD34D', accentDark: '#78350f',
-    reward: 1000, emblem: '🏆 골드 엠블럼 (30일)',
+    emblem: '👑 TOP 10 기념 배지 (30일)',
     canvasBg: ['#451a03','#78350f','#0f0f0f'],
   },
   2:  {
-    medal: '🥈', title: 'RUNNER-UP',
+    medal: '🏅', title: 'TOP 10',
     bg:   'from-slate-800 via-slate-700 to-[#0a0a12]',
     glow: 'rgba(148,163,184,0.35)',
     accent: '#CBD5E1', accentDark: '#334155',
-    reward: 800, emblem: '🥈 실버 엠블럼 (14일)',
+    emblem: '💎 TOP 10 기념 배지 (14일)',
     canvasBg: ['#1e293b','#334155','#0a0a0a'],
   },
   3:  {
-    medal: '🥉', title: 'TOP CHALLENGER',
+    medal: '🏅', title: 'TOP 10',
     bg:   'from-orange-950 via-amber-900 to-[#0f0800]',
     glow: 'rgba(249,115,22,0.35)',
     accent: '#FB923C', accentDark: '#7c2d12',
-    reward: 600, emblem: '🥉 브론즈 엠블럼 (7일)',
+    emblem: '🔥 TOP 10 기념 배지 (7일)',
     canvasBg: ['#431407','#7c2d12','#0f0f0f'],
   },
 }
 const TOP10_CFG = {
-  medal: '🎖️', title: 'TOP 10 CHALLENGER',
+  medal: '🏅', title: 'TOP 10',
   bg:   'from-violet-950 via-purple-900 to-[#050010]',
   glow: 'rgba(139,92,246,0.35)',
   accent: '#A78BFA', accentDark: '#4c1d95',
-  reward: 500, emblem: '🏅 TOP 10 엠블럼 (7일)',
+  emblem: '⭐ TOP 10 기념 배지 (7일)',
   canvasBg: ['#2e1065','#4c1d95','#0a0010'],
 }
 
@@ -95,21 +101,87 @@ function Particles() {
 export function RankingCelebrationModal({
   rank, nickname, avatar_url, points,
   period = 'weekly', top1 = null, profile = null,
+  typeTab = 'creator',
+  sortBy = 'votes',
+  userId = null,
   onClose,
 }) {
   const cfg        = getRankCfg(rank)
   const lvl        = getLevel(points || 0)
+  const tier       = profile ? getTier(profile) : null
   const gap        = top1 ? Math.max(0, (top1.points || 0) - (points || 0)) : null
   const periodLabel = getPeriodLabel(period)
   const [saving,     setSaving]     = useState(false)
   const [showEditor, setShowEditor] = useState(false)
 
-  // ESC 닫기
+  /** 서버 멱등 지급 결과 (랭킹 목록은 category 미필터 → 클레임은 항상 all) */
+  const [bonusLoading, setBonusLoading]   = useState(!!userId)
+  const [bonusAmount, setBonusAmount]     = useState(null)
+  const [bonusAlready, setBonusAlready]   = useState(false)
+  const [bonusNotTop10, setBonusNotTop10] = useState(false)
+  const [bonusRpcError, setBonusRpcError] = useState(null)
+  const claimSeqRef = useRef(0)
+
+  const editorRankInfo = useMemo(() => ({ overallRank: rank }), [rank])
+  const expectedBonusP = useMemo(() => rankingCelebrationAmountForRank(rank), [rank])
+
   useEffect(() => {
-    const fn = (e) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', fn)
-    return () => window.removeEventListener('keydown', fn)
-  }, [onClose])
+    if (!userId) {
+      setBonusLoading(false)
+      setBonusAmount(expectedBonusP)
+      setBonusAlready(false)
+      setBonusNotTop10(false)
+      setBonusRpcError(null)
+      return
+    }
+    const seq = ++claimSeqRef.current
+    setBonusLoading(true)
+    setBonusAmount(null)
+    setBonusAlready(false)
+    setBonusNotTop10(false)
+    setBonusRpcError(null)
+    const showToast = useUIStore.getState().showToast
+    ;(async () => {
+      try {
+        const { data, error } = await supabase.rpc('claim_ranking_celebration_bonus', {
+          p_type_tab: typeTab,
+          p_sort_by: sortBy,
+          p_category: 'all',
+          p_period: period || 'weekly',
+        })
+        if (seq !== claimSeqRef.current) return
+        if (error) {
+          setBonusRpcError(error.message || 'rpc')
+          showToast('보너스 지급을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.', 'error')
+          return
+        }
+        const d = data || {}
+        if (!d.ok) {
+          if (d.reason === 'not_top10') {
+            setBonusNotTop10(true)
+            showToast('실제 랭킹 기준으로는 TOP10 보너스 대상이 아니에요.', 'error')
+          } else {
+            setBonusRpcError(d.error || 'unknown')
+            const msg = d.error === 'not_authenticated'
+              ? '로그인이 필요해요.'
+              : '보너스를 지급할 수 없어요.'
+            showToast(msg, 'error')
+          }
+          return
+        }
+        const amt = Number(d.amount) || 0
+        setBonusAmount(amt)
+        setBonusAlready(!!d.already_claimed)
+        const isFreshPay = !d.already_claimed && amt > 0
+        if (isFreshPay) {
+          showToast(`랭킹 축하 보너스 ${amt.toLocaleString('ko-KR')}P가 지급됐어요!`, 'success')
+          await useAuthStore.getState().fetchProfile(userId)
+        }
+      } finally {
+        if (seq === claimSeqRef.current) setBonusLoading(false)
+      }
+    })()
+  }, [userId, typeTab, sortBy, period, expectedBonusP])
 
   // ── 캔버스 공유 카드 생성 (9:16) ────────────────────────────────
   const generateCard = useCallback(async () => {
@@ -279,7 +351,6 @@ export function RankingCelebrationModal({
       <div
         className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4"
         style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)' }}
-        onClick={(e) => e.target === e.currentTarget && onClose()}
       >
         <Particles />
 
@@ -332,7 +403,21 @@ export function RankingCelebrationModal({
 
             {/* 메달 + 순위 */}
             <div className="relative mb-2 flex flex-col items-center">
-              <span className="text-5xl drop-shadow-lg">{cfg.medal}</span>
+              <div className="relative inline-flex items-center justify-center">
+                <span className="text-5xl drop-shadow-lg">{cfg.medal}</span>
+                <span
+                  className="absolute inset-0 flex items-center justify-center font-black"
+                  style={{
+                    fontSize: '15px',
+                    color: '#111',
+                    WebkitTextStroke: '3px #fff',
+                    paintOrder: 'stroke fill',
+                    textShadow: '0 0 6px rgba(255,255,255,0.9)',
+                  }}
+                >
+                  {rank}위
+                </span>
+              </div>
               <div className="mt-1.5 px-3 py-0.5 rounded-full text-[10px] font-black tracking-widest uppercase"
                 style={{ background: `${cfg.accent}22`, color: cfg.accent, border: `1px solid ${cfg.accent}44` }}>
                 {cfg.title}
@@ -344,7 +429,7 @@ export function RankingCelebrationModal({
               <div className="w-16 h-16 rounded-full overflow-hidden ring-[3px]"
                 style={{ ringColor: cfg.accent, boxShadow: `0 0 0 3px ${cfg.accent}` }}>
                 {avatar_url
-                  ? <img src={avatar_url} alt={nickname} className="w-full h-full object-cover" />
+                  ? <img src={safeMediaUrl(avatar_url)} alt={nickname} className="w-full h-full object-cover" />
                   : <div className="w-full h-full flex items-center justify-center"
                       style={{ background: `${cfg.accentDark}` }}>
                       <span className="text-2xl font-black text-white">{nickname?.[0]?.toUpperCase()}</span>
@@ -359,7 +444,7 @@ export function RankingCelebrationModal({
 
             {/* 닉네임 */}
             <p className="text-lg font-black text-white mb-0.5">{nickname}</p>
-            <p className="text-xs text-white/40 mb-3">{lvl.emoji} {lvl.name}</p>
+            <p className="text-xs text-white/40 mb-3">{lvl.emoji} {tier ? `${tier.emoji} ${tier.name}` : `Lv.${lvl.level}`}</p>
 
             {/* 순위 + 백분위 */}
             <div className="w-full rounded-2xl mb-2.5 px-4 py-3 text-center relative overflow-hidden"
@@ -375,17 +460,51 @@ export function RankingCelebrationModal({
                 {periodLabel} <span style={{ fontSize: '2rem' }}>{rank}</span>위
               </p>
               <p className="text-xs font-bold text-white/60">
-                {getPercentile(rank)}의 놀라운 안목이에요! 👏
+                {getPercentile(rank)}의 놀라운 실력자에요! 👏
               </p>
             </div>
 
-            {/* 획득 보상 */}
+            {/* 획득 보상 — 순위 기준 P는 즉시 표시, RPC는 반영·멱등 확인 */}
             <div className="w-full rounded-2xl px-4 py-3 mb-2.5"
               style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
               <p className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-2">획득 보상</p>
-              <div className="flex items-center gap-2">
-                <span className="text-base">💎</span>
-                <p className="text-sm font-black text-white">{formatNumber(cfg.reward)} P 지급 완료</p>
+              <div className="flex items-start gap-2">
+                <span className="text-base shrink-0">💎</span>
+                <div className="min-w-0 text-sm font-black text-white">
+                  {bonusNotTop10 && (
+                    <p>
+                      표시 순위와 실제 집계가 달라 보너스가 없을 수 있어요.
+                      <span className="block text-[11px] font-bold text-white/50 mt-1">
+                        (표시 기준 {expectedBonusP.toLocaleString('ko-KR')}P)
+                      </span>
+                    </p>
+                  )}
+                  {bonusRpcError && !bonusNotTop10 && (
+                    <p>
+                      보너스 자동 확인에 실패했어요. 잠시 후 모달을 닫았다가 다시 열어 주세요.
+                      <span className="block text-[11px] font-bold text-white/50 mt-1">
+                        표시 기준 {expectedBonusP.toLocaleString('ko-KR')}P
+                      </span>
+                    </p>
+                  )}
+                  {!bonusNotTop10 && !bonusRpcError && (
+                    <>
+                      <p>
+                        보너스{' '}
+                        {(bonusAmount != null && bonusAmount > 0 ? bonusAmount : expectedBonusP).toLocaleString('ko-KR')}
+                        P 지급 완료
+                        {!bonusLoading && bonusAlready && bonusAmount > 0 && (
+                          <span className="text-white/55 font-bold"> · 이미 수령</span>
+                        )}
+                      </p>
+                      {bonusLoading && userId && (
+                        <p className="text-[11px] font-bold text-white/45 mt-1">
+                          계정 포인트 반영을 서버에서 확인하는 중이에요…
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
               <div className="flex items-center gap-2 mt-1.5">
                 <span className="text-base">{cfg.emblem.split(' ')[0]}</span>
@@ -427,7 +546,7 @@ export function RankingCelebrationModal({
               📸 랭킹 카드 편집 &amp; 저장하기
             </button>
 
-            {/* 다음 시즌 도전 버튼 */}
+            {/* 시즌 1위 도전 버튼 */}
             <Link
               to="/matchups"
               onClick={onClose}
@@ -435,7 +554,7 @@ export function RankingCelebrationModal({
               style={{ border: '1px solid rgba(255,255,255,0.15)' }}
             >
               <Flame size={15} className="text-orange-400" />
-              다음 시즌 1위 도전하기
+              시즌 1위 도전하기
               <ChevronRight size={13} />
             </Link>
 
@@ -453,6 +572,7 @@ export function RankingCelebrationModal({
           points={points}
           period={period}
           profile={profile}
+          rankInfo={editorRankInfo}
           onClose={() => setShowEditor(false)}
         />
       )}

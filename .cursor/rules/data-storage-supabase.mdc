@@ -1,0 +1,44 @@
+---
+description: 모든 데이터 저장은 Supabase를 사용해야 한다. localStorage는 사용하지 않는다.
+alwaysApply: true
+---
+
+# 데이터 저장소 원칙: Supabase 우선
+
+이 프로젝트의 모든 데이터(공지, 문의, 팝업, 제재, 카테고리 등)는 **Supabase**에 저장한다.
+앱(모바일)과 웹(브라우저) 모두 동일한 데이터를 실시간으로 공유해야 하기 때문이다.
+
+## ❌ 금지
+
+```js
+// localStorage, sessionStorage 사용 금지
+localStorage.setItem('vics_notices', JSON.stringify(data))
+const raw = localStorage.getItem('vics_notices')
+```
+
+## ✅ 올바른 방법
+
+```js
+import { supabase } from './supabase'
+
+// 조회
+const { data, error } = await supabase.from('notices').select('*')
+
+// 저장
+const { data, error } = await supabase.from('notices').insert({ ... }).select().single()
+
+// 수정
+const { data, error } = await supabase.from('notices').update({ ... }).eq('id', id).select().single()
+```
+
+## 새 기능을 만들 때 체크리스트
+
+1. `supabase_[기능명].sql` 파일에 테이블 + RLS 정책을 먼저 작성한다.
+2. 저장소 함수는 항상 `async`로 작성한다.
+3. 저장 후 동일 탭 즉시 반영이 필요하면 `window.dispatchEvent(new CustomEvent('vics:[기능]:updated'))` 를 함께 dispatch한다.
+4. 컴포넌트에서 데이터를 읽을 때는 `useEffect` 안에서 비동기로 fetch하고, 커스텀 이벤트를 구독해 갱신한다.
+
+## 기존 localStorage 파일
+
+`src/lib/*Storage.js` 중 아직 Supabase로 전환하지 않은 파일이 있다.
+새 기능 추가 시 반드시 Supabase 방식으로 작성하고, 기존 파일을 수정할 때도 localStorage 코드를 Supabase로 교체한다.

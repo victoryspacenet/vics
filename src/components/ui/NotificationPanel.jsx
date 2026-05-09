@@ -1,25 +1,99 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, Check, CheckCheck, Heart, MessageCircle, ThumbsUp } from 'lucide-react'
+import {
+  Bell,
+  Check,
+  CheckCheck,
+  Heart,
+  MessageCircle,
+  Megaphone,
+  ThumbsUp,
+  AlertTriangle,
+  Home,
+  Sparkles,
+  Mail,
+} from 'lucide-react'
 import { useNotificationStore } from '../../store/notificationStore'
 import { useAuthStore } from '../../store/authStore'
+import { useUIStore } from '../../store/uiStore'
 import { formatDate } from '../../lib/utils'
 
+/** MZ 파스텔 — 타입별 아이콘 링 */
 const TYPE_CONFIG = {
-  vote:    { icon: ThumbsUp,       color: 'text-blue-500',  bg: 'bg-blue-50'   },
-  comment: { icon: MessageCircle,  color: 'text-green-500', bg: 'bg-green-50'  },
-  like:    { icon: Heart,          color: 'text-red-400',   bg: 'bg-red-50'    },
-  match_complete: { icon: Check,   color: 'text-purple-500', bg: 'bg-purple-50' },
-  ranking: { icon: Bell,           color: 'text-yellow-500', bg: 'bg-yellow-50' },
+  vote: {
+    icon: ThumbsUp,
+    color: 'text-sky-600',
+    bg: 'bg-gradient-to-br from-sky-100 to-cyan-100 ring-1 ring-sky-200/60',
+  },
+  comment: {
+    icon: MessageCircle,
+    color: 'text-emerald-600',
+    bg: 'bg-gradient-to-br from-emerald-100 to-teal-100 ring-1 ring-emerald-200/60',
+  },
+  like: {
+    icon: Heart,
+    color: 'text-rose-500',
+    bg: 'bg-gradient-to-br from-rose-100 to-pink-100 ring-1 ring-rose-200/60',
+  },
+  match_complete: {
+    icon: Check,
+    color: 'text-violet-600',
+    bg: 'bg-gradient-to-br from-violet-100 to-fuchsia-100 ring-1 ring-violet-200/60',
+  },
+  ranking: {
+    icon: Bell,
+    color: 'text-amber-600',
+    bg: 'bg-gradient-to-br from-amber-100 to-lime-100 ring-1 ring-amber-200/60',
+  },
+  notice: {
+    icon: Megaphone,
+    color: 'text-violet-700',
+    bg: 'bg-gradient-to-br from-violet-100 to-indigo-100 ring-1 ring-violet-200/60',
+  },
+  content_deletion: {
+    icon: AlertTriangle,
+    color: 'text-orange-600',
+    bg: 'bg-gradient-to-br from-orange-100 to-amber-100 ring-1 ring-orange-200/60',
+  },
+  restriction_lift: {
+    icon: Home,
+    color: 'text-teal-600',
+    bg: 'bg-gradient-to-br from-teal-100 to-cyan-100 ring-1 ring-teal-200/60',
+  },
+  appeal_result: {
+    icon: Check,
+    color: 'text-emerald-600',
+    bg: 'bg-gradient-to-br from-emerald-100 to-lime-100 ring-1 ring-emerald-200/60',
+  },
+  inquiry_reply: {
+    icon: Mail,
+    color: 'text-cyan-600',
+    bg: 'bg-gradient-to-br from-cyan-100 to-sky-100 ring-1 ring-cyan-200/60',
+  },
+}
+
+function payloadObj(notif) {
+  const p = notif?.payload
+  if (p && typeof p === 'object') return p
+  try {
+    return typeof p === 'string' && p ? JSON.parse(p) : {}
+  } catch {
+    return {}
+  }
 }
 
 export function NotificationPanel({ onClose }) {
   const navigate = useNavigate()
-  const { user } = useAuthStore()
+  const { user, profile } = useAuthStore()
+  const { openWelcomeBackModal } = useUIStore()
   const { notifications, unreadCount, loading, markAsRead, markAllAsRead } = useNotificationStore()
   const panelRef = useRef(null)
 
-  // 패널 외부 클릭 시 닫기
+  const mergedList = useMemo(
+    () => [...notifications].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)),
+    [notifications]
+  )
+
   useEffect(() => {
     const handler = (e) => {
       if (panelRef.current && !panelRef.current.contains(e.target)) {
@@ -33,99 +107,168 @@ export function NotificationPanel({ onClose }) {
   const handleNotifClick = async (notif) => {
     if (!notif.is_read) await markAsRead(notif.id)
     onClose()
+
+    const pl = payloadObj(notif)
+
+    if (notif.type === 'content_deletion' && pl.deletionId) {
+      navigate(`/notice/deletion/${pl.deletionId}`)
+      return
+    }
+    if (notif.type === 'appeal_result' && pl.receiptId) {
+      navigate(`/appeal-result/${encodeURIComponent(pl.receiptId)}`)
+      return
+    }
+    if (notif.type === 'inquiry_reply' && pl.receipt_id) {
+      navigate(`/inquiry/history/${encodeURIComponent(pl.receipt_id)}`)
+      return
+    }
+    if (notif.type === 'restriction_lift') {
+      openWelcomeBackModal({
+        nickname: pl.nickname || profile?.nickname || '회원',
+        avatarUrl: pl.avatarUrl ?? profile?.avatar_url ?? null,
+        userId: user?.id,
+        endsAt: typeof pl.endsAtMs === 'number' ? pl.endsAtMs : null,
+      })
+      return
+    }
     if (notif.related_matchup_id) {
       navigate(`/matchup/${notif.related_matchup_id}`)
     }
+    if (notif.related_notice_id) {
+      navigate(`/notice/${notif.related_notice_id}`)
+    }
   }
 
-  const handleMarkAll = () => {
-    if (user) markAllAsRead(user.id)
+  const handleMarkAll = async () => {
+    if (user) await markAllAsRead(user.id)
   }
 
   return (
     <div
       ref={panelRef}
-      className="absolute right-0 top-full mt-2 w-[min(20rem,calc(100vw-2rem))] max-w-80 bg-white rounded-2xl border border-gray-100 shadow-xl z-50 overflow-hidden"
+      className="w-[min(20rem,calc(100vw-2rem))] max-w-80 overflow-hidden rounded-2xl border-2 border-pink-200 bg-gradient-to-br from-rose-50 via-fuchsia-50 to-cyan-50 shadow-[0_20px_50px_-12px_rgba(236,72,153,0.35),0_8px_24px_-8px_rgba(34,211,238,0.2)] ring-2 ring-white z-50"
     >
       {/* 헤더 */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-        <div className="flex items-center gap-2">
-          <Bell size={16} className="text-[#22282E]" />
-          <span className="text-sm font-bold text-[#22282E]">알림</span>
+      <div className="flex items-center justify-between border-b border-pink-200 bg-gradient-to-r from-fuchsia-100 via-pink-50 to-violet-100 px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-fuchsia-500 via-pink-500 to-rose-500 text-white shadow-md shadow-fuchsia-400/35 ring-1 ring-white/50">
+            <Bell size={15} strokeWidth={2.5} />
+          </div>
+          <span className="bg-gradient-to-r from-fuchsia-800 via-violet-700 to-cyan-700 bg-clip-text text-sm font-black tracking-tight text-transparent">
+            알림
+          </span>
           {unreadCount > 0 && (
-            <span className="text-xs font-bold px-1.5 py-0.5 bg-[#22282E] text-white rounded-full">
+            <span className="shrink-0 rounded-full bg-gradient-to-r from-fuchsia-600 to-pink-500 px-2 py-0.5 text-[10px] font-black text-white shadow-sm shadow-fuchsia-400/40 ring-1 ring-white/40">
               {unreadCount}
             </span>
           )}
         </div>
         {unreadCount > 0 && (
           <button
+            type="button"
             onClick={handleMarkAll}
-            className="flex items-center gap-1 text-xs text-gray-400 hover:text-[#22282E] transition-colors"
+            className="flex shrink-0 items-center gap-1 rounded-xl px-2 py-1 text-[11px] font-bold text-fuchsia-800 transition-colors hover:bg-white hover:text-fuchsia-900"
           >
-            <CheckCheck size={13} />
+            <CheckCheck size={13} strokeWidth={2.25} className="text-emerald-600" />
             모두 읽음
           </button>
         )}
       </div>
 
       {/* 알림 목록 */}
-      <div className="max-h-96 overflow-y-auto">
+      <div className="max-h-96 overflow-y-auto overscroll-contain [scrollbar-color:rgba(244,114,182,0.35)_transparent]">
         {loading && (
           <div className="space-y-1 p-2">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 p-3 animate-pulse">
-                <div className="w-9 h-9 bg-gray-100 rounded-full shrink-0" />
+              <div key={i} className="flex animate-pulse items-center gap-3 rounded-xl p-3">
+                <div className="h-9 w-9 shrink-0 rounded-full bg-gradient-to-br from-pink-100 to-fuchsia-100" />
                 <div className="flex-1 space-y-1.5">
-                  <div className="h-3.5 bg-gray-100 rounded w-3/4" />
-                  <div className="h-3 bg-gray-100 rounded w-1/2" />
+                  <div className="h-3.5 w-3/4 rounded bg-pink-100/90" />
+                  <div className="h-3 w-1/2 rounded bg-fuchsia-100/70" />
                 </div>
               </div>
             ))}
           </div>
         )}
 
-        {!loading && notifications.length === 0 && (
-          <div className="py-12 text-center">
-            <Bell size={28} className="mx-auto mb-2 text-gray-200" />
-            <p className="text-sm text-gray-400">아직 알림이 없어요</p>
+        {!loading && mergedList.length === 0 && (
+          <div className="px-4 py-12 text-center">
+            <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-fuchsia-100 to-cyan-100 ring-1 ring-pink-200/60">
+              <Sparkles className="text-fuchsia-400" size={26} strokeWidth={2} />
+            </div>
+            <p className="text-sm font-bold text-fuchsia-900/75">아직 알림이 없어요</p>
+            <p className="mt-1 text-xs font-medium text-fuchsia-700/50">새 소식이 오면 여기에 모여요</p>
           </div>
         )}
 
-        {!loading && notifications.map((notif) => {
-          const cfg = TYPE_CONFIG[notif.type] || TYPE_CONFIG.vote
-          const Icon = cfg.icon
-          return (
-            <button
-              key={notif.id}
-              onClick={() => handleNotifClick(notif)}
-              className={`w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0 ${
-                !notif.is_read ? 'bg-blue-50/30' : ''
-              }`}
-            >
-              {/* 아이콘 */}
-              <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${cfg.bg}`}>
-                <Icon size={15} className={cfg.color} />
-              </div>
+        {!loading &&
+          mergedList.map((notif) => {
+            const pl = payloadObj(notif)
+            let cfg = TYPE_CONFIG[notif.type] || TYPE_CONFIG.vote
+            if (notif.type === 'appeal_result') {
+              cfg =
+                pl.decision === 'approve'
+                  ? {
+                      icon: Check,
+                      color: 'text-emerald-600',
+                      bg: 'bg-gradient-to-br from-emerald-100 to-lime-100 ring-1 ring-emerald-200/60',
+                    }
+                  : {
+                      icon: AlertTriangle,
+                      color: 'text-orange-600',
+                      bg: 'bg-gradient-to-br from-orange-100 to-amber-100 ring-1 ring-orange-200/60',
+                    }
+            }
+            const Icon = cfg.icon
+            const isNotice =
+              notif.type === 'notice' ||
+              notif.type === 'appeal_result' ||
+              notif.type === 'content_deletion' ||
+              notif.type === 'restriction_lift' ||
+              notif.type === 'inquiry_reply'
+            return (
+              <button
+                key={notif.id}
+                type="button"
+                onClick={() => handleNotifClick(notif)}
+                className={`w-full border-b border-pink-100 px-4 py-3 text-left transition-colors last:border-0 hover:bg-gradient-to-r hover:from-fuchsia-50 hover:to-cyan-50/90 ${
+                  !notif.is_read
+                    ? 'bg-gradient-to-r from-fuchsia-50 via-rose-50/95 to-white'
+                    : 'bg-transparent'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${cfg.bg}`}
+                  >
+                    <Icon size={15} strokeWidth={2.25} className={cfg.color} />
+                  </div>
 
-              {/* 내용 */}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-[#22282E] leading-snug">
-                  {notif.title}
-                </p>
-                {notif.body && (
-                  <p className="text-xs text-gray-500 mt-0.5 truncate">{notif.body}</p>
-                )}
-                <p className="text-xs text-gray-400 mt-1">{formatDate(notif.created_at)}</p>
-              </div>
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className={`leading-snug ${
+                        isNotice
+                          ? 'text-sm font-black text-fuchsia-950'
+                          : 'text-sm font-semibold text-fuchsia-950/95'
+                      }`}
+                    >
+                      {notif.title}
+                    </p>
+                    {notif.body && (
+                      <p className="mt-0.5 line-clamp-2 text-xs font-medium text-fuchsia-800/55">
+                        {notif.body}
+                      </p>
+                    )}
+                    <p className="mt-1 text-[11px] font-medium text-fuchsia-600/45">{formatDate(notif.created_at)}</p>
+                  </div>
 
-              {/* 읽지 않음 도트 */}
-              {!notif.is_read && (
-                <div className="w-2 h-2 rounded-full bg-[#22282E] mt-1 shrink-0" />
-              )}
-            </button>
-          )
-        })}
+                  {!notif.is_read && (
+                    <div className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-gradient-to-br from-fuchsia-500 to-pink-500 shadow-sm shadow-fuchsia-400/50 ring-1 ring-white/80" />
+                  )}
+                </div>
+              </button>
+            )
+          })}
       </div>
     </div>
   )

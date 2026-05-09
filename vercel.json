@@ -1,3 +1,6 @@
 {
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "rewrites": [
+    { "source": "/api/vote", "destination": "/api/vote" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }

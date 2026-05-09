@@ -2,8 +2,14 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Trophy, Download, Share2, Trash2, X, SortDesc, Crown, Sparkles } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
+import { useUIStore } from '../store/uiStore'
 import { loadGallery, deleteFromGallery, markAllSeen, getBestCard } from '../lib/galleryUtils'
 import { drawCard, getPercentile, getTierInfo, formatSavedDate, CARD_W, CARD_H } from '../lib/cardDraw'
+import { safeMediaUrl } from '../lib/sanitize'
+import { cn } from '../lib/utils'
+
+const PAGE_BG =
+  'bg-gradient-to-br from-rose-50/98 via-fuchsia-50/35 to-cyan-50/50 min-h-[70vh]'
 
 // ── 기간 한글 레이블 ────────────────────────────────────────────────
 function periodLabel(p) {
@@ -36,7 +42,7 @@ function CardThumbnail({ card, onClick }) {
     >
       {/* 썸네일 이미지 */}
       {card.thumbnail
-        ? <img ref={imgRef} src={card.thumbnail} alt={`${card.rank}위 카드`}
+        ? <img ref={imgRef} src={safeMediaUrl(card.thumbnail)} alt={`${card.rank}위 카드`}
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
         : <div style={{
             width: '100%', height: '100%',
@@ -78,8 +84,8 @@ function CardThumbnail({ card, onClick }) {
 
 // ── 카드 상세 모달 ───────────────────────────────────────────────────
 function CardDetailModal({ card, onClose, onDelete }) {
+  const { showToast } = useUIStore()
   const avatarRef  = useRef(null)
-  const [confirm,  setConfirm]    = useState(false)
   const [showDeletePopup, setShowDeletePopup] = useState(false)
   const [saving,   setSaving]     = useState(false)
   const tier = getTierInfo(card.rank)
@@ -113,8 +119,9 @@ function CardDetailModal({ card, onClose, onDelete }) {
 
   // ── 인스타 공유 ──────────────────────────────────────────────────
   const handleShare = async () => {
-    if (card.thumbnail) {
-      const res  = await fetch(card.thumbnail)
+    const safeUrl = safeMediaUrl(card.thumbnail)
+    if (safeUrl) {
+      const res  = await fetch(safeUrl)
       const blob = await res.blob()
       const file = new File([blob], 'vics_ranking.png', { type: 'image/jpeg' })
       if (navigator.share && navigator.canShare?.({ files: [file] })) {
@@ -125,7 +132,7 @@ function CardDetailModal({ card, onClose, onDelete }) {
     // fallback
     const link = document.createElement('a')
     link.download = `VICS_ranking.jpg`
-    link.href = card.thumbnail || ''
+    link.href = safeUrl || ''
     link.click()
     alert('이미지를 저장 후 인스타그램 스토리에서 공유해보세요 📸')
   }
@@ -134,135 +141,130 @@ function CardDetailModal({ card, onClose, onDelete }) {
     <>
       <style>{`
         @keyframes detail-in {
-          from { opacity:0; transform:scale(0.95); }
-          to   { opacity:1; transform:scale(1); }
+          from { opacity:0; transform:scale(0.96) translateY(8px); }
+          to   { opacity:1; transform:scale(1) translateY(0); }
         }
       `}</style>
       <div
-        style={{
-          position:'fixed', inset:0, zIndex:70,
-          display:'flex', alignItems:'center', justifyContent:'center',
-          background:'rgba(0,0,0,0.92)', backdropFilter:'blur(12px)',
-          padding:16,
-        }}
-        onClick={(e) => e.target === e.currentTarget && onClose()}
+        className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-gradient-to-br from-fuchsia-950/55 via-purple-950/45 to-rose-950/50 backdrop-blur-md"
       >
-        <div style={{
-          width:'100%', maxWidth:420,
-          background:'#12121f', borderRadius:24,
-          overflow:'hidden', animation:'detail-in 0.25s ease both',
-          maxHeight:'92dvh', display:'flex', flexDirection:'column',
-        }}>
-          {/* 헤더 (고정) */}
-          <div style={{
-            display:'flex', alignItems:'center', justifyContent:'space-between',
-            padding:'12px 16px', borderBottom:'1px solid rgba(255,255,255,0.07)',
-            flexShrink:0,
-          }}>
-            <div>
-              <p style={{ color:'#fff', fontWeight:900, fontSize:14, margin:0 }}>
-                {tier.emoji} {tier.name}
+        <div
+          className={cn(
+            'w-full max-w-[420px] max-h-[92dvh] flex flex-col overflow-hidden rounded-[1.35rem]',
+            'border-2 border-pink-200/90 bg-gradient-to-br from-rose-50/98 via-fuchsia-50/95 to-cyan-50/90',
+            'shadow-[0_0_0_1px_rgba(244,114,182,0.12),0_28px_56px_-16px_rgba(236,72,153,0.35),0_12px_32px_-8px_rgba(34,211,238,0.15)]',
+            'animate-[detail-in_0.28s_ease_both]',
+          )}
+        >
+          {/* 헤더: 티어 컬러 그라데이션 스트립 */}
+          <div
+            className="relative flex shrink-0 items-center justify-between gap-3 px-4 py-3.5"
+            style={{
+              background: `linear-gradient(135deg, ${tier.color}35 0%, rgba(255,255,255,0.92) 45%, rgba(236,254,255,0.95) 100%)`,
+              borderBottom: `1px solid ${tier.color}40`,
+            }}
+          >
+            <div className="min-w-0 text-left">
+              <p className="mb-0.5 flex items-center gap-1.5 text-[15px] font-black tracking-tight text-fuchsia-950">
+                <span className="text-lg leading-none">{tier.emoji}</span>
+                <span
+                  className="bg-gradient-to-r from-fuchsia-700 via-violet-700 to-cyan-700 bg-clip-text text-transparent"
+                >
+                  {tier.name}
+                </span>
               </p>
-              <p style={{ color:'rgba(255,255,255,0.35)', fontSize:11, margin:0 }}>
+              <p className="text-[11px] font-semibold text-fuchsia-800/55">
                 {formatSavedDate(card.savedAt)} · {periodLabel(card.period)} 랭킹
               </p>
             </div>
-            <button onClick={onClose} style={{
-              background:'rgba(255,255,255,0.08)', border:'none', borderRadius:'50%',
-              width:30, height:30, display:'flex', alignItems:'center', justifyContent:'center',
-              cursor:'pointer', color:'rgba(255,255,255,0.5)',
-            }}><X size={14} /></button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-pink-200/80 bg-white/90 text-fuchsia-900/50 shadow-sm transition hover:scale-105 hover:bg-white hover:text-fuchsia-900"
+            >
+              <X size={16} strokeWidth={2.25} />
+            </button>
           </div>
 
-          {/* 스크롤 가능한 본문 */}
-          <div style={{
-            flex:1, minHeight:0, overflowY:'auto', overscrollBehavior:'contain',
-            WebkitOverflowScrolling:'touch',
-          }}>
-            {/* 카드 미리보기 (축소) */}
-            <div style={{
-              display:'flex', justifyContent:'center',
-              background:'rgba(0,0,0,0.4)', padding:'14px 0',
-              flexShrink:0,
-            }}>
-              <div style={{
-                width:140, aspectRatio:'9/16', borderRadius:12, overflow:'hidden',
-                boxShadow:`0 0 0 2px ${tier.color}88, 0 6px 20px rgba(0,0,0,0.5)`,
-              }}>
-                {card.thumbnail
-                  ? <img src={card.thumbnail} alt="카드" style={{ width:'100%',height:'100%',objectFit:'cover' }} />
-                  : <div style={{ width:'100%',height:'100%',background:'#1a1a2e',
-                      display:'flex',alignItems:'center',justifyContent:'center' }}>
-                      <span style={{ fontSize:32 }}>{tier.emoji}</span>
-                    </div>
-                }
-              </div>
-            </div>
-
-            {/* 정보 + 액션 */}
-            <div style={{ padding:'12px 16px 20px', display:'flex', flexDirection:'column', gap:10 }}>
-            <div style={{
-              display:'flex', justifyContent:'space-between',
-              padding:'10px 14px', background:'rgba(255,255,255,0.04)',
-              borderRadius:12, border:'1px solid rgba(255,255,255,0.06)',
-            }}>
-              <div style={{ textAlign:'center' }}>
-                <p style={{ color:'rgba(255,255,255,0.4)', fontSize:9, fontWeight:900, margin:'0 0 3px', textTransform:'uppercase', letterSpacing:'0.08em' }}>순위</p>
-                <p style={{ color: tier.color, fontSize:18, fontWeight:900, margin:0 }}>#{card.rank}</p>
-              </div>
-              <div style={{ textAlign:'center' }}>
-                <p style={{ color:'rgba(255,255,255,0.4)', fontSize:9, fontWeight:900, margin:'0 0 3px', textTransform:'uppercase', letterSpacing:'0.08em' }}>백분위</p>
-                <p style={{ color:'#fff', fontSize:11, fontWeight:900, margin:0 }}>{getPercentile(card.rank)}</p>
-              </div>
-              <div style={{ textAlign:'center' }}>
-                <p style={{ color:'rgba(255,255,255,0.4)', fontSize:9, fontWeight:900, margin:'0 0 3px', textTransform:'uppercase', letterSpacing:'0.08em' }}>포인트</p>
-                <p style={{ color:'#fff', fontSize:11, fontWeight:900, margin:0 }}>{(card.points||0).toLocaleString()}P</p>
-              </div>
-            </div>
-
-            {/* 액션 버튼 */}
-            <div style={{ display:'flex', gap:8 }}>
-              <button onClick={handleReDownload} disabled={saving} style={{
-                flex:1, padding:'11px 0', borderRadius:12, border:'1px solid rgba(255,255,255,0.12)',
-                background:'rgba(255,255,255,0.06)', color:'#fff', fontWeight:700, fontSize:12,
-                cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:6,
-              }}>
-                <Download size={13} /> {saving ? '생성 중…' : '다시 저장'}
-              </button>
-              <button onClick={handleShare} style={{
-                flex:1, padding:'11px 0', borderRadius:12, border:'none',
-                background:'linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045)',
-                color:'#fff', fontWeight:700, fontSize:12,
-                cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:6,
-              }}>
-                <Share2 size={13} /> 공유하기
-              </button>
-            </div>
-
-            {/* 삭제 */}
-            <div style={{ paddingBottom:18 }}>
-              {!confirm
-                ? <button onClick={() => setConfirm(true)} style={{
-                    width:'100%', padding:'10px', borderRadius:12,
-                    background:'transparent', border:'1px solid rgba(239,68,68,0.25)',
-                    color:'rgba(239,68,68,0.6)', fontWeight:700, fontSize:12,
-                    cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:6,
-                  }}>
-                    <Trash2 size={12} /> 이 카드 삭제
-                  </button>
-                : <div style={{ display:'flex', gap:8 }}>
-                    <button onClick={() => setConfirm(false)} style={{
-                      flex:1, padding:'10px', borderRadius:12,
-                      background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)',
-                      color:'rgba(255,255,255,0.6)', fontWeight:700, fontSize:12, cursor:'pointer',
-                    }}>취소</button>
-                    <button onClick={() => setShowDeletePopup(true)} style={{
-                      flex:1, padding:'10px', borderRadius:12, border:'none',
-                      background:'#ef4444', color:'#fff', fontWeight:900, fontSize:12, cursor:'pointer',
-                    }}>정말 삭제</button>
+          {/* 스크롤 본문 */}
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
+            {/* 카드 미리보기 */}
+            <div className="flex shrink-0 justify-center bg-gradient-to-b from-fuchsia-100/40 via-white/50 to-cyan-50/40 px-4 py-5">
+              <div
+                className="w-[140px] overflow-hidden rounded-2xl shadow-lg ring-2 ring-white"
+                style={{
+                  aspectRatio: '9/16',
+                  boxShadow: `0 0 0 3px ${tier.color}55, 0 16px 40px -8px ${tier.color}44`,
+                }}
+              >
+                {card.thumbnail ? (
+                  <img
+                    src={safeMediaUrl(card.thumbnail)}
+                    alt="카드"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div
+                    className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-900 to-fuchsia-950"
+                  >
+                    <span className="text-4xl">{tier.emoji}</span>
                   </div>
-              }
+                )}
+              </div>
             </div>
+
+            <div className="flex flex-col gap-3 px-4 pb-5 pt-1">
+              {/* 스탯 */}
+              <div className="grid grid-cols-3 gap-2 rounded-2xl border border-pink-100/80 bg-white/85 p-3 shadow-sm shadow-pink-100/30 backdrop-blur-sm">
+                {[
+                  { label: '순위', value: `#${card.rank}`, valueStyle: { color: tier.color } },
+                  { label: '백분위', value: getPercentile(card.rank), valueStyle: { color: '#5b21b6' } },
+                  { label: '포인트', value: `${(card.points || 0).toLocaleString()}P`, valueStyle: { color: '#0d9488' } },
+                ].map((row) => (
+                  <div key={row.label} className="text-center">
+                    <p className="mb-1 text-[9px] font-black uppercase tracking-[0.12em] text-fuchsia-900/40">
+                      {row.label}
+                    </p>
+                    <p className="text-[13px] font-black leading-tight" style={row.valueStyle}>
+                      {row.value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleReDownload}
+                  disabled={saving}
+                  className={cn(
+                    'flex flex-1 items-center justify-center gap-1.5 rounded-2xl border-2 border-emerald-200/90 bg-white/95 py-3 text-[12px] font-black text-emerald-900 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50/80',
+                    saving && 'cursor-wait opacity-70',
+                  )}
+                >
+                  <Download size={14} strokeWidth={2.25} />
+                  {saving ? '생성 중…' : '다시 저장'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleShare}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-r from-violet-500 via-fuchsia-500 to-pink-500 py-3 text-[12px] font-black text-white shadow-md shadow-fuchsia-400/35 ring-1 ring-white/40 transition hover:scale-[1.02] active:scale-[0.98]"
+                >
+                  <Share2 size={14} strokeWidth={2.25} />
+                  공유하기
+                </button>
+              </div>
+
+              <div className="pb-1">
+                <button
+                  type="button"
+                  onClick={() => setShowDeletePopup(true)}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-200/90 bg-rose-50/80 py-2.5 text-[12px] font-bold text-rose-600/90 transition hover:bg-rose-100/90"
+                >
+                  <Trash2 size={13} strokeWidth={2} />
+                  이 카드 삭제
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -271,40 +273,35 @@ function CardDetailModal({ card, onClose, onDelete }) {
       {/* 삭제 확인 팝업 */}
       {showDeletePopup && (
         <div
-          style={{
-            position:'fixed', inset:0, zIndex:80,
-            display:'flex', alignItems:'center', justifyContent:'center',
-            background:'rgba(0,0,0,0.7)', backdropFilter:'blur(4px)', padding:16,
-          }}
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-fuchsia-950/50 p-4 backdrop-blur-sm"
           onClick={(e) => e.target === e.currentTarget && setShowDeletePopup(false)}
         >
-          <div style={{
-            width:'100%', maxWidth:320, background:'#1a1a2e', borderRadius:20, padding:24,
-            boxShadow:'0 8px 32px rgba(0,0,0,0.5)',
-          }}>
-            <p style={{ color:'#fff', fontWeight:900, fontSize:16, margin:'0 0 8px', textAlign:'center' }}>
-              이 카드를 삭제할까요?
-            </p>
-            <p style={{ color:'rgba(255,255,255,0.5)', fontSize:13, margin:'0 0 20px', textAlign:'center' }}>
+          <div
+            className={cn(
+              'w-full max-w-[320px] rounded-2xl border-2 border-pink-200/90 bg-gradient-to-br from-rose-50 to-fuchsia-50 p-6',
+              'shadow-[0_24px_48px_-12px_rgba(236,72,153,0.35)]',
+            )}
+          >
+            <p className="mb-2 text-center text-base font-black text-fuchsia-950">이 카드를 삭제할까요?</p>
+            <p className="mb-5 text-center text-[13px] font-medium leading-relaxed text-fuchsia-900/55">
               삭제 후에는 복구할 수 없어요.
             </p>
-            <div style={{ display:'flex', gap:10 }}>
+            <div className="flex gap-2.5">
               <button
+                type="button"
                 onClick={() => setShowDeletePopup(false)}
-                style={{
-                  flex:1, padding:'12px', borderRadius:12,
-                  background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.1)',
-                  color:'rgba(255,255,255,0.8)', fontWeight:700, fontSize:13, cursor:'pointer',
-                }}
+                className="flex-1 rounded-xl border border-pink-200 bg-white py-3 text-[13px] font-bold text-fuchsia-900/70"
               >
                 취소
               </button>
               <button
-                onClick={() => { onDelete(card.id); onClose() }}
-                style={{
-                  flex:1, padding:'12px', borderRadius:12, border:'none',
-                  background:'#ef4444', color:'#fff', fontWeight:900, fontSize:13, cursor:'pointer',
+                type="button"
+                onClick={() => {
+                  onDelete(card.id)
+                  showToast('랭킹 카드를 삭제했어요', 'success')
+                  onClose()
                 }}
+                className="flex-1 rounded-xl bg-gradient-to-r from-rose-500 to-red-500 py-3 text-[13px] font-black text-white shadow-md shadow-rose-400/30"
               >
                 삭제
               </button>
@@ -324,6 +321,9 @@ export function RankingGalleryPage() {
   const [cards,    setCards]    = useState([])
   const [sortBy,   setSortBy]   = useState('date')   // 'date' | 'tier'
   const [selected, setSelected] = useState(null)      // 상세 모달
+  const [galleryPage, setGalleryPage] = useState(0)
+
+  const GALLERY_PAGE_SIZE = 10
 
   const loadCards = useCallback(() => {
     if (!user?.id) return
@@ -348,6 +348,9 @@ export function RankingGalleryPage() {
     return new Date(b.savedAt) - new Date(a.savedAt)
   })
 
+  const totalGalleryPages = Math.ceil(sorted.length / GALLERY_PAGE_SIZE)
+  const pagedCards = sorted.slice(galleryPage * GALLERY_PAGE_SIZE, (galleryPage + 1) * GALLERY_PAGE_SIZE)
+
   const best = getBestCard(cards)
   const bestTier = best ? getTierInfo(best.rank) : null
 
@@ -361,7 +364,8 @@ export function RankingGalleryPage() {
   }
 
   return (
-    <div style={{ maxWidth: 520, margin: '0 auto', padding: '0 0 80px' }}>
+    <div className={cn(PAGE_BG)}>
+      <div className="mx-auto max-w-[520px] px-0 pb-20 pt-0">
       <style>{`
         @keyframes card-in {
           from { opacity:0; transform:translateY(16px); }
@@ -370,19 +374,18 @@ export function RankingGalleryPage() {
       `}</style>
 
       {/* 헤더 */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '16px 16px 12px',
-      }}>
-        <button onClick={() => navigate(-1)} style={{
-          display:'flex', alignItems:'center', gap:6,
-          background:'none', border:'none', cursor:'pointer',
-          color:'#22282E', fontWeight:700, fontSize:14, padding:'6px 8px', borderRadius:10,
-        }}>
-          <ArrowLeft size={18} />
+      <div className="flex items-center justify-between px-4 pb-3 pt-4">
+        <button
+          type="button"
+          onClick={() => navigate(-1)}
+          className="flex items-center gap-1.5 rounded-2xl border border-pink-100/80 bg-white/90 px-2.5 py-2 text-sm font-black text-fuchsia-950 shadow-sm shadow-pink-100/40 transition hover:bg-white hover:shadow-md"
+        >
+          <ArrowLeft size={18} strokeWidth={2.25} />
         </button>
-        <h1 style={{ fontWeight:900, fontSize:17, color:'#22282E', margin:0 }}>나의 랭킹 히스토리</h1>
-        <div style={{ width:40 }} />
+        <h1 className="bg-gradient-to-r from-fuchsia-700 via-violet-600 to-cyan-600 bg-clip-text text-center text-[17px] font-black tracking-tight text-transparent">
+          나의 랭킹 히스토리
+        </h1>
+        <div className="w-10" aria-hidden />
       </div>
 
       {/* ── 나의 최고 기록 ── */}
@@ -405,7 +408,7 @@ export function RankingGalleryPage() {
                   boxShadow:'0 0 0 2px rgba(255,255,255,0.3)',
                 }}>
                   {best.thumbnail
-                    ? <img src={best.thumbnail} alt="" style={{ width:'100%',height:'100%',objectFit:'cover' }} />
+                    ? <img src={safeMediaUrl(best.thumbnail)} alt="" style={{ width:'100%',height:'100%',objectFit:'cover' }} />
                     : <div style={{ width:'100%',height:'100%',background:'rgba(0,0,0,0.3)',
                         display:'flex',alignItems:'center',justifyContent:'center' }}>
                         <span style={{ fontSize:18 }}>{bestTier.emoji}</span>
@@ -445,7 +448,7 @@ export function RankingGalleryPage() {
           {cards.length > 1 && (
             <div style={{ display:'flex', gap:6 }}>
               {[{ id:'date', label:'최신순' }, { id:'tier', label:'티어순' }].map(s => (
-                <button key={s.id} onClick={() => setSortBy(s.id)} style={{
+                <button key={s.id} onClick={() => { setSortBy(s.id); setGalleryPage(0) }} style={{
                   padding:'5px 12px', borderRadius:20,
                   background: sortBy === s.id ? '#22282E' : '#f3f4f6',
                   color: sortBy === s.id ? '#fff' : '#6b7280',
@@ -483,15 +486,49 @@ export function RankingGalleryPage() {
         )}
 
         {/* 2컬럼 그리드 */}
-        {sorted.length > 0 && (
+        {pagedCards.length > 0 && (
           <div style={{
             display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 12,
           }}>
-            {sorted.map((card, i) => (
+            {pagedCards.map((card, i) => (
               <div key={card.id} style={{ animation: `card-in 0.3s ${i * 0.05}s ease both` }}>
                 <CardThumbnail card={card} onClick={() => setSelected(card)} />
               </div>
             ))}
+          </div>
+        )}
+
+        {/* 페이지네이션 (카드 10개 초과 시) */}
+        {totalGalleryPages > 1 && (
+          <div className="flex items-center justify-center gap-1.5 mt-5 flex-wrap">
+            <button
+              onClick={() => { setGalleryPage(p => p - 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+              disabled={galleryPage === 0}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold border border-fuchsia-200 bg-white text-fuchsia-700 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-fuchsia-50 transition-colors"
+            >
+              ← 이전
+            </button>
+            {Array.from({ length: totalGalleryPages }, (_, i) => i).map((p) => (
+              <button
+                key={p}
+                onClick={() => { setGalleryPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+                className={cn(
+                  'w-8 h-8 rounded-xl text-xs font-black border transition-colors',
+                  p === galleryPage
+                    ? 'bg-gradient-to-r from-fuchsia-200 via-violet-200 to-pink-200 border-fuchsia-300 text-fuchsia-900 shadow-sm'
+                    : 'border-fuchsia-100 bg-white text-gray-600 hover:bg-fuchsia-50'
+                )}
+              >
+                {p + 1}
+              </button>
+            ))}
+            <button
+              onClick={() => { setGalleryPage(p => p + 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+              disabled={galleryPage >= totalGalleryPages - 1}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold border border-fuchsia-200 bg-white text-fuchsia-700 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-fuchsia-50 transition-colors"
+            >
+              다음 →
+            </button>
           </div>
         )}
 
@@ -508,6 +545,7 @@ export function RankingGalleryPage() {
             </p>
             <p style={{ color:'#6b7280', fontSize:11, margin:0, lineHeight:1.6 }}>
               카드를 클릭해 다시 공유하거나 고화질로 저장할 수 있어요.
+              <br />
               인스타그램 스토리에 공유하면 친구들의 투표를 유도할 수 있어요!
             </p>
           </div>
@@ -522,6 +560,7 @@ export function RankingGalleryPage() {
           onDelete={(id) => { handleDelete(id); setSelected(null) }}
         />
       )}
+      </div>
     </div>
   )
 }

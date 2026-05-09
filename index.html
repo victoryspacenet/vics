@@ -2,13 +2,26 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
+    <!-- 폰트는 HTML에서 로드해 CSS @import 블로킹으로 tailwind·레이아웃이 늦게 적용되는 것을 방지 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400..800;1,400..800&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"
+    />
     <link rel="icon" type="image/png" href="/logo.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="VICS - 사진·영상·텍스트로 대결하고 투표하는 경쟁 플랫폼" />
-    <meta property="og:title" content="VICS - 대결 투표 플랫폼" />
-    <meta property="og:description" content="좌/우 콘텐츠 대결! 클릭 한 번으로 투표하세요" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="VICS - 사진·영상·텍스트로 경쟁하고 투표하는 경쟁 플랫폼" />
+    <meta property="og:title" content="VICS - 경쟁 투표 플랫폼" />
+    <meta property="og:description" content="좌/우 콘텐츠 경쟁! 클릭 한 번으로 투표하세요" />
+    <meta property="og:image" content="/logo.png" />
     <meta property="og:type" content="website" />
-    <title>VICS - 대결 투표 플랫폼</title>
+    <meta name="twitter:card" content="summary_large_image" />
+    <title>VICS - 경쟁 투표 플랫폼</title>
   </head>
   <body>
     <div id="root"></div>

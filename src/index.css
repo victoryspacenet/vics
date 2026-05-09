@@ -1,8 +1,37 @@
-@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
+/**
+ * VictorySpace (빅스) 글로벌 디자인 컨셉
+ * - 밝고 역동적인 색: 에너지 라인(라임·에메랄드·코럴·스카이)을 포인트로 사용
+ * - 세련된 산세리프 + 높은 x-height: 라틴 Plus Jakarta Sans, 한글 Pretendard Variable (폰트는 index.html에서 로드)
+ * - 여백의 미: 본문 line-height·섹션 간격 토큰으로 리듬 유지
+ */
 @import "tailwindcss";
 
 @theme {
-  --font-sans: 'Pretendard Variable', 'Pretendard', 'Noto Sans KR', sans-serif;
+  /* 라틴: 높은 x-height · 한글: Pretendard로 자연스럽게 폴백 */
+  --font-sans:
+    'Plus Jakarta Sans',
+    'Pretendard Variable',
+    'Pretendard',
+    'Noto Sans KR',
+    system-ui,
+    sans-serif;
+
+  /* 역동·밝은 포인트 팔레트 (버튼·그라데이션·배지에 공통 사용) */
+  --color-energy-lime: #a3e635;
+  --color-energy-emerald: #34d399;
+  --color-energy-teal: #2dd4bf;
+  --color-energy-coral: #fb7185;
+  --color-energy-sky: #38bdf8;
+  --color-energy-amber: #fbbf24;
+  --color-surface-bright: #fafefb;
+  --color-surface-vibrant: #f0fdf4;
+
+  /* 네온 포인트 (매치업 투표·승률 바·핵심 CTA — Z/MZ 톤) */
+  --color-neon-fuchsia: #e11d8c;
+  --color-neon-magenta: #d946ef;
+  --color-neon-electric: #0ea5e9;
+  --color-neon-blue: #2563eb;
+  --color-neon-lime: #bef264;
 
   --color-brand: #22282E;
   --color-brand-50: #f5f6f7;
@@ -18,6 +47,11 @@
 
   --shadow-card: 0 1px 4px 0 rgba(0, 0, 0, 0.06);
   --shadow-card-hover: 0 4px 16px 0 rgba(0, 0, 0, 0.10);
+
+  /* 섹션·블록 여백 (여백의 미) */
+  --spacing-section: 3.5rem;
+  --spacing-section-lg: 5rem;
+  --spacing-block: 1.25rem;
 }
 
 @layer base {
@@ -29,12 +63,28 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
   body {
-    background-color: white;
     color: #22282E;
     min-height: 100vh;
+    line-height: 1.65;
+    letter-spacing: -0.01em;
+    background: linear-gradient(
+      165deg,
+      var(--color-surface-bright) 0%,
+      #f8fafc 42%,
+      #f3f6f4 100%
+    );
+    background-attachment: fixed;
+  }
+
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.02em;
+    line-height: 1.25;
   }
 
   ::-webkit-scrollbar {
@@ -128,4 +178,1037 @@
 
 @utility animate-grow-bar {
   animation: grow-bar 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* ── 투표 결과 막대: 왼쪽 기준 스르륵 채움 (scaleX) ── */
+@keyframes vote-bar-rise {
+  from {
+    transform: scaleX(0);
+    opacity: 0.75;
+  }
+  to {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+}
+
+@utility animate-vote-bar-rise {
+  transform-origin: left center;
+  will-change: transform, opacity;
+  animation: vote-bar-rise 0.88s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@utility animate-vote-bar-rise-delayed {
+  transform-origin: left center;
+  will-change: transform, opacity;
+  animation: vote-bar-rise 0.88s cubic-bezier(0.22, 1, 0.36, 1) 0.14s both;
+}
+
+/* ── 콘텐츠 등장: 은은한 페이드 + 살짝 상승 ── */
+@keyframes fade-in-soft {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility animate-fade-in-soft {
+  animation: fade-in-soft 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* 스태거용: 인라인 style로 --stagger-delay(ms) 지정 */
+@utility animate-fade-in-stagger {
+  animation: fade-in-soft 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--stagger-delay, 0ms);
+}
+
+/* 매치업 피드 카드: 부드러운 페이드인 + 살짝 상승 */
+@keyframes fade-in-feed {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility animate-fade-in-feed {
+  animation: fade-in-feed 0.65s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@utility animate-fade-in-feed-stagger {
+  animation: fade-in-feed 0.62s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--stagger-delay, 0ms);
+}
+
+/* ── VS 배지: 청·적 대비 + 흐르는 그라데이션 ── */
+@keyframes vs-gradient-flow {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.vs-badge-surface {
+  background: linear-gradient(
+    90deg,
+    #0284c7 0%,
+    #0ea5e9 12%,
+    #38bdf8 26%,
+    #6366f1 50%,
+    #fb7185 68%,
+    #ef4444 84%,
+    #dc2626 100%
+  );
+  background-size: 240% 100%;
+  background-position: 0% 50%;
+}
+
+.vs-badge-surface--motion {
+  animation: vs-gradient-flow 4.8s ease-in-out infinite;
+}
+
+/* ── 매치업 썸네일: 움직이는 테두리 + 빛 스윕 ── */
+@keyframes matchup-frame-drift {
+  0%,
+  100% {
+    background-position: 0% 40%;
+  }
+  50% {
+    background-position: 100% 60%;
+  }
+}
+
+@keyframes matchup-shine-sweep {
+  0%,
+  100% {
+    background-position: 140% 0;
+    opacity: 0.35;
+  }
+  50% {
+    background-position: -40% 0;
+    opacity: 0.55;
+  }
+}
+
+.matchup-thumb-frame {
+  background-size: 240% 240%;
+  animation: matchup-frame-drift 12s ease-in-out infinite;
+}
+
+.matchup-thumb-frame--left {
+  background-image: linear-gradient(
+    135deg,
+    #f472b6,
+    #c084fc,
+    #22d3ee,
+    #34d399,
+    #f472b6
+  );
+}
+
+.matchup-thumb-frame--right {
+  background-image: linear-gradient(
+    135deg,
+    #38bdf8,
+    #818cf8,
+    #fb7185,
+    #a78bfa,
+    #38bdf8
+  );
+}
+
+.matchup-thumb-shine {
+  background: linear-gradient(
+    115deg,
+    transparent 0%,
+    transparent 40%,
+    rgba(255, 255, 255, 0.42) 50%,
+    transparent 60%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: matchup-shine-sweep 4.2s ease-in-out infinite;
+  mix-blend-mode: overlay;
+}
+
+/* ── 메인 스포트라이트: LIVE 배지 + 무대 조명 ── */
+@keyframes spotlight-live-blink {
+  0%,
+  100% {
+    opacity: 1;
+    filter: brightness(1.05);
+  }
+  50% {
+    opacity: 0.72;
+    filter: brightness(0.92);
+  }
+}
+
+.spotlight-live-badge {
+  animation: spotlight-live-blink 1.15s ease-in-out infinite;
+}
+
+@keyframes spotlight-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.35;
+  }
+  50% {
+    transform: translate3d(-6%, 4%, 0) scale(1.08);
+    opacity: 0.5;
+  }
+}
+
+.spotlight-particle-layer {
+  animation: spotlight-drift 14s ease-in-out infinite;
+}
+
+/* ── 피드 배너 강조(포인트 부스트): 일반 카드와 확실히 구분되는 네온 ── */
+@keyframes vics-feed-banner-neon-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(192, 38, 211, 0.5),
+      0 0 22px rgba(217, 70, 239, 0.48),
+      0 0 52px rgba(139, 92, 246, 0.28),
+      0 0 88px rgba(34, 211, 238, 0.14),
+      inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(236, 72, 153, 0.75),
+      0 0 36px rgba(217, 70, 239, 0.62),
+      0 0 78px rgba(167, 139, 250, 0.38),
+      0 0 120px rgba(34, 211, 238, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 1);
+  }
+}
+
+.vics-feed-banner-highlight {
+  position: relative;
+  border-color: rgba(192, 38, 211, 0.58) !important;
+  border-width: 2px !important;
+  background: linear-gradient(
+    148deg,
+    rgba(253, 242, 248, 0.98) 0%,
+    rgba(255, 255, 255, 0.99) 40%,
+    rgba(236, 254, 255, 0.9) 72%,
+    rgba(250, 245, 255, 0.95) 100%
+  ) !important;
+  animation: vics-feed-banner-neon-pulse 2.6s ease-in-out infinite;
+}
+
+.vics-feed-banner-highlight::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 4px;
+  border-top-left-radius: 1rem;
+  border-top-right-radius: 1rem;
+  pointer-events: none;
+  z-index: 4;
+  background: linear-gradient(90deg, #d946ef, #22d3ee, #8b5cf6, #ec4899);
+  background-size: 200% 100%;
+  animation: vics-feed-banner-top-shimmer 4s linear infinite;
+  box-shadow: 0 3px 14px rgba(217, 70, 239, 0.45);
+}
+
+@keyframes vics-feed-banner-top-shimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+/* 매치업 목록 피드 카드(lg:rounded-3xl) 상단 네온 띠 모서리 정렬 */
+@media (min-width: 1024px) {
+  .vics-feed-banner-highlight--feed-lg::after {
+    border-top-left-radius: 1.5rem;
+    border-top-right-radius: 1.5rem;
+  }
+}
+
+/* ── 매치업 캐러셀: 스냅·패딩 정렬·가로 오버스크롤 끊김 방지 ── */
+.matchup-carousel-track {
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  scroll-padding-inline: 1rem;
+  overscroll-behavior-x: contain;
+}
+
+/* 스포트라이트 특별 투표 — Shockwave & flash (SpotlightVoteEffects) */
+@keyframes spotlight-vote-dim-kf {
+  0% {
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  32% {
+    opacity: 0.62;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes spotlight-vote-flash-kf {
+  0% {
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes spotlight-vote-shock-kf {
+  0% {
+    transform: scale(0.08);
+    opacity: 1;
+    border-color: rgb(52 211 153 / 0.95);
+    box-shadow:
+      0 0 0 1px rgb(45 212 191 / 0.85),
+      0 0 52px rgb(52 211 153 / 0.65);
+  }
+  100% {
+    transform: scale(22);
+    opacity: 0;
+    border-color: rgb(45 212 191 / 0);
+    box-shadow:
+      0 0 0 0 transparent,
+      0 0 0 0 transparent;
+  }
+}
+
+.spotlight-vote-dim {
+  opacity: 0;
+  animation: spotlight-vote-dim-kf 3s ease-in-out forwards;
+}
+
+.spotlight-vote-flash {
+  animation: spotlight-vote-flash-kf 280ms ease-out forwards;
+}
+
+.spotlight-vote-shock {
+  transform: scale(0.08);
+  animation: spotlight-vote-shock-kf 2.85s cubic-bezier(0.08, 0.82, 0.18, 1) forwards;
+}
+
+@keyframes spotlight-points-pulse-kf {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(251 191 36 / 0);
+    transform: scale(1);
+  }
+  35% {
+    box-shadow:
+      0 0 0 3px rgb(251 191 36 / 0.55),
+      0 0 22px rgb(245 158 11 / 0.45);
+    transform: scale(1.06);
+  }
+  55% {
+    box-shadow:
+      0 0 0 2px rgb(251 191 36 / 0.35),
+      0 0 14px rgb(245 158 11 / 0.3);
+    transform: scale(1.03);
+  }
+}
+
+.vics-header-points-pulse {
+  animation: spotlight-points-pulse-kf 1.8s ease-in-out 2;
+}
+
+/* 골드·다이아 팬덤 등급 댓글 네온 오라 (매치업 상세) */
+@keyframes vics-fandom-aura-pulse-kf {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgb(251 191 36 / 0.35),
+      0 0 18px rgb(245 158 11 / 0.22);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px rgb(253 224 71 / 0.45),
+      0 0 28px rgb(250 204 21 / 0.38),
+      0 0 48px rgb(217 70 239 / 0.12);
+  }
+}
+
+.vics-fandom-comment-aura {
+  animation: vics-fandom-aura-pulse-kf 2.4s ease-in-out infinite;
+}
+
+/* ── V-Card 스토리 전용 네온 테두리 (활동 기반 4테마) ── */
+@keyframes vics-story-neon-gold-pulse-kf {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 0 1px rgb(251 191 36 / 0.55),
+      inset 0 0 28px rgb(56 189 248 / 0.12),
+      0 0 0 2px rgb(251 191 36 / 0.55),
+      0 0 24px rgb(251 191 36 / 0.35),
+      0 0 48px rgb(14 165 233 / 0.22);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 2px rgb(253 224 71 / 0.65),
+      inset 0 0 36px rgb(56 189 248 / 0.2),
+      0 0 0 2px rgb(253 224 71 / 0.75),
+      0 0 36px rgb(251 191 36 / 0.5),
+      0 0 64px rgb(14 165 233 / 0.32);
+  }
+}
+
+@keyframes vics-story-neon-arctic-pulse-kf {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 0 1px rgb(34 211 238 / 0.45),
+      inset 0 0 22px rgb(168 85 247 / 0.15),
+      0 0 0 2px rgb(34 211 238 / 0.45),
+      0 0 28px rgb(168 85 247 / 0.35),
+      0 0 52px rgb(56 189 248 / 0.2);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 2px rgb(192 132 252 / 0.55),
+      inset 0 0 30px rgb(34 211 238 / 0.18),
+      0 0 0 2px rgb(125 211 252 / 0.65),
+      0 0 40px rgb(168 85 247 / 0.42),
+      0 0 72px rgb(34 211 238 / 0.25);
+  }
+}
+
+@keyframes vics-story-neon-magma-pulse-kf {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 0 1px rgb(248 113 113 / 0.55),
+      inset 0 0 26px rgb(251 146 60 / 0.18),
+      0 0 0 2px rgb(239 68 68 / 0.55),
+      0 0 32px rgb(251 146 60 / 0.45),
+      0 0 56px rgb(220 38 38 / 0.22);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 2px rgb(251 146 60 / 0.7),
+      inset 0 0 34px rgb(248 113 113 / 0.22),
+      0 0 0 2px rgb(251 146 60 / 0.75),
+      0 0 44px rgb(239 68 68 / 0.55),
+      0 0 72px rgb(251 113 133 / 0.28);
+  }
+}
+
+@keyframes vics-story-neon-rainbow-pulse-kf {
+  0% {
+    box-shadow:
+      inset 0 0 0 1px rgb(251 191 36 / 0.45),
+      0 0 0 2px rgb(244 114 182 / 0.55),
+      0 0 32px rgb(34 211 238 / 0.3),
+      0 0 48px rgb(192 132 252 / 0.28);
+  }
+  33% {
+    box-shadow:
+      inset 0 0 0 1px rgb(52 211 153 / 0.45),
+      0 0 0 2px rgb(250 204 21 / 0.55),
+      0 0 36px rgb(244 114 182 / 0.32),
+      0 0 56px rgb(56 189 248 / 0.28);
+  }
+  66% {
+    box-shadow:
+      inset 0 0 0 1px rgb(192 132 252 / 0.5),
+      0 0 0 2px rgb(34 211 238 / 0.55),
+      0 0 36px rgb(250 204 21 / 0.3),
+      0 0 56px rgb(52 211 153 / 0.25);
+  }
+  100% {
+    box-shadow:
+      inset 0 0 0 1px rgb(251 191 36 / 0.45),
+      0 0 0 2px rgb(244 114 182 / 0.55),
+      0 0 32px rgb(34 211 238 / 0.3),
+      0 0 48px rgb(192 132 252 / 0.28);
+  }
+}
+
+@keyframes vics-story-neon-gold-dust-kf {
+  0%,
+  100% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.6);
+  }
+  15% {
+    opacity: 0.95;
+  }
+  55% {
+    opacity: 0.65;
+    transform: translate(3px, -6px) scale(1);
+  }
+}
+
+@keyframes vics-story-neon-flame-kf {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+    filter: brightness(1);
+  }
+  50% {
+    transform: translateY(-2px) scale(1.12);
+    filter: brightness(1.25);
+  }
+}
+
+@keyframes vics-story-neon-mvp-pill-kf {
+  0%,
+  100% {
+    transform: translate(-50%, 0) scale(1);
+    filter: brightness(1.05);
+  }
+  50% {
+    transform: translate(-50%, 0) scale(1.04);
+    filter: brightness(1.15);
+  }
+}
+
+@keyframes vics-story-neon-rainbow-shine-kf {
+  0% {
+    background-position: 0% 50%;
+    opacity: 0.45;
+  }
+  50% {
+    background-position: 100% 50%;
+    opacity: 0.72;
+  }
+  100% {
+    background-position: 0% 50%;
+    opacity: 0.45;
+  }
+}
+
+@keyframes vics-story-neon-arctic-spark-kf {
+  0% {
+    opacity: 0;
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+  18% {
+    opacity: 1;
+    box-shadow:
+      inset 0 0 14px rgb(186 230 253 / 0.95),
+      0 0 0 2px rgb(240 249 255 / 0.9),
+      0 0 28px rgb(34 211 238 / 0.85);
+  }
+  100% {
+    opacity: 0;
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+}
+
+.vics-story-neon-host--gold-aura {
+  animation: vics-story-neon-gold-pulse-kf 3.2s ease-in-out infinite;
+}
+
+.vics-story-neon-host--arctic-pulse {
+  animation: vics-story-neon-arctic-pulse-kf 3.6s ease-in-out infinite;
+}
+
+.vics-story-neon-host--magma-flow {
+  animation: vics-story-neon-magma-pulse-kf 2.8s ease-in-out infinite;
+}
+
+.vics-story-neon-host--luminous-rainbow {
+  animation: vics-story-neon-rainbow-pulse-kf 4.5s ease-in-out infinite;
+}
+
+.vics-story-neon-host--boost {
+  animation-duration: 1.05s !important;
+  filter: saturate(1.2) contrast(1.05);
+}
+
+.vics-story-neon-gold-dust {
+  animation: vics-story-neon-gold-dust-kf 2.8s ease-in-out infinite;
+}
+
+.vics-story-neon-flame {
+  animation: vics-story-neon-flame-kf 0.9s ease-in-out infinite;
+}
+
+.vics-story-neon-flame-delayed {
+  animation: vics-story-neon-flame-kf 1.1s ease-in-out infinite;
+  animation-delay: 0.15s;
+}
+
+.vics-story-neon-mvp-pill {
+  animation: vics-story-neon-mvp-pill-kf 2.2s ease-in-out infinite;
+}
+
+.vics-story-neon-rainbow-shine {
+  background: linear-gradient(
+    125deg,
+    rgb(251 191 36 / 0.35),
+    rgb(244 114 182 / 0.35),
+    rgb(56 189 248 / 0.35),
+    rgb(167 139 250 / 0.35),
+    rgb(52 211 153 / 0.32),
+    rgb(251 191 36 / 0.35)
+  );
+  background-size: 240% 240%;
+  animation: vics-story-neon-rainbow-shine-kf 3.8s ease-in-out infinite;
+}
+
+.vics-story-neon-arctic-spark {
+  animation: vics-story-neon-arctic-spark-kf 0.42s ease-out forwards;
+}
+
+/* ── 다이아몬드 팬덤 전설 강림 모달 + 피드 ── */
+@keyframes vics-legend-shard-rise-kf {
+  0% {
+    opacity: 0;
+    transform: translateY(28px) rotate(0deg);
+  }
+  20% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0.35;
+    transform: translateY(-120px) rotate(180deg);
+  }
+}
+
+.vics-legend-shard-rise {
+  animation: vics-legend-shard-rise-kf 2.4s ease-out forwards;
+}
+
+@keyframes vics-legend-laser-burst-kf {
+  0% {
+    transform: translate(-50%, -50%) rotate(0deg);
+    opacity: 0.75;
+  }
+  100% {
+    transform: translate(-50%, -50%) rotate(360deg);
+    opacity: 1;
+  }
+}
+
+.vics-legend-laser-burst {
+  animation: vics-legend-laser-burst-kf 2.8s linear infinite;
+}
+
+@keyframes vics-legend-rough-stone-kf {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) rotate(0deg) scale(1);
+  }
+  20% {
+    transform: translate(-50%, -50%) rotate(-2deg) scale(1.03);
+  }
+  40% {
+    transform: translate(-50%, -50%) rotate(2deg) scale(1.02);
+  }
+  60% {
+    transform: translate(-50%, -50%) rotate(-1.5deg) scale(1.04);
+  }
+}
+
+.vics-legend-rough-stone {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  animation: vics-legend-rough-stone-kf 0.55s ease-in-out infinite;
+}
+
+@keyframes vics-legend-badge-spin-kf {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.2) rotate(-120deg);
+  }
+  55% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.08) rotate(12deg);
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1) rotate(0deg);
+  }
+}
+
+.vics-legend-badge-spin {
+  animation: vics-legend-badge-spin-kf 1.1s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes vics-legend-glass-particle-kf {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.6);
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--gx, 12px), var(--gy, -40px)) scale(1);
+  }
+}
+
+.vics-legend-glass-particle {
+  --gx: 18px;
+  --gy: -32px;
+  animation: vics-legend-glass-particle-kf 0.85s ease-out forwards;
+}
+
+@keyframes vics-legend-aurora-bg-kf {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 40%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.vics-legend-aurora-bg {
+  background: linear-gradient(
+    125deg,
+    rgb(15 23 42 / 0.9),
+    rgb(49 46 129 / 0.55),
+    rgb(22 78 99 / 0.5),
+    rgb(88 28 135 / 0.45),
+    rgb(15 23 42 / 0.9)
+  );
+  background-size: 220% 220%;
+  animation: vics-legend-aurora-bg-kf 8s ease-in-out infinite;
+}
+
+.vics-legend-metal-type {
+  background: linear-gradient(180deg, #e2e8f0 0%, #94a3b8 35%, #f8fafc 55%, #64748b 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  text-shadow: 0 0 24px rgb(34 211 238 / 0.35);
+}
+
+@keyframes vics-legend-nickname-neon-kf {
+  0%,
+  100% {
+    text-shadow:
+      0 0 8px rgb(34 211 238 / 0.55),
+      0 0 20px rgb(192 132 252 / 0.35);
+  }
+  50% {
+    text-shadow:
+      0 0 14px rgb(34 211 238 / 0.85),
+      0 0 32px rgb(244 114 182 / 0.45);
+  }
+}
+
+.vics-legend-nickname-neon {
+  animation: vics-legend-nickname-neon-kf 2.4s ease-in-out infinite;
+}
+
+/* 다이아 팬덤 — 매치업 리스트·카드 작성자 닉네임 (라이트 배경용) */
+@keyframes vics-fandom-diamond-nickname-list-kf {
+  0%,
+  100% {
+    text-shadow:
+      0 0 4px rgb(34 211 238 / 0.55),
+      0 0 14px rgb(192 132 252 / 0.3);
+  }
+  50% {
+    text-shadow:
+      0 0 10px rgb(34 211 238 / 0.85),
+      0 0 24px rgb(244 114 182 / 0.42);
+  }
+}
+
+.vics-fandom-diamond-nickname-aura {
+  animation: vics-fandom-diamond-nickname-list-kf 2.6s ease-in-out infinite;
+}
+
+/* 실버 팬덤 — 프로필 아바타 외곽 실버 네온 테두리 */
+@keyframes vics-fandom-silver-avatar-glow-kf {
+  0%,
+  100% {
+    box-shadow:
+      0 0 16px rgba(148, 163, 184, 0.55),
+      0 0 32px rgba(203, 213, 225, 0.32),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+  }
+  50% {
+    box-shadow:
+      0 0 24px rgba(148, 163, 184, 0.82),
+      0 0 46px rgba(226, 232, 240, 0.42),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+  }
+}
+
+.vics-fandom-silver-avatar-wrap {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 9999px;
+  padding: 3px;
+  background: linear-gradient(142deg, #cbd5e1 0%, #f8fafc 40%, #e2e8f0 78%, #94a3b8 100%);
+  animation: vics-fandom-silver-avatar-glow-kf 3.2s ease-in-out infinite;
+}
+
+/* 실버 팬덤 — 마이페이지 프로필 헤더 카드 외곽 은빛 하이라이트 */
+.vics-fandom-silver-profile-header {
+  box-shadow:
+    0 0 0 1px rgba(203, 213, 225, 0.65),
+    0 0 26px rgba(148, 163, 184, 0.28),
+    0 0 48px rgba(226, 232, 240, 0.18);
+}
+
+/* 골드 팬덤 — 프로필 아바타 외곽 골드 네온 테두리 */
+@keyframes vics-fandom-gold-avatar-glow-kf {
+  0%,
+  100% {
+    box-shadow:
+      0 0 18px rgba(234, 179, 8, 0.55),
+      0 0 36px rgba(250, 204, 21, 0.28),
+      inset 0 0 0 1px rgba(255, 251, 235, 0.45);
+  }
+  50% {
+    box-shadow:
+      0 0 28px rgba(245, 158, 11, 0.85),
+      0 0 52px rgba(253, 224, 71, 0.38),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+  }
+}
+
+.vics-fandom-gold-avatar-wrap {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 9999px;
+  padding: 3px;
+  background: linear-gradient(
+    142deg,
+    #ca8a04 0%,
+    #fde047 32%,
+    #fef9c3 48%,
+    #eab308 72%,
+    #a16207 100%
+  );
+  animation: vics-fandom-gold-avatar-glow-kf 2.8s ease-in-out infinite;
+}
+
+/* 골드 팬덤 — 마이페이지 프로필 헤더 카드 외곽 골드 하이라이트 */
+.vics-fandom-gold-profile-header {
+  box-shadow:
+    0 0 0 1px rgba(234, 179, 8, 0.55),
+    0 0 28px rgba(245, 158, 11, 0.32),
+    0 0 52px rgba(250, 204, 21, 0.2);
+}
+
+/* 다이아 팬덤 — 앱 셸(본문 뒤 배경) */
+.vics-shell-legend-diamond-root {
+  background:
+    radial-gradient(ellipse 130% 90% at 50% -15%, rgb(34 211 238 / 0.14), transparent 52%),
+    radial-gradient(ellipse 80% 55% at 100% 30%, rgb(168 85 247 / 0.12), transparent 48%),
+    linear-gradient(168deg, rgb(2 6 23) 0%, rgb(15 23 42) 42%, rgb(30 27 75 / 0.92) 70%, rgb(15 23 42) 100%);
+}
+
+/* 레전드 셸 + 하단 내비 (Layout 내부) */
+.vics-bottomnav-legend-diamond > .vics-bottomnav-legend-diamond__bg {
+  border-top-color: rgb(34 211 238 / 0.18);
+  background: linear-gradient(to bottom, rgb(15 23 42 / 0.96), rgb(2 6 23 / 0.98));
+  box-shadow: 0 -12px 40px rgb(0 0 0 / 0.45);
+}
+
+.vics-bottomnav-legend-diamond > .vics-bottomnav-legend-diamond__hairline {
+  background: linear-gradient(
+    to right,
+    rgb(34 211 238 / 0.35),
+    rgb(192 132 252 / 0.35),
+    rgb(34 211 238 / 0.35)
+  );
+}
+
+.vics-bottomnav-legend-diamond > .vics-bottomnav-legend-diamond__safe {
+  background: linear-gradient(to bottom, rgb(15 23 42 / 0.95), rgb(2 6 23));
+}
+
+@keyframes vics-diamond-card-bg-kf {
+  0% {
+    background-position: 0% 0%;
+  }
+  100% {
+    background-position: 100% 100%;
+  }
+}
+
+.vics-diamond-matchup-card-bg {
+  background-image:
+    linear-gradient(
+      135deg,
+      rgb(255 255 255 / 0.07) 0%,
+      transparent 22%,
+      rgb(34 211 238 / 0.06) 40%,
+      transparent 58%,
+      rgb(192 132 252 / 0.07) 78%,
+      transparent 100%
+    ),
+    radial-gradient(ellipse 80% 60% at 50% 0%, rgb(255 255 255 / 0.12), transparent 55%);
+  background-size: 200% 200%;
+  animation: vics-diamond-card-bg-kf 14s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vics-feed-banner-highlight {
+    animation: none !important;
+    box-shadow:
+      0 0 0 1px rgba(192, 38, 211, 0.45),
+      0 0 28px rgba(217, 70, 239, 0.4),
+      0 0 56px rgba(14, 165, 233, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+  }
+
+  .vics-feed-banner-highlight::after {
+    animation: none !important;
+    background-position: 50% 50% !important;
+  }
+
+  .animate-vote-bar-rise,
+  .animate-vote-bar-rise-delayed,
+  .animate-fade-in-soft,
+  .animate-fade-in-stagger,
+  .animate-fade-in-feed,
+  .animate-fade-in-feed-stagger,
+  .animate-fade-in-up {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .vs-badge-surface--motion {
+    animation: none !important;
+    background-position: 50% 50% !important;
+  }
+
+  .matchup-thumb-frame {
+    animation: none !important;
+    background-position: 50% 50% !important;
+  }
+
+  .matchup-thumb-shine {
+    animation: none !important;
+    opacity: 0.22 !important;
+  }
+
+  .spotlight-live-badge {
+    animation: none !important;
+    opacity: 1 !important;
+    filter: none !important;
+  }
+
+  .spotlight-particle-layer {
+    animation: none !important;
+    transform: none !important;
+    opacity: 0.28 !important;
+  }
+
+  .spotlight-vote-dim,
+  .spotlight-vote-flash,
+  .spotlight-vote-shock,
+  .vics-header-points-pulse {
+    animation: none !important;
+  }
+
+  .spotlight-vote-dim {
+    opacity: 0 !important;
+  }
+
+  .spotlight-vote-shock {
+    opacity: 0 !important;
+    transform: scale(0) !important;
+  }
+
+  .vics-fandom-comment-aura {
+    animation: none !important;
+    box-shadow: 0 0 0 1px rgb(251 191 36 / 0.25) !important;
+  }
+
+  .vics-story-neon-host--gold-aura,
+  .vics-story-neon-host--arctic-pulse,
+  .vics-story-neon-host--magma-flow,
+  .vics-story-neon-host--luminous-rainbow,
+  .vics-story-neon-host--boost {
+    animation: none !important;
+    filter: none !important;
+    box-shadow:
+      inset 0 0 0 1px rgb(251 191 36 / 0.35),
+      0 0 0 2px rgb(251 191 36 / 0.35),
+      0 0 20px rgb(14 165 233 / 0.18) !important;
+  }
+
+  .vics-story-neon-gold-dust,
+  .vics-story-neon-flame,
+  .vics-story-neon-flame-delayed,
+  .vics-story-neon-mvp-pill,
+  .vics-story-neon-rainbow-shine,
+  .vics-story-neon-arctic-spark {
+    animation: none !important;
+    opacity: 0.35 !important;
+  }
+
+  .vics-legend-shard-rise,
+  .vics-legend-laser-burst,
+  .vics-legend-rough-stone,
+  .vics-legend-badge-spin,
+  .vics-legend-glass-particle,
+  .vics-legend-aurora-bg,
+  .vics-legend-nickname-neon,
+  .vics-diamond-matchup-card-bg {
+    animation: none !important;
+  }
+
+  .vics-legend-nickname-neon {
+    text-shadow: 0 0 10px rgb(34 211 238 / 0.4) !important;
+  }
+
+  .vics-fandom-diamond-nickname-aura {
+    animation: none !important;
+    text-shadow: 0 0 8px rgb(34 211 238 / 0.45), 0 0 16px rgb(192 132 252 / 0.28) !important;
+  }
+
+  .vics-fandom-silver-avatar-wrap {
+    animation: none !important;
+    box-shadow:
+      0 0 18px rgba(148, 163, 184, 0.55),
+      0 0 34px rgba(226, 232, 240, 0.28),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.35) !important;
+  }
+
+  .vics-fandom-gold-avatar-wrap {
+    animation: none !important;
+    box-shadow:
+      0 0 20px rgba(234, 179, 8, 0.6),
+      0 0 40px rgba(250, 204, 21, 0.3),
+      inset 0 0 0 1px rgba(255, 251, 235, 0.45) !important;
+  }
+
+  .vics-shell-legend-diamond-root {
+    background: rgb(15 23 42);
+  }
+
+  .matchup-carousel-track {
+    scroll-behavior: auto;
+  }
 }

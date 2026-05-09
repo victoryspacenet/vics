@@ -1,46 +1,68 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Upload, X, Image, Video, Type, AlertCircle, CheckCircle, Hash, Zap, Share2, Link2 } from 'lucide-react'
+import { Upload, X, Image, Video, Type, AlertCircle, AlertTriangle, CheckCircle, Hash, Zap, Share2, Link2 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
 import { Drawer } from '../ui/Drawer'
+import { Modal } from '../ui/Modal'
+import { VsBadge } from '../ui/VsBadge'
 import { Avatar } from '../ui/Avatar'
 import { cn, copyToClipboard } from '../../lib/utils'
+import { safeMediaUrl } from '../../lib/sanitize'
+import { compressAndCropImage } from '../../lib/mediaCrop'
+import {
+  saveChallengeDraft,
+  loadChallengeDraft,
+  clearChallengeDraft,
+  hasChallengeDraft,
+} from '../../lib/draftStorage'
+import {
+  MAX_IMAGE_MB,
+  MAX_VIDEO_MB,
+  MAX_IMAGE_BYTES,
+  MAX_VIDEO_BYTES,
+  validateVideo,
+} from '../../lib/mediaSpec'
 
-const MAX_IMAGE_MB = 5
-const MAX_VIDEO_MB = 50
-const MAX_IMAGE_BYTES = MAX_IMAGE_MB * 1024 * 1024
-const MAX_VIDEO_BYTES = MAX_VIDEO_MB * 1024 * 1024
+/** B측 폼 값 ↔ DB 스냅샷 동일 여부 (도전자 수정 dirty 판별) */
+function challengerRightEquals(cur, snap) {
+  if (cur == null && snap == null) return true
+  if (cur == null || snap == null) return false
+  if (cur.type !== snap.type) return false
+  if (cur.type === 'text') {
+    return (cur.text || '').trim() === (snap.text || '').trim()
+  }
+  if (cur.file) return false
+  if (!cur.fromExisting) return false
+  return (
+    (cur.persistUrl || '') === (snap.persistUrl || '') &&
+    String(cur.persistThumb ?? cur.persistUrl ?? '') === String(snap.persistThumb ?? snap.persistUrl ?? '')
+  )
+}
 
-async function compressImage(file) {
-  return new Promise((resolve) => {
-    const img = document.createElement('img')
-    const url = URL.createObjectURL(file)
-    img.onload = () => {
-      URL.revokeObjectURL(url)
-      const MAX = 1200
-      let { width, height } = img
-      if (width > MAX || height > MAX) {
-        if (width > height) { height = Math.round((height * MAX) / width); width = MAX }
-        else { width = Math.round((width * MAX) / height); height = MAX }
-      }
-      const canvas = document.createElement('canvas')
-      canvas.width = width; canvas.height = height
-      canvas.getContext('2d').drawImage(img, 0, 0, width, height)
-      canvas.toBlob(
-        (blob) => resolve(new File([blob], file.name, { type: 'image/jpeg' })),
-        'image/jpeg', 0.85
-      )
+function getChallengerEditRightSnapshot(m) {
+  if (!m?.right_type) return null
+  if (m.right_type === 'text') {
+    return { type: 'text', text: m.right_text || '' }
+  }
+  if (m.right_type === 'image' || m.right_type === 'video') {
+    return {
+      type: m.right_type,
+      preview: m.right_thumbnail_url || m.right_url,
+      fromExisting: true,
+      persistUrl: m.right_url,
+      persistThumb: m.right_thumbnail_url || m.right_url,
     }
-    img.src = url
-  })
+  }
+  return null
 }
 
 export function ChallengeDrawer() {
   const navigate = useNavigate()
-  const { user } = useAuthStore()
-  const { challengeMatchup, closeChallengeDrawer, showToast, openLoginModal } = useUIStore()
+  const { user, profile } = useAuthStore()
+  const { challengeMatchup, challengeMatchupEdit, closeChallengeDrawer, showToast, openLoginModal } =
+    useUIStore()
 
   const [rightContent, setRightContent] = useState(null)
   const [uploading, setUploading] = useState(false)
@@ -48,22 +70,114 @@ export function ChallengeDrawer() {
   const [shareModal, setShareModal] = useState(null) // { matchupId, title }
   const [boxKey, setBoxKey] = useState(0)
   const [linkCopied, setLinkCopied] = useState(false)
+  const [showRestorePrompt, setShowRestorePrompt] = useState(false)
+  const [showEditSubmitWarning, setShowEditSubmitWarning] = useState(false)
+  const saveTimeoutRef = useRef(null)
 
   const isOpen = !!challengeMatchup
   const isValid = !!rightContent
+
+  const hasChallengerEditChanges = useMemo(() => {
+    if (!challengeMatchupEdit || !challengeMatchup) return true
+    const snap = getChallengerEditRightSnapshot(challengeMatchup)
+    return !challengerRightEquals(rightContent, snap)
+  }, [challengeMatchupEdit, challengeMatchup, rightContent])
+
+  const canSubmitChallenge = challengeMatchupEdit ? isValid && hasChallengerEditChanges : isValid
 
   useEffect(() => {
     if (!isOpen) {
       setRightContent(null)
       setUploadStep('')
       setBoxKey((k) => k + 1)
+      setShowRestorePrompt(false)
+      setShowEditSubmitWarning(false)
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
     }
   }, [isOpen])
 
+  // 도전자(B) 수정: 기존 오른쪽 콘텐츠로 폼 채우기
+  useEffect(() => {
+    if (!isOpen || !challengeMatchup || !challengeMatchupEdit) return
+    const m = challengeMatchup
+    if (m.right_type === 'text') {
+      setRightContent({ type: 'text', text: m.right_text || '' })
+    } else if (m.right_type === 'image' || m.right_type === 'video') {
+      const preview = m.right_thumbnail_url || m.right_url
+      setRightContent({
+        type: m.right_type,
+        preview,
+        fromExisting: true,
+        persistUrl: m.right_url,
+        persistThumb: m.right_thumbnail_url || m.right_url,
+      })
+    }
+    setBoxKey((k) => k + 1)
+    setShowRestorePrompt(false)
+  }, [isOpen, challengeMatchup, challengeMatchupEdit])
+
   const handleClose = () => {
     if (uploading) return
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
     closeChallengeDrawer()
   }
+
+  const handleRestoreDraft = useCallback(async () => {
+    if (!challengeMatchup?.id || !user?.id) return
+    const draft = await loadChallengeDraft(challengeMatchup.id, user.id)
+    if (!draft?.rightContent) return
+    setRightContent(draft.rightContent)
+    setBoxKey((k) => k + 1)
+    setShowRestorePrompt(false)
+    showToast(draft.hasRestoredFile ? '임시 저장된 내용을 복원했어요' : '임시 저장된 내용을 복원했어요 (이미지/영상은 다시 선택해주세요)', 'success')
+  }, [challengeMatchup?.id, user?.id, showToast])
+
+  const handleDiscardDraft = useCallback(() => {
+    if (challengeMatchup?.id && user?.id) clearChallengeDraft(challengeMatchup.id, user.id)
+    setShowRestorePrompt(false)
+  }, [challengeMatchup?.id, user?.id])
+
+  // 임시 저장 복원 (드로어 열릴 때)
+  useEffect(() => {
+    if (!isOpen || !challengeMatchup?.id || !user?.id) return
+    if (hasChallengeDraft(challengeMatchup.id, user.id)) setShowRestorePrompt(true)
+  }, [isOpen, challengeMatchup?.id, user?.id])
+
+  // 임시 저장 (디바운스 800ms)
+  useEffect(() => {
+    if (!isOpen || !challengeMatchup?.id || !user?.id || uploading) return
+    if (!rightContent) return
+
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
+    saveTimeoutRef.current = setTimeout(() => {
+      saveChallengeDraft(challengeMatchup.id, { rightContent }, user.id)
+      saveTimeoutRef.current = null
+    }, 800)
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
+    }
+  }, [isOpen, challengeMatchup?.id, user?.id, uploading, rightContent])
+
+  // beforeunload + offline 시 즉시 저장
+  useEffect(() => {
+    if (!isOpen || !user?.id || !challengeMatchup?.id) return
+    const hasContent = !!rightContent
+    const handler = (e) => { if (hasContent && !uploading) e.preventDefault() }
+    const onOffline = () => {
+      if (hasContent && !uploading) {
+        saveChallengeDraft(challengeMatchup.id, { rightContent }, user.id)
+      }
+    }
+    if (hasContent && !uploading) {
+      window.addEventListener('beforeunload', handler)
+      window.addEventListener('offline', onOffline)
+      return () => {
+        window.removeEventListener('beforeunload', handler)
+        window.removeEventListener('offline', onOffline)
+      }
+    }
+    return () => {}
+  }, [isOpen, user?.id, challengeMatchup?.id, rightContent, uploading])
 
   const uploadFile = async (file) => {
     const isImage = file.type.startsWith('image/')
@@ -71,11 +185,15 @@ export function ChallengeDrawer() {
     if (!isImage && !isVideo) throw new Error('이미지 또는 영상 파일만 업로드 가능해요')
     if (isImage && file.size > MAX_IMAGE_BYTES) throw new Error(`이미지는 ${MAX_IMAGE_MB}MB 이하로 올려주세요`)
     if (isVideo && file.size > MAX_VIDEO_BYTES) throw new Error(`영상은 ${MAX_VIDEO_MB}MB 이하로 올려주세요`)
+    if (isVideo) {
+      const v = await validateVideo(file)
+      if (!v.valid) throw new Error(v.error)
+    }
 
     let toUpload = file
     if (isImage) {
-      setUploadStep('이미지 압축 중...')
-      toUpload = await compressImage(file)
+      setUploadStep('이미지 1:1 크롭 중...')
+      toUpload = await compressAndCropImage(file)
     }
     setUploadStep('파일 업로드 중...')
 
@@ -93,31 +211,68 @@ export function ChallengeDrawer() {
     return { url: publicUrl, thumbnail: isImage ? publicUrl : null }
   }
 
+  const handleSubmitClick = () => {
+    if (!canSubmitChallenge || uploading || !challengeMatchup) return
+    if (!user) {
+      openLoginModal()
+      return
+    }
+    if (challengeMatchupEdit) {
+      setShowEditSubmitWarning(true)
+      return
+    }
+    void handleSubmit()
+  }
+
+  const handleConfirmEditSubmit = () => {
+    setShowEditSubmitWarning(false)
+    void handleSubmit()
+  }
+
   const handleSubmit = async () => {
-    if (!isValid || uploading || !challengeMatchup) return
+    if (!canSubmitChallenge || uploading || !challengeMatchup) return
     if (!user) { openLoginModal(); return }
+
+    const isEditRun = challengeMatchupEdit
 
     setUploading(true)
     try {
-      let rightUrl = null, rightThumbnail = null
-      if (rightContent.file) {
+      let rightUrl = null
+      let rightThumbnail = null
+      if (rightContent?.file) {
         const r = await uploadFile(rightContent.file)
-        rightUrl = r.url; rightThumbnail = r.thumbnail
+        rightUrl = r.url
+        rightThumbnail = r.thumbnail
+      } else if (rightContent?.fromExisting && (rightContent.type === 'image' || rightContent.type === 'video')) {
+        rightUrl = rightContent.persistUrl
+        rightThumbnail = rightContent.persistThumb ?? rightContent.persistUrl
       }
 
-      setUploadStep('매치업 완성 중...')
+      if (rightContent?.type !== 'text' && !rightUrl) {
+        throw new Error('B 측(도전자) 이미지·영상을 선택해주세요')
+      }
+
+      setUploadStep(isEditRun ? '수정 저장 중...' : '매치업 완성 중...')
+
+      const basePayload = {
+        right_type: rightContent.type,
+        right_url: rightContent.type === 'text' ? null : rightUrl,
+        right_text: rightContent.type === 'text' ? (rightContent.text || '').trim() || null : null,
+        right_thumbnail_url: rightContent.type === 'text' ? null : rightThumbnail,
+        updated_at: new Date().toISOString(),
+      }
+
+      const insertChallengerFields = isEditRun
+        ? {}
+        : {
+            right_label: profile?.nickname || 'B',
+            right_user_id: user.id,
+            is_complete: true,
+          }
 
       const { error } = await supabase
         .from('matchups')
-        .update({
-          right_type: rightContent.type,
-          right_url: rightUrl,
-          right_text: rightContent.text || null,
-          right_thumbnail_url: rightThumbnail,
-          right_label: 'B',
-          is_complete: true,
-          updated_at: new Date().toISOString(),
-        })
+        .update({ ...basePayload, ...insertChallengerFields })
         .eq('id', challengeMatchup.id)
 
       if (error) {
@@ -125,12 +280,21 @@ export function ChallengeDrawer() {
         throw new Error(error.message)
       }
 
-      showToast('매치업이 성공적으로 완성됐어요! 🎉', 'success')
+      clearChallengeDraft(challengeMatchup.id, user.id)
       const matchupId = challengeMatchup.id
       const matchupTitle = challengeMatchup.title
       closeChallengeDrawer()
 
-      // 공유 유도 모달 → 상세 페이지 이동
+      if (isEditRun) {
+        showToast('도전자(B) 쪽 수정이 저장됐어요. 상세 페이지에서 바로 확인할 수 있어요.', 'success')
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('vics:matchup:updated', { detail: { matchupId } }))
+        }
+        navigate(`/matchup/${matchupId}`)
+        return
+      }
+
+      showToast('매치업이 성공적으로 완성됐어요! 🎉', 'success')
       setShareModal({ matchupId, matchupTitle })
     } catch (err) {
       console.error('[ChallengeDrawer]', err)
@@ -161,13 +325,17 @@ export function ChallengeDrawer() {
 
   return (
     <>
-      <Drawer isOpen={isOpen} onClose={handleClose} title="⚡ 도전장 보내기">
+      <Drawer
+        isOpen={isOpen}
+        onClose={handleClose}
+        title={challengeMatchupEdit ? '✏️ 도전자(B) 쪽 수정' : '⚡ 도전장 보내기'}
+      >
         {matchup && (
           <div className="p-5 space-y-6 pb-8">
 
-            {/* ── SECTION 1: 대결 주제 (읽기 전용) ── */}
+            {/* ── SECTION 1: 경쟁 제목 (읽기 전용) ── */}
             <section className="space-y-2">
-              <SectionLabel emoji="📌" text="대결 주제" hint="User A가 설정함" />
+              <SectionLabel emoji="📌" text="경쟁 제목" hint="User A가 설정함" />
               <div className="px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl">
                 <p className="text-sm font-bold text-[#22282E]">{matchup.title}</p>
                 {matchup.description && (
@@ -179,14 +347,37 @@ export function ChallengeDrawer() {
                 <Avatar src={matchup.profiles?.avatar_url} alt={matchup.profiles?.nickname} size="xs" />
                 <span className="text-xs text-gray-400">
                   <span className="font-semibold text-[#22282E]">{matchup.profiles?.nickname || '사용자'}</span>
-                  님의 대결 주제
+                  님의 경쟁 제목
                 </span>
               </div>
             </section>
 
-            {/* ── SECTION 2: 대결 구도 ── */}
+            {/* 임시 저장 복원 안내 */}
+            {showRestorePrompt && (
+              <div className="flex items-center justify-between gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl">
+                <p className="text-sm font-semibold text-amber-800">임시 저장된 내용이 있어요</p>
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleDiscardDraft}
+                    className="px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 rounded-lg transition-colors"
+                  >
+                    버리기
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRestoreDraft}
+                    className="px-3 py-1.5 text-xs font-bold bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors"
+                  >
+                    복원하기
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ── SECTION 2: 경쟁 구도 ── */}
             <section className="space-y-3">
-              <SectionLabel emoji="🥊" text="대결 구도" hint="Ready to Fight!" />
+              <SectionLabel emoji="🥊" text="경쟁 구도" hint="Ready to Fight!" />
 
               <div className="grid grid-cols-[1fr_44px_1fr] gap-2 items-stretch">
                 {/* User A 콘텐츠 (읽기 전용) */}
@@ -201,10 +392,10 @@ export function ChallengeDrawer() {
 
                 {/* VS */}
                 <div className="flex items-center justify-center">
-                  <div className="flex flex-col items-center gap-1 h-full">
-                    <div className="w-px flex-1 bg-gradient-to-b from-transparent via-gray-200 to-transparent" />
-                    <span className="text-lg font-black text-gray-300 tracking-tighter">VS</span>
-                    <div className="w-px flex-1 bg-gradient-to-b from-transparent via-gray-200 to-transparent" />
+                  <div className="flex flex-col items-center justify-center gap-1 min-h-[140px] py-1">
+                    <div className="w-px flex-1 min-h-[8px] bg-gradient-to-b from-transparent via-gray-200 to-transparent" />
+                    <VsBadge size="md" variant="inline" />
+                    <div className="w-px flex-1 min-h-[8px] bg-gradient-to-b from-transparent via-gray-200 to-transparent" />
                   </div>
                 </div>
 
@@ -220,6 +411,12 @@ export function ChallengeDrawer() {
                     content={rightContent}
                     onChange={setRightContent}
                     disabled={uploading}
+                    lockedSideType={challengeMatchupEdit ? challengeMatchup?.right_type : null}
+                    initialText={
+                      challengeMatchupEdit && challengeMatchup?.right_type === 'text'
+                        ? challengeMatchup.right_text || ''
+                        : undefined
+                    }
                   />
                 </div>
               </div>
@@ -228,7 +425,17 @@ export function ChallengeDrawer() {
               <div className="flex items-start gap-2 px-3 py-2.5 bg-red-50 border border-red-100 rounded-xl">
                 <span className="text-sm shrink-0 mt-0.5">📢</span>
                 <p className="text-[11px] text-red-700 leading-relaxed">
-                  <span className="font-bold">'최종 매치업 만들기'</span>를 누르면 즉시 투표가 시작되며 수정이 불가능해요.
+                  {challengeMatchupEdit ? (
+                    <>
+                      <span className="font-bold">저장</span>하면 B 측 내용만 갱신돼요. (작성자 A 쪽·주제는 수정할 수
+                      없어요.)
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-bold">'최종 매치업 만들기'</span>를 누르면 즉시 투표가 시작되며 수정이
+                      불가능해요.
+                    </>
+                  )}
                 </p>
               </div>
             </section>
@@ -261,11 +468,12 @@ export function ChallengeDrawer() {
 
             {/* ── 최종 생성 버튼 ── */}
             <button
-              onClick={handleSubmit}
-              disabled={!isValid || uploading}
+              type="button"
+              onClick={handleSubmitClick}
+              disabled={!canSubmitChallenge || uploading}
               className={cn(
                 'w-full py-4 rounded-2xl text-sm font-black tracking-wide transition-all duration-300',
-                isValid && !uploading
+                canSubmitChallenge && !uploading
                   ? 'bg-[#22282E] text-white shadow-[0_0_24px_rgba(34,40,46,0.45)] hover:shadow-[0_0_40px_rgba(34,40,46,0.65)] hover:scale-[1.01] active:scale-[0.99]'
                   : 'bg-gray-100 text-gray-400 cursor-not-allowed'
               )}
@@ -277,8 +485,8 @@ export function ChallengeDrawer() {
                 </span>
               ) : (
                 <span className="flex items-center justify-center gap-2">
-                  {isValid && <Zap size={16} className="fill-current" />}
-                  최종 매치업 만들기
+                  {canSubmitChallenge && <Zap size={16} className="fill-current" />}
+                  {challengeMatchupEdit ? '변경 사항 저장' : '최종 매치업 만들기'}
                 </span>
               )}
             </button>
@@ -287,6 +495,61 @@ export function ChallengeDrawer() {
       </Drawer>
 
       {/* ── 공유 유도 모달 ── */}
+      <Modal
+        isOpen={showEditSubmitWarning}
+        onClose={() => !uploading && setShowEditSubmitWarning(false)}
+        title="도전자(B) 쪽 수정을 저장할까요?"
+        className="max-w-md"
+      >
+        <div className="space-y-4">
+          <div className="flex gap-3 rounded-xl border border-amber-200/80 bg-gradient-to-br from-amber-50/95 to-orange-50/60 px-3.5 py-3">
+            <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" strokeWidth={2.25} />
+            <p className="text-sm leading-relaxed text-amber-950/90">
+              저장하면 <strong className="font-bold">B측 이미지·영상·텍스트</strong>만 갱신돼요. 작성자(A) 주제·A측
+              콘텐츠는 바꿀 수 없어요. 부적절한 콘텐츠는 운영 정책에 따라 삭제될 수 있습니다.
+            </p>
+          </div>
+          <ul className="text-xs text-gray-600 space-y-2 pl-0 list-none">
+            <li className="flex gap-2">
+              <span className="text-violet-500 font-bold">·</span>
+              저작권·초상권을 침해하지 않은 콘텐츠만 올려주세요.
+            </li>
+            <li className="flex gap-2">
+              <span className="text-fuchsia-500 font-bold">·</span>
+              폭력·선정·혐오·비방 등은 금지됩니다.
+            </li>
+            <li className="flex gap-2">
+              <span className="text-teal-600 font-bold">·</span>
+              위 내용을 확인했으며, 수정 저장에 동의합니다.
+            </li>
+          </ul>
+          <div className="flex gap-3 pt-1">
+            <button
+              type="button"
+              onClick={() => setShowEditSubmitWarning(false)}
+              disabled={uploading}
+              className={cn(
+                'flex-1 py-3 rounded-2xl text-sm font-semibold transition-all duration-300 border-2 border-transparent',
+                'bg-gradient-to-br from-violet-100/90 via-fuchsia-50/80 to-teal-50/70 text-violet-800',
+                'hover:from-violet-200/95 hover:via-fuchsia-100/85 hover:to-teal-100/75',
+                'shadow-[0_2px_12px_rgba(139,92,246,0.12)]',
+                'disabled:opacity-40',
+              )}
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmEditSubmit}
+              disabled={uploading}
+              className="flex-1 py-3 rounded-2xl text-sm font-black tracking-wide bg-[#22282E] text-white shadow-[0_0_20px_rgba(34,40,46,0.35)] hover:shadow-[0_0_28px_rgba(34,40,46,0.5)] hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-40 disabled:hover:scale-100"
+            >
+              저장하기
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       {shareModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={handleGoWithoutShare} />
@@ -294,9 +557,9 @@ export function ChallengeDrawer() {
             {/* 이모지 */}
             <div className="text-5xl">🎉</div>
             <div>
-              <h3 className="text-lg font-black text-[#22282E]">대결이 시작됐어요!</h3>
+              <h3 className="text-lg font-black text-[#22282E]">경쟁이 시작됐어요!</h3>
               <p className="text-sm text-gray-500 mt-1.5 leading-relaxed">
-                당신의 대결이 시작되었습니다!<br />
+                당신의 경쟁이 시작되었습니다!<br />
                 친구들에게 투표를 부탁해보세요.
               </p>
             </div>
@@ -313,7 +576,7 @@ export function ChallengeDrawer() {
                 className="w-full flex items-center justify-center gap-2 py-3.5 bg-[#22282E] text-white rounded-2xl text-sm font-bold hover:bg-[#363d46] transition-colors"
               >
                 <Link2 size={16} />
-                링크 복사하고 대결 보기
+                링크 복사하고 경쟁 보기
               </button>
 
               {/* 바로 이동 */}
@@ -321,7 +584,7 @@ export function ChallengeDrawer() {
                 onClick={handleGoWithoutShare}
                 className="w-full py-3 text-sm text-gray-400 hover:text-[#22282E] transition-colors font-medium"
               >
-                공유 없이 대결 보기
+                공유 없이 경쟁 보기
               </button>
             </div>
           </div>
@@ -352,10 +615,10 @@ function UserAPreview({ matchup }) {
         {matchup.left_label || 'A'}
       </span>
       {matchup.left_type === 'image' && src && (
-        <img src={src} alt="A" className="w-full h-full object-cover" />
+        <img src={safeMediaUrl(src)} alt="A" className="w-full h-full object-cover" />
       )}
       {matchup.left_type === 'video' && src && (
-        <img src={src} alt="A" className="w-full h-full object-cover" />
+        <img src={safeMediaUrl(src)} alt="A" className="w-full h-full object-cover" />
       )}
       {matchup.left_type === 'text' && (
         <div className="w-full h-full flex items-center justify-center p-3 bg-gray-50">
@@ -372,14 +635,25 @@ function UserAPreview({ matchup }) {
 }
 
 // ── User B 업로드 박스 ────────────────────────────────────────────
-function UserBUploadBox({ content, onChange, disabled }) {
+function UserBUploadBox({ content, onChange, disabled, lockedSideType = null, initialText }) {
   const fileRef = useRef(null)
   const [contentType, setContentType] = useState('image')
   const [dragging, setDragging] = useState(false)
-  const [textInput, setTextInput] = useState('')
+  const [textInput, setTextInput] = useState(() => (typeof initialText === 'string' ? initialText : ''))
   const [sizeError, setSizeError] = useState('')
+  const [validating, setValidating] = useState(false)
 
-  const validateAndSet = (file) => {
+  useEffect(() => {
+    if (lockedSideType === 'image' || lockedSideType === 'video' || lockedSideType === 'text') {
+      setContentType(lockedSideType)
+    }
+  }, [lockedSideType])
+
+  useEffect(() => {
+    if (typeof initialText === 'string') setTextInput(initialText)
+  }, [initialText])
+
+  const validateAndSet = async (file) => {
     if (!file) return
     setSizeError('')
     const isImage = file.type.startsWith('image/')
@@ -387,13 +661,19 @@ function UserBUploadBox({ content, onChange, disabled }) {
     if (!isImage && !isVideo) { setSizeError('이미지 또는 영상만 가능해요'); return }
     if (isImage && file.size > MAX_IMAGE_BYTES) { setSizeError(`최대 ${MAX_IMAGE_MB}MB`); return }
     if (isVideo && file.size > MAX_VIDEO_BYTES) { setSizeError(`최대 ${MAX_VIDEO_MB}MB`); return }
+    if (isVideo) {
+      setValidating(true)
+      const v = await validateVideo(file)
+      setValidating(false)
+      if (!v.valid) { setSizeError(v.error); return }
+    }
     const preview = URL.createObjectURL(file)
     onChange({ type: isVideo ? 'video' : 'image', file, preview })
   }
 
   const handleDrop = (e) => {
     e.preventDefault(); setDragging(false)
-    if (disabled) return
+    if (disabled || validating) return
     validateAndSet(e.dataTransfer.files?.[0])
   }
 
@@ -416,8 +696,13 @@ function UserBUploadBox({ content, onChange, disabled }) {
           <button
             key={id}
             type="button"
-            onClick={() => { setContentType(id); onChange(null); setTextInput('') }}
-            disabled={disabled}
+            onClick={() => {
+              if (lockedSideType) return
+              setContentType(id)
+              onChange(null)
+              setTextInput('')
+            }}
+            disabled={disabled || !!lockedSideType}
             className={cn(
               'p-1 rounded transition-colors',
               contentType === id ? 'bg-[#22282E] text-white' : 'text-gray-300 hover:text-gray-500',
@@ -449,10 +734,10 @@ function UserBUploadBox({ content, onChange, disabled }) {
           onDrop={handleDrop}
           onDragOver={(e) => { e.preventDefault(); if (!disabled) setDragging(true) }}
           onDragLeave={() => setDragging(false)}
-          onClick={() => { if (!content && !disabled) fileRef.current?.click() }}
+          onClick={() => { if (!content && !disabled && !validating) fileRef.current?.click() }}
           className={cn(
             'relative aspect-square rounded-xl border-2 border-dashed transition-all overflow-hidden',
-            disabled ? 'opacity-60 cursor-not-allowed' :
+            disabled || validating ? 'opacity-60 cursor-not-allowed' :
             dragging ? 'border-[#22282E] bg-gray-100 scale-[1.02]' :
             content ? 'border-[#22282E] cursor-default' :
             'border-gray-200 bg-gray-50 hover:border-[#22282E]/50 hover:bg-gray-100 cursor-pointer active:scale-[0.98]'
@@ -460,8 +745,8 @@ function UserBUploadBox({ content, onChange, disabled }) {
         >
           {content ? (
             <>
-              {content.type === 'image' && <img src={content.preview} alt="" className="w-full h-full object-cover" />}
-              {content.type === 'video' && <video src={content.preview} className="w-full h-full object-cover" muted />}
+              {content.type === 'image' && <img src={safeMediaUrl(content.preview)} alt="" className="w-full h-full object-cover" />}
+              {content.type === 'video' && <video src={safeMediaUrl(content.preview)} className="w-full h-full object-cover" muted />}
               {!disabled && (
                 <button
                   type="button"
@@ -480,15 +765,24 @@ function UserBUploadBox({ content, onChange, disabled }) {
             </>
           ) : (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-gray-400">
-              <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
-                <Upload size={18} className="text-gray-400" />
-              </div>
-              <div className="text-center">
-                <p className="text-xs font-semibold text-gray-500">클릭 또는 드롭</p>
-                <p className="text-[10px] mt-0.5 text-gray-300">
-                  {contentType === 'image' ? `JPG, PNG (${MAX_IMAGE_MB}MB)` : `MP4, MOV (${MAX_VIDEO_MB}MB)`}
-                </p>
-              </div>
+              {validating ? (
+                <>
+                  <span className="w-5 h-5 border-2 border-gray-300 border-t-[#22282E] rounded-full animate-spin" />
+                  <p className="text-[10px] font-medium text-gray-500">영상 검사 중...</p>
+                </>
+              ) : (
+                <>
+                  <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
+                    <Upload size={18} className="text-gray-400" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs font-semibold text-gray-500">클릭 또는 드롭</p>
+                    <p className="text-[10px] mt-0.5 text-gray-300">
+                      {contentType === 'image' ? `JPG, PNG (${MAX_IMAGE_MB}MB)` : `MP4, MOV (${MAX_VIDEO_MB}MB, 15초)`}
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -505,7 +799,7 @@ function UserBUploadBox({ content, onChange, disabled }) {
         type="file"
         accept={contentType === 'image' ? 'image/*' : 'video/*'}
         className="hidden"
-        onChange={(e) => validateAndSet(e.target.files?.[0])}
+        onChange={(e) => { validateAndSet(e.target.files?.[0]); e.target.value = '' }}
       />
     </div>
   )

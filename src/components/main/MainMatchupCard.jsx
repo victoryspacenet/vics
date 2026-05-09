@@ -1,92 +1,267 @@
 import { Link } from 'react-router-dom'
-import { BarChart3 } from 'lucide-react'
-import { formatNumber, formatDate, calcPercent } from '../../lib/utils'
+import { BarChart3, Play } from 'lucide-react'
+import { formatNumber, formatDate, calcPercent, cn } from '../../lib/utils'
+import { VsBadge } from '../ui/VsBadge'
+import { MatchupThumbFrame } from '../ui/MatchupThumbFrame'
+import { Avatar } from '../ui/Avatar'
+import { UserProfileLink } from '../ui/UserProfileLink'
+import { FeaturedBadgeSpan } from '../ui/FeaturedBadge'
+import { safeMediaUrl } from '../../lib/sanitize'
+import { isFeedBannerHighlightActive } from '../../lib/bannerHighlightBoost'
+import { isMatchupCreatorVipTierGlow, VIP_MATCHUP_SURFACE_CLASS } from '../../lib/matchupCreatorVipGlow'
+import { fandomTierHasDiamondListNicknameAura } from '../../lib/fandomTiers'
+import { FandomBronzeStarBadge } from '../fandom/FandomBronzeStarBadge'
+
+/** 이미지·영상·텍스트 썸네일 (영상은 썸네일 없을 때 video 태그로 표시 — img에 mp4 넣으면 깨짐) */
+function MatchupSidePreview({ side, matchup: m }) {
+  const isLeft = side === 'left'
+  const type = isLeft ? m.left_type : m.right_type
+  const url = isLeft ? m.left_url : m.right_url
+  const thumb = isLeft ? m.left_thumbnail_url : m.right_thumbnail_url
+  const label = isLeft ? m.left_label : m.right_label
+  const text = isLeft ? m.left_text : m.right_text
+
+  const safeThumb = safeMediaUrl(thumb || '')
+  const safeUrl = safeMediaUrl(url || '')
+
+  if (type === 'text') {
+    return (
+      <div className="flex h-full min-h-[4rem] w-full items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 p-2">
+        <p className="line-clamp-4 text-center text-[10px] font-semibold leading-relaxed text-[#22282E]">
+          {text || label || '—'}
+        </p>
+      </div>
+    )
+  }
+
+  if (type === 'video') {
+    if (safeThumb) {
+      return <img src={safeThumb} alt={label || ''} className="h-full w-full min-h-0 object-cover" />
+    }
+    if (safeUrl) {
+      return (
+        <div className="relative h-full w-full min-h-0">
+          <video
+            src={safeUrl}
+            muted
+            playsInline
+            preload="metadata"
+            className="h-full w-full object-cover"
+            aria-label={label || ''}
+          />
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/25">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/25 backdrop-blur-sm">
+              <Play size={14} className="ml-0.5 fill-white text-white" />
+            </div>
+          </div>
+        </div>
+      )
+    }
+    return (
+      <div className="flex h-full w-full items-center justify-center text-gray-400">
+        <span className="text-xs">{label || (isLeft ? 'A' : 'B')}</span>
+      </div>
+    )
+  }
+
+  if (type === 'image') {
+    const src = safeMediaUrl(thumb || url || '')
+    if (src) {
+      return <img src={src} alt={label || ''} className="h-full w-full min-h-0 object-cover" />
+    }
+    return (
+      <div className="flex h-full w-full items-center justify-center text-gray-400">
+        <span className="text-xs">{label || (isLeft ? 'A' : 'B')}</span>
+      </div>
+    )
+  }
+
+  const legacySrc = safeMediaUrl(thumb || url || '')
+  if (legacySrc) {
+    return <img src={legacySrc} alt={label || ''} className="h-full w-full min-h-0 object-cover" />
+  }
+
+  return (
+    <div className="flex h-full w-full items-center justify-center text-gray-400">
+      <span className="text-xs">{label || (isLeft ? 'A' : 'B')}</span>
+    </div>
+  )
+}
+
+const VARIANT_CARD = {
+  best:
+    'border-amber-200/85 ring-1 ring-amber-100/55 shadow-md shadow-amber-200/30 bg-gradient-to-br from-white via-amber-50/20 to-orange-50/35 hover:border-amber-300/80 hover:shadow-lg hover:shadow-amber-300/35 hover:via-amber-50/30',
+  hot:
+    'border-fuchsia-200/80 ring-1 ring-violet-100/50 shadow-md shadow-fuchsia-200/25 bg-gradient-to-br from-white via-violet-50/22 to-fuchsia-50/30 hover:border-fuchsia-300/75 hover:shadow-lg hover:shadow-fuchsia-200/35 hover:via-violet-50/32',
+  new:
+    'border-emerald-200/80 ring-1 ring-teal-100/50 shadow-md shadow-emerald-200/28 bg-gradient-to-br from-white via-emerald-50/20 to-cyan-50/28 hover:border-emerald-300/75 hover:shadow-lg hover:shadow-teal-200/35 hover:via-emerald-50/30',
+}
 
 export function MainMatchupCard({ matchup: m, variant, rank }) {
   const { left, right } = calcPercent(m.left_votes, m.right_votes)
-  const leftThumb = m.left_thumbnail_url || (m.left_type === 'image' ? m.left_url : null)
-  const rightThumb = m.right_thumbnail_url || (m.right_type === 'image' ? m.right_url : null)
+  const showNewRightPlaceholder = variant === 'new' && (m.right_type == null || m.right_type === undefined)
+  const creator = m.profiles
+  const bannerGlow = isFeedBannerHighlightActive(m)
+  const vipFrame =
+    !bannerGlow && isMatchupCreatorVipTierGlow(creator, m._creatorRankInfo)
+
+  const detailTo = `/matchup/${m.id}`
 
   return (
-    <Link
-      to={`/matchup/${m.id}`}
-      className="block bg-[#1a2332] rounded-xl border border-white/10 overflow-hidden hover:border-white/20 transition-colors shrink-0"
+    <div
+      className={cn(
+        'relative block shrink-0 overflow-hidden rounded-2xl border transition-all',
+        bannerGlow
+          ? 'vics-feed-banner-highlight shadow-none'
+          : VARIANT_CARD[variant] ??
+              'border-gray-200/80 bg-gradient-to-br from-white via-white to-slate-50/70 shadow-sm shadow-slate-200/40 hover:border-emerald-200/60 hover:shadow-md hover:via-cyan-50/20',
+        vipFrame && VIP_MATCHUP_SURFACE_CLASS,
+      )}
     >
-      <div className="p-4">
-        <div className="flex items-start justify-between gap-2 mb-3">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            {variant === 'best' && <span className="shrink-0 text-base">🔥</span>}
-            {variant === 'hot' && <span className="shrink-0 text-base">✨</span>}
-            {variant === 'new' && <span className="shrink-0 text-base">⚡</span>}
-            <h3 className="text-sm font-bold line-clamp-1">{m.title}</h3>
+      {variant === 'best' && (
+        <span className="absolute right-2.5 top-2.5 z-10 rounded-md bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.12em] text-white shadow-md shadow-amber-500/35 ring-1 ring-white/60">
+          TOP
+        </span>
+      )}
+      {variant === 'hot' && (
+        <span className="absolute right-2.5 top-2.5 z-10 rounded-md bg-gradient-to-r from-violet-500 via-fuchsia-500 to-purple-600 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.12em] text-white shadow-md shadow-fuchsia-500/40 ring-1 ring-white/60">
+          HOT
+        </span>
+      )}
+      {creator?.fandom_tier === 'diamond' && (
+        <div
+          className="pointer-events-none absolute inset-0 z-[4] rounded-2xl vics-diamond-matchup-card-bg opacity-[0.18]"
+          aria-hidden
+        />
+      )}
+      <div className="relative z-[6] p-4">
+        <Link
+          to={detailTo}
+          className="group -m-1 block rounded-xl p-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 focus-visible:ring-offset-1"
+        >
+          <div className="flex items-start justify-between gap-2 mb-3">
+            <div className={`flex min-w-0 flex-1 flex-wrap items-center gap-2 ${variant === 'best' || variant === 'hot' ? 'pr-14' : ''}`}>
+              {variant === 'best' && <span className="shrink-0 text-base">🔥</span>}
+              {variant === 'hot' && <span className="shrink-0 text-base">✨</span>}
+              {variant === 'new' && <span className="shrink-0 text-base">⚡</span>}
+              {bannerGlow && (
+                <span className="shrink-0 rounded-full border border-white/50 bg-gradient-to-r from-fuchsia-600 via-violet-600 to-cyan-600 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-white shadow-[0_0_12px_rgba(217,70,239,0.5)]">
+                  부스트
+                </span>
+              )}
+              <h3 className="min-w-0 flex-1 text-sm font-bold line-clamp-1 text-[#22282E] group-hover:underline">{m.title}</h3>
+            </div>
           </div>
-        </div>
+        </Link>
+
+        {creator?.nickname && (
+          <div className="mb-3 flex min-w-0 items-center gap-1.5">
+            <UserProfileLink userId={creator?.id} className="inline-flex shrink-0">
+              <Avatar src={creator?.avatar_url} alt={creator?.nickname} size="xs" />
+            </UserProfileLink>
+            <UserProfileLink
+              userId={creator?.id}
+              className={cn(
+                'min-w-0 truncate text-xs font-semibold text-gray-600 hover:underline',
+                fandomTierHasDiamondListNicknameAura(creator?.fandom_tier) &&
+                  'vics-fandom-diamond-nickname-aura text-slate-800',
+              )}
+            >
+              {creator.nickname}
+            </UserProfileLink>
+            <FandomBronzeStarBadge tierId={creator?.fandom_tier} size={12} />
+            <FeaturedBadgeSpan badgeId={creator?.featured_badge} className="translate-y-px shrink-0" />
+          </div>
+        )}
 
         {variant === 'hot' && m.tags?.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-2">
             {m.tags.slice(0, 4).map((tag) => (
-              <span key={tag} className="text-[10px] font-bold text-violet-400">
+              <span key={tag} className="text-[10px] font-bold text-violet-600">
                 #{tag.replace(/\s/g, '_')}
               </span>
             ))}
           </div>
         )}
 
+        <Link
+          to={detailTo}
+          className="-m-1 block rounded-xl p-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 focus-visible:ring-offset-1"
+        >
         <div className="relative grid grid-cols-2 gap-2">
-          <div className="aspect-square rounded-lg overflow-hidden bg-white/5">
-            {leftThumb ? (
-              <img src={leftThumb} alt={m.left_label || 'A'} className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-white/30">
-                <span className="text-xs">{m.left_label || 'A'}</span>
-              </div>
-            )}
+          <MatchupThumbFrame side="left" className="aspect-square w-full min-h-0">
+            <MatchupSidePreview side="left" matchup={m} />
+          </MatchupThumbFrame>
+          <div className="absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2">
+            <VsBadge size="sm" />
           </div>
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center text-xs font-black">
-            VS
-          </div>
-          <div className="aspect-square rounded-lg overflow-hidden bg-white/5">
-            {rightThumb ? (
-              <img src={rightThumb} alt={m.right_label || 'B'} className="w-full h-full object-cover" />
-            ) : variant === 'new' ? (
-              <div className="w-full h-full flex flex-col items-center justify-center gap-0.5 text-white/30">
+          <MatchupThumbFrame side="right" className="aspect-square w-full min-h-0">
+            {showNewRightPlaceholder ? (
+              <div className="flex h-full w-full flex-col items-center justify-center gap-0.5 text-gray-400">
                 <span className="text-[10px] font-bold">도전자 대기</span>
                 <span className="text-[9px]">나중에 채워요</span>
               </div>
             ) : (
-              <div className="w-full h-full flex items-center justify-center text-white/30">
-                <span className="text-xs">{m.right_label || 'B'}</span>
-              </div>
+              <MatchupSidePreview side="right" matchup={m} />
             )}
-          </div>
+          </MatchupThumbFrame>
         </div>
 
         <div className={`mt-3 flex items-center ${variant === 'new' ? 'justify-end' : 'justify-between'}`}>
           {variant !== 'new' && (
-            <div className="flex items-center gap-1.5 text-xs text-white/60">
-              <BarChart3 size={12} />
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <BarChart3
+                size={12}
+                className={
+                  variant === 'best'
+                    ? 'shrink-0 text-amber-500'
+                    : variant === 'hot'
+                      ? 'shrink-0 text-violet-500'
+                      : 'text-gray-400'
+                }
+              />
               {variant === 'hot' && (m.total_votes || 0) > 0 ? (
-                <span>{left}% VS {right}%</span>
+                <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+                  <span className="bg-gradient-to-r from-fuchsia-600 to-pink-600 bg-clip-text text-xl font-black tabular-nums leading-none text-transparent sm:text-2xl">
+                    {left}%
+                  </span>
+                  <span className="text-xs font-black text-gray-400">VS</span>
+                  <span className="bg-gradient-to-r from-sky-600 to-indigo-600 bg-clip-text text-xl font-black tabular-nums leading-none text-transparent sm:text-2xl">
+                    {right}%
+                  </span>
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-violet-500">박빙</span>
+                </div>
+              ) : variant === 'best' ? (
+                <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+                  <span className="text-[11px] font-semibold text-gray-500">총 투표</span>
+                  <span className="bg-gradient-to-r from-amber-600 to-orange-600 bg-clip-text text-xl font-black tabular-nums leading-none text-transparent sm:text-2xl">
+                    {formatNumber(m.total_votes || 0)}
+                  </span>
+                  <span className="text-xs font-bold text-gray-600">명 참여</span>
+                </div>
               ) : (
-                <span>{formatNumber(m.total_votes || 0)}명 참여 중</span>
+                <span className="text-xs text-gray-500">{formatNumber(m.total_votes || 0)}명 참여 중</span>
               )}
             </div>
           )}
-          <span className="text-xs font-bold text-emerald-400">상세/투표 →</span>
+          <span className="text-xs font-bold text-emerald-600">
+            {variant === 'new' ? '상세 →' : '상세/투표 →'}
+          </span>
         </div>
 
         {variant === 'hot' && (m.total_votes || 0) > 0 && (
-          <p className="mt-2 text-[10px] text-violet-400/80">
+          <p className="mt-2 text-[10px] text-violet-600/90">
             ✨ 님과 안목이 비슷한 80%가 참여
           </p>
         )}
 
         {variant === 'new' && (
-          <p className="mt-2 text-[10px] text-emerald-400/80">
+          <p className="mt-2 text-[10px] text-emerald-600/90">
             🆕 {formatDate(m.created_at)} 생성됨
           </p>
         )}
+        </Link>
       </div>
-    </Link>
+    </div>
   )
 }

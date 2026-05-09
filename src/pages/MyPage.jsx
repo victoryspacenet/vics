@@ -1,14 +1,43 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
-import { Link, Navigate } from 'react-router-dom'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { Link, Navigate, useSearchParams } from 'react-router-dom'
 import {
   Edit2, Trophy, Target, Swords,
   CheckCircle2, XCircle, Clock, ChevronRight,
-  ChevronLeft, Plus, Flame, Users, ArrowRight, Zap, Gift,
+  ChevronLeft, Plus, Flame, Users, ArrowRight, Zap, Gift, CalendarCheck,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
-import { formatNumber, calcPercent, getLevel, getLevelProgress, LEVELS } from '../lib/utils'
+import { formatNumber, calcPercent, cn } from '../lib/utils'
+import { sanitizeText, safeMediaUrl } from '../lib/sanitize'
+import {
+  getTier,
+  getTierIndex,
+  TIERS,
+  TIER_MIN_HOLD_POINTS,
+  profileHoldPoints,
+} from '../lib/tiers'
+import { TierBadge } from '../components/ui/TierBadge'
+import { mapTierSnapshotRow, EMPTY_TIER_RANK_INFO } from '../lib/creatorRankSnapshot'
+import { VipPromoButton } from '../components/main/VipPromoButton'
+import { VsBadge } from '../components/ui/VsBadge'
+import { MatchupThumbFrame } from '../components/ui/MatchupThumbFrame'
+import { POINTS_VOTER_DRAW, POINTS_VOTER_HIT, POINTS_VOTER_MISS } from '../lib/pointRewards'
+import { getMyPageNeonShell } from '../lib/neonProfileTheme'
+import { FandomBronzeStarBadge } from '../components/fandom/FandomBronzeStarBadge'
+import { fandomTierHasGoldProfileGlow, fandomTierHasSilverProfileGlow } from '../lib/fandomTiers'
+import { isRankingBadgeActive, getRankingBadgeDays, getRankingBadgeRemainingDays } from '../lib/rankingBadge'
+
+/** 전체 포인트 랭킹 순위 — TOP10은 랭킹 축하 모달과 동일 Gold·Silver·Bronze·TOP 10, 그 외 N위 */
+function overallRankGradeLabel(rank) {
+  const n = typeof rank === 'number' && Number.isFinite(rank) ? rank : Number(rank)
+  if (!Number.isFinite(n) || n < 1) return null
+  if (n === 1) return 'Gold'
+  if (n === 2) return 'Silver'
+  if (n === 3) return 'Bronze'
+  if (n <= 10) return 'TOP 10'
+  return `${n}위`
+}
 
 const CREATED_SORT   = [
   { id: 'latest',   label: '최신순' },
@@ -28,29 +57,91 @@ const VOTED_FILTER = [
   { id: 'lose',  label: '패배(아쉬움)' },
   { id: 'live',  label: '진행중' },
 ]
-const VOTE_POINTS = 10  // 투표당 지급 포인트
+const VOTER_RESULT_POINTS = { win: POINTS_VOTER_HIT, lose: POINTS_VOTER_MISS, draw: POINTS_VOTER_DRAW }
+const ATTENDANCE_POINTS = 10  // 출석 기본 포인트
+const ATTENDANCE_STREAK_BONUS = 70 // 7일 연속 출석 시(매 7일마다) 보너스 — 7·14·21…일째
+
+/** 섹션 카드 (MZ 파스텔) — 네온 테마 시에도 본문 카드는 가독성 위해 유지 */
+const SECTION_CARD =
+  'rounded-2xl border border-pink-100/50 bg-white/92 shadow-[0_4px_28px_-10px_rgba(244,114,182,0.18)] backdrop-blur-[2px]'
+const LIST_CARD =
+  'rounded-2xl border border-pink-100/45 bg-white/95 shadow-sm shadow-pink-100/15'
 
 export function MyPage() {
-  const { user, profile } = useAuthStore()
-  const { openCreateDrawer, openLoginModal } = useUIStore()
+  const { user, profile, fetchProfile, loading: authLoading } = useAuthStore()
+  const { openCreateDrawer, openLoginModal, showToast } = useUIStore()
+  const [searchParams, setSearchParams] = useSearchParams()
 
-  const [activeTab,        setActiveTab]        = useState('created')
+  const [attendanceChecked, setAttendanceChecked] = useState(false)
+  const [attendanceConsecutive, setAttendanceConsecutive] = useState(0)
+  const [attendanceLoading, setAttendanceLoading] = useState(false)
   const [sortCreated,      setSortCreated]       = useState('latest')
   const [filterCreated,    setFilterCreated]     = useState('all')
-  const [createdPage,      setCreatedPage]       = useState(1)
   const [filterVoted,      setFilterVoted]       = useState('all')
-  const [votedPage,        setVotedPage]         = useState(1)
   const [createdMatchups,  setCreatedMatchups]   = useState([])
   const [votedMatchups,    setVotedMatchups]     = useState([])
   const [stats,            setStats]             = useState(null)
+  const [tierRankSnapshot, setTierRankSnapshot]   = useState(() => ({ ...EMPTY_TIER_RANK_INFO }))
   const [loading,          setLoading]           = useState(true)
   const [chartPeriod,      setChartPeriod]       = useState('weekly')  // 'weekly' | 'monthly'
   const createdListRef = useRef(null)
   const votedListRef   = useRef(null)
 
-  if (!user) return <Navigate to="/" />
+  const patchSearch = useCallback((updates) => {
+    setSearchParams((prev) => {
+      const n = new URLSearchParams(prev)
+      Object.entries(updates).forEach(([k, v]) => {
+        if (v === null || v === undefined || v === '') n.delete(k)
+        else n.set(k, String(v))
+      })
+      return n
+    }, { replace: true })
+  }, [setSearchParams])
 
-  useEffect(() => { fetchData() }, [user])
+  const neonShell = useMemo(() => getMyPageNeonShell(profile), [profile])
+  const goldProfileGlow = useMemo(
+    () => fandomTierHasGoldProfileGlow(profile?.fandom_tier),
+    [profile?.fandom_tier],
+  )
+  const silverProfileGlow = useMemo(
+    () => fandomTierHasSilverProfileGlow(profile?.fandom_tier),
+    [profile?.fandom_tier],
+  )
+
+  const fetchAttendanceStatus = async () => {
+    if (!user) return
+    try {
+      const today = new Date().toISOString().slice(0, 10)
+      const { data } = await supabase
+        .from('attendances')
+        .select('checked_at')
+        .eq('user_id', user.id)
+        .eq('checked_at', today)
+        .maybeSingle()
+      setAttendanceChecked(!!data)
+    } catch { /* attendances 테이블 없을 수 있음 */ }
+  }
+
+  const handleCheckAttendance = async () => {
+    if (!user || attendanceChecked || attendanceLoading) return
+    setAttendanceLoading(true)
+    try {
+      const { data, error } = await supabase.rpc('check_attendance')
+      if (error) throw error
+      if (data?.ok) {
+        setAttendanceChecked(true)
+        setAttendanceConsecutive(data.consecutive || 1)
+        fetchProfile(user.id)
+        showToast(`출석 완료! +${data.points || ATTENDANCE_POINTS}P 획득 🎉`, 'success')
+      } else {
+        showToast(data?.error || '출석 체크에 실패했어요', 'error')
+      }
+    } catch (err) {
+      showToast(err.message || '출석 체크에 실패했어요', 'error')
+    } finally {
+      setAttendanceLoading(false)
+    }
+  }
 
   const fetchData = async () => {
     setLoading(true)
@@ -69,19 +160,35 @@ export function MyPage() {
         .order('created_at', { ascending: false })
       setVotedMatchups(votes || [])
 
-      const { data: rankData } = await supabase
-        .from('profiles')
-        .select('id')
-        .order('points', { ascending: false })
-      const rank = rankData?.findIndex((p) => p.id === user.id) + 1
+      const [{ data: trRows }, { count: totalUsers }] = await Promise.all([
+        supabase.rpc('profiles_tier_rank_snapshot_for_ids', { p_ids: [user.id] }),
+        supabase.from('profiles').select('id', { count: 'exact', head: true }),
+      ])
+      const tierInfo = mapTierSnapshotRow(trRows?.[0])
+      setTierRankSnapshot(tierInfo)
+      const rank =
+        tierInfo.overallRank != null && tierInfo.overallRank > 0 ? tierInfo.overallRank : '-'
 
-      setStats({ rank: rank || '-' })
+      setStats({
+        rank,
+        totalUsers: tierInfo.totalUsers || totalUsers || 0,
+      })
     } catch (err) {
       console.error(err)
     } finally {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (!user) return
+    fetchData()
+  }, [user])
+
+  useEffect(() => {
+    if (!user) return
+    fetchAttendanceStatus()
+  }, [user])
 
   const sortedCreated = [...createdMatchups].sort((a, b) => {
     if (sortCreated === 'latest')   return new Date(b.created_at) - new Date(a.created_at)
@@ -101,19 +208,45 @@ export function MyPage() {
     return true
   })
   const totalCreatedPages = Math.max(1, Math.ceil(filteredCreated.length / CREATED_PAGE_SIZE))
-  const pagedCreated      = filteredCreated.slice(
+
+  const filteredVoted = votedMatchups.filter((v) => {
+    const m = v.matchups
+    if (!m) return false
+    const isActive = m.status === 'active'
+    const isDraw   = (m.left_votes || 0) === (m.right_votes || 0)
+    const winner   = isDraw ? null : (m.left_votes > m.right_votes ? 'left' : 'right')
+    const myWin    = !isDraw && winner && v.side === winner && m.total_votes > 0 && !isActive
+    const myLose   = !isDraw && m.total_votes > 0 && !isActive && v.side !== winner
+    if (filterVoted === 'win')  return myWin
+    if (filterVoted === 'lose') return myLose
+    if (filterVoted === 'live') return isActive
+    return true
+  })
+  const totalVotedPages = Math.max(1, Math.ceil(filteredVoted.length / VOTED_PAGE_SIZE))
+
+  const activeTab = searchParams.get('tab') === 'voted' ? 'voted' : 'created'
+  const rawCp = Math.max(1, parseInt(searchParams.get('cp') || '1', 10) || 1)
+  const rawVp = Math.max(1, parseInt(searchParams.get('vp') || '1', 10) || 1)
+  const createdPage = Math.min(rawCp, totalCreatedPages)
+  const votedPage = Math.min(rawVp, totalVotedPages)
+
+  const pagedCreated = filteredCreated.slice(
     (createdPage - 1) * CREATED_PAGE_SIZE,
     createdPage * CREATED_PAGE_SIZE,
   )
+  const pagedVoted = filteredVoted.slice(
+    (votedPage - 1) * VOTED_PAGE_SIZE,
+    votedPage * VOTED_PAGE_SIZE,
+  )
 
   const goCreatedPage = (p) => {
-    setCreatedPage(p)
+    patchSearch({ tab: 'created', cp: p })
     createdListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   const handleFilterChange = (id) => {
     setFilterCreated(id)
-    setCreatedPage(1)
+    patchSearch({ cp: 1 })
   }
 
   // ── 투표 탭 계산 ──────────────────────────────────────────────────
@@ -123,55 +256,98 @@ export function MyPage() {
   })
   const votedWins  = votesWithResult.filter((v) => {
     const m = v.matchups
-    const winner = m.left_votes >= m.right_votes ? 'left' : 'right'
-    return v.side === winner
+    const isDraw = (m.left_votes || 0) === (m.right_votes || 0)
+    const winner = isDraw ? null : (m.left_votes > m.right_votes ? 'left' : 'right')
+    return !isDraw && winner && v.side === winner
   }).length
   const voteWinRate = votesWithResult.length > 0
     ? Math.round((votedWins / votesWithResult.length) * 100)
     : 0
+  const totalVotedPoints = useMemo(() => {
+    return votedMatchups.reduce((sum, v) => {
+      const m = v.matchups
+      const isActive = m?.status === 'active'
+      const hasVotes = (m?.total_votes || 0) > 0
+      const isDraw = (m?.left_votes || 0) === (m?.right_votes || 0)
+      const winner = isDraw ? null : ((m?.left_votes || 0) > (m?.right_votes || 0) ? 'left' : 'right')
+      const myWin = !isActive && hasVotes && !isDraw && v.side === winner
+      const pts =
+        !isActive && hasVotes
+          ? (isDraw ? VOTER_RESULT_POINTS.draw : myWin ? VOTER_RESULT_POINTS.win : VOTER_RESULT_POINTS.lose)
+          : 0
+      return sum + pts
+    }, 0)
+  }, [votedMatchups])
 
-  const filteredVoted = votedMatchups.filter((v) => {
-    const m = v.matchups
-    if (!m) return false
-    const isActive = m.status === 'active'
-    const winner   = m.left_votes >= m.right_votes ? 'left' : 'right'
-    const myWin    = v.side === winner && m.total_votes > 0 && !isActive
-    if (filterVoted === 'win')  return !isActive && m.total_votes > 0 && myWin
-    if (filterVoted === 'lose') return !isActive && m.total_votes > 0 && !myWin
-    if (filterVoted === 'live') return isActive
-    return true
-  })
-  const totalVotedPages = Math.max(1, Math.ceil(filteredVoted.length / VOTED_PAGE_SIZE))
-  const pagedVoted      = filteredVoted.slice(
-    (votedPage - 1) * VOTED_PAGE_SIZE,
-    votedPage * VOTED_PAGE_SIZE,
-  )
   const goVotedPage = (p) => {
-    setVotedPage(p)
+    patchSearch({ tab: 'voted', vp: p })
     votedListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
   const handleVotedFilterChange = (id) => {
     setFilterVoted(id)
-    setVotedPage(1)
+    patchSearch({ vp: 1 })
   }
 
-  const points   = profile?.points || 0
-  const levelObj = getLevel(points)
-  const progress = getLevelProgress(points)
-  const nextLevel = LEVELS[Math.min(levelObj.level, LEVELS.length - 1)]
-  const winRate  = profile && (profile.wins + profile.losses) > 0
-    ? Math.round((profile.wins / (profile.wins + profile.losses)) * 100)
-    : 0
+  const points = profile?.points || 0
+  const matchupTier = useMemo(
+    () => getTier(profile || {}, tierRankSnapshot),
+    [profile, tierRankSnapshot],
+  )
+  const tierHoldRingProgress = useMemo(() => {
+    const id = matchupTier.id
+    const i = getTierIndex(id)
+    const curMin = TIER_MIN_HOLD_POINTS[id] ?? 0
+    const pts = profileHoldPoints(profile || {})
+    if (i >= TIERS.length - 1) return 100
+    const nextId = TIERS[i + 1].id
+    const nextMin = TIER_MIN_HOLD_POINTS[nextId] ?? curMin
+    if (nextMin <= curMin) return 100
+    return Math.min(100, Math.round(((pts - curMin) / (nextMin - curMin)) * 100))
+  }, [matchupTier.id, profile])
+  /** 만든 매치업(작성자 = 좌측) + 투표한 타인 매치업의 승·패를 합산한 총승률 (무승부·미종료 제외) */
+  const combinedOutcome = useMemo(() => {
+    if (!user?.id) return { wins: 0, losses: 0, rate: 0 }
+    let wins = 0
+    let losses = 0
+
+    for (const m of createdMatchups) {
+      if (m.status === 'active') continue
+      if (m.right_type == null) continue
+      const tv = m.total_votes || 0
+      if (tv === 0) continue
+      const lv = m.left_votes || 0
+      const rv = m.right_votes || 0
+      if (lv === rv) continue
+      const winner = lv > rv ? 'left' : 'right'
+      if (winner === 'left') wins += 1
+      else losses += 1
+    }
+
+    for (const v of votedMatchups) {
+      const m = v.matchups
+      if (!m || m.user_id === user.id) continue
+      if (m.status === 'active') continue
+      const tv = m.total_votes || 0
+      if (tv === 0) continue
+      const lv = m.left_votes || 0
+      const rv = m.right_votes || 0
+      if (lv === rv) continue
+      const winner = lv > rv ? 'left' : 'right'
+      if (v.side === winner) wins += 1
+      else losses += 1
+    }
+
+    const n = wins + losses
+    const rate = n > 0 ? Math.round((wins / n) * 100) : 0
+    return { wins, losses, rate }
+  }, [user?.id, createdMatchups, votedMatchups])
+
   const totalMatchups = createdMatchups.length + votedMatchups.length
 
   // 활동통계 차트 데이터 (주간 7일 / 월간 4주)
   const chartData = useMemo(() => {
     const now = new Date()
     now.setHours(0, 0, 0, 0)
-    // 생성한 매치업 임의 값 (물결 패턴, 실제 데이터가 없을 때 시각적 참고용)
-    const demoCreated = (n) => Array.from({ length: n }, (_, i) =>
-      Math.max(0, Math.round(Math.sin(i * 0.7) * 2 + Math.cos(i * 0.5) * 1.5 + 3))
-    )
     if (chartPeriod === 'weekly') {
       const labels = []
       const created = []
@@ -188,7 +364,7 @@ export function MyPage() {
           const t = new Date(m.created_at).getTime()
           return t >= dayStart.getTime() && t <= dayEnd.getTime()
         }).length
-        created.push(realCreated > 0 ? realCreated : demoCreated(7)[6 - i])
+        created.push(realCreated)
         voted.push(votedMatchups.filter((v) => {
           const t = new Date(v.created_at).getTime()
           return t >= dayStart.getTime() && t <= dayEnd.getTime()
@@ -199,7 +375,6 @@ export function MyPage() {
       const labels = []
       const created = []
       const voted = []
-      const demo = demoCreated(4)
       for (let i = 0; i <= 3; i++) {
         const weekEnd = new Date(now)
         weekEnd.setDate(weekEnd.getDate() - i * 7)
@@ -212,7 +387,7 @@ export function MyPage() {
           const t = new Date(m.created_at).getTime()
           return t >= weekStart.getTime() && t <= weekEnd.getTime()
         }).length
-        created.push(realCreated > 0 ? realCreated : demo[i])
+        created.push(realCreated)
         voted.push(votedMatchups.filter((v) => {
           const t = new Date(v.created_at).getTime()
           return t >= weekStart.getTime() && t <= weekEnd.getTime()
@@ -222,26 +397,86 @@ export function MyPage() {
     }
   }, [chartPeriod, createdMatchups, votedMatchups])
 
+  if (authLoading) {
+    return (
+      <div
+        className={`max-w-screen-lg mx-auto -mx-4 px-4 py-16 flex flex-col items-center justify-center min-h-[45vh] rounded-2xl ${neonShell.pageWrap}`}
+      >
+        <div
+          className="h-10 w-10 border-2 border-pink-200 border-t-fuchsia-600 rounded-full animate-spin"
+          aria-hidden
+        />
+        <p className="mt-4 text-sm font-bold text-fuchsia-800/70">세션 확인 중…</p>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return <Navigate to="/" replace />
+  }
+
   return (
-    <div className="max-w-screen-lg mx-auto">
+    <div className={`max-w-screen-lg mx-auto -mx-4 px-4 py-4 sm:py-6 rounded-2xl ${neonShell.pageWrap}`}>
 
       {/* ══ 프로필 헤더 ══ */}
-      <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-6 mb-6">
-        <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
+      <div
+        className={cn(
+          neonShell.headerSection,
+          !loading && goldProfileGlow && 'vics-fandom-gold-profile-header',
+          !loading && silverProfileGlow && 'vics-fandom-silver-profile-header',
+        )}
+      >
+        {loading ? (
+          <ProfileHeaderSkeleton />
+        ) : (
+        <div className="flex w-full flex-col sm:flex-row items-center sm:items-start gap-6">
 
-          {/* 아바타 */}
-          <div className="shrink-0">
-            <div className="relative group">
-              <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full ring-4 ring-[#22282E] ring-offset-2 overflow-hidden bg-gray-100">
-                {profile?.avatar_url
-                  ? <img src={profile.avatar_url} alt={profile?.nickname} className="w-full h-full object-cover" />
-                  : <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-200 to-gray-300">
-                      <span className="text-3xl font-black text-gray-500">
-                        {profile?.nickname?.[0]?.toUpperCase() || '?'}
-                      </span>
-                    </div>
-                }
-              </div>
+          {/* 아바타 — 모바일에서 닉네임과 동일 축으로 정확히 가운데 */}
+          <div className="flex w-full shrink-0 justify-center sm:w-auto sm:justify-start">
+            <div className="relative group w-fit max-w-full">
+              {goldProfileGlow ? (
+                <div className="vics-fandom-gold-avatar-wrap">
+                  <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden bg-amber-100/80">
+                    {profile?.avatar_url
+                      ? <img src={safeMediaUrl(profile.avatar_url)} alt={profile?.nickname ?? ''} className="w-full h-full object-cover" />
+                      : <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-amber-200 to-amber-500">
+                          <span className="text-3xl font-black text-amber-900">
+                            {profile?.nickname?.[0]?.toUpperCase() || '?'}
+                          </span>
+                        </div>
+                    }
+                  </div>
+                </div>
+              ) : silverProfileGlow ? (
+                <div className="vics-fandom-silver-avatar-wrap">
+                  <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden bg-slate-100/70">
+                    {profile?.avatar_url
+                      ? <img src={safeMediaUrl(profile.avatar_url)} alt={profile?.nickname ?? ''} className="w-full h-full object-cover" />
+                      : <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-200 to-slate-300">
+                          <span className="text-3xl font-black text-slate-600">
+                            {profile?.nickname?.[0]?.toUpperCase() || '?'}
+                          </span>
+                        </div>
+                    }
+                  </div>
+                </div>
+              ) : (
+                <div
+                  className={cn(
+                    'w-24 h-24 sm:w-28 sm:h-28 rounded-full ring-4 ring-offset-2 overflow-hidden bg-pink-100/50',
+                    neonShell.avatarRing,
+                  )}
+                >
+                  {profile?.avatar_url
+                    ? <img src={safeMediaUrl(profile.avatar_url)} alt={profile?.nickname ?? ''} className="w-full h-full object-cover" />
+                    : <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-pink-100 to-fuchsia-200">
+                        <span className="text-3xl font-black text-fuchsia-700">
+                          {profile?.nickname?.[0]?.toUpperCase() || '?'}
+                        </span>
+                      </div>
+                  }
+                </div>
+              )}
               <Link
                 to="/mypage/edit"
                 className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
@@ -251,20 +486,25 @@ export function MyPage() {
             </div>
           </div>
 
-          {/* 닉네임 + 이메일 + 바이오 */}
-          <div className="flex-1 text-center sm:text-left">
-            <div className="flex items-center justify-center sm:justify-start gap-3 mb-1">
-              <h1 className="text-2xl font-black text-[#22282E]">{profile?.nickname || '사용자'}</h1>
-              <span className="text-lg">{levelObj.emoji}</span>
+          {/* 닉네임 + 이메일 + 바이오 — 모바일에서 아바타와 동일 가로폭 기준 중앙 */}
+          <div className="flex w-full min-w-0 flex-1 flex-col text-center sm:w-auto sm:text-left">
+            <div className="flex items-center justify-center sm:justify-start gap-2 sm:gap-3 mb-1">
+              <h1 className={cn('text-2xl font-black', neonShell.nicknameClass)}>
+                {profile?.nickname || '사용자'}
+              </h1>
+              <FandomBronzeStarBadge tierId={profile?.fandom_tier} size={18} />
+              <span className="text-lg" title={`매치업 등급 ${matchupTier.name}`}>{matchupTier.emoji}</span>
             </div>
-            <p className="text-sm text-gray-400 mb-2">{user.email}</p>
+            <p className={cn('text-sm mb-2', neonShell.subtextClass)}>{user.email}</p>
             {profile?.bio && (
-              <p className="text-sm text-gray-500 max-w-sm line-clamp-2 mb-3">{profile.bio}</p>
+              <p className={cn('text-sm max-w-sm line-clamp-2 mb-3', neonShell.bioClass)}>
+                {sanitizeText(profile.bio)}
+              </p>
             )}
             <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
               <Link
                 to="/mypage/edit"
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-gray-600 border border-gray-200 rounded-full hover:bg-gray-50 transition-colors"
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-fuchsia-800/85 border border-pink-200/70 rounded-full bg-white/70 hover:bg-pink-50/80 transition-colors"
               >
                 <Edit2 size={13} /> 프로필 수정
               </Link>
@@ -282,46 +522,122 @@ export function MyPage() {
             </div>
           </div>
         </div>
+        )}
       </div>
 
       {/* ══ My 레벨 ══ */}
-      <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-5 mb-6">
-        <h2 className="text-base font-black text-[#22282E] mb-4">My 레벨</h2>
+      <div className={`${SECTION_CARD} p-5 mb-6`}>
+        {loading ? (
+          <ProfileLevelSkeleton />
+        ) : (
+        <>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+          <h2 className="text-base font-black text-[#22282E]">My 등급</h2>
+          <div className="flex items-center gap-2">
+            <TierBadge profile={profile} rankInfo={tierRankSnapshot} variant="compact" />
+            <VipPromoButton />
+          </div>
+        </div>
         <div className="flex flex-col sm:flex-row items-center gap-6">
           <div className="flex flex-col items-center shrink-0">
-            <CircularLevelRing
-              level={levelObj.level}
-              progressPercent={progress}
-              emoji={levelObj.emoji}
+            <CircularTierRing
+              tierEmoji={matchupTier.emoji}
+              rankLabel={points > 0 ? overallRankGradeLabel(stats?.rank) : null}
+              progressPercent={tierHoldRingProgress}
             />
             <div className="text-center mt-3">
-              <p className="text-sm font-bold text-[#22282E]">{levelObj.emoji} {levelObj.name}</p>
-              <p className="text-sm text-gray-500 mt-0.5">
-                <span className="font-black text-[#22282E]">{formatNumber(points)}</span>
-                {nextLevel && <span className="text-gray-400"> / {formatNumber(nextLevel.min)} P</span>}
+              <p className="text-sm font-bold text-[#22282E]">
+                {matchupTier.emoji} {matchupTier.name}
               </p>
-              {nextLevel && (
-                <p className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-100 text-amber-800 text-sm font-bold">
-                  <span className="text-amber-500">✨</span>
-                  다음 레벨까지 {formatNumber(Math.max(0, nextLevel.min - points))} P 남음
-                </p>
-              )}
+              <p className="text-sm text-gray-500 mt-0.5">
+                <span className={cn('font-black', neonShell.pointsAccent)}>{formatNumber(points)}</span>
+                <span className="text-gray-400"> P</span>
+              </p>
             </div>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 flex-1 w-full sm:w-auto">
-            <SideStatBox icon="🏅" label="랭킹" value={stats?.rank ? `${stats.rank}위` : '-'} color="text-amber-600" />
-            <SideStatBox icon="📊" label="승률" value={`${winRate}%`} color="text-blue-600" />
-            <SideStatBox icon="🏆" label="승리" value={`${profile?.wins || 0}승`} color="text-green-600" />
-            <SideStatBox icon="⚔️" label="총 매치업" value={`${totalMatchups}전`} color="text-violet-600" />
+            <SideStatBox variant="rank" icon="🏅" label="랭킹" value={typeof stats?.rank === 'number' ? `${stats.rank}위` : '-'} color="text-amber-600" />
+            <SideStatBox variant="rate" icon="📊" label="총승률" value={`${combinedOutcome.rate}%`} color="text-sky-600" />
+            <SideStatBox variant="wins" icon="🏆" label="총승리" value={`${combinedOutcome.wins}승`} color="text-emerald-600" />
+            <SideStatBox variant="total" icon="⚔️" label="총 매치업" value={`${totalMatchups}전`} color="text-violet-600" />
           </div>
+        </div>
+
+        {/* ── TOP 10 기념 배지 현황 ── */}
+        {isRankingBadgeActive(profile) && (
+          <div className="mt-4 flex items-center gap-3 px-4 py-3 rounded-2xl bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200/60">
+            <div className="relative shrink-0 flex items-center justify-center w-10 h-10">
+              <span className="text-3xl leading-none">🏅</span>
+              <span
+                className="absolute inset-0 flex items-center justify-center font-black"
+                style={{
+                  fontSize: '10px',
+                  color: '#111',
+                  WebkitTextStroke: '2px #fff',
+                  paintOrder: 'stroke fill',
+                  textShadow: '0 0 4px rgba(255,255,255,0.9)',
+                }}
+              >
+                {profile.ranking_badge_rank}위
+              </span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-black text-amber-800">
+                TOP 10 기념 배지 ({getRankingBadgeDays(profile.ranking_badge_rank)}일) 이용 중
+              </p>
+              <p className="text-[11px] text-amber-600/80 mt-0.5">
+                {profile.ranking_badge_rank}위 달성 · 만료까지 {getRankingBadgeRemainingDays(profile)}일 남음
+              </p>
+            </div>
+            <Link
+              to="/rewards"
+              className="shrink-0 text-[11px] font-bold text-amber-700 hover:text-amber-900 transition-colors"
+            >
+              리워드 센터
+            </Link>
+          </div>
+        )}
+        </>
+        )}
+      </div>
+
+      {/* ══ 출석 체크 ══ */}
+      <div className={`${SECTION_CARD} p-5 mb-6`}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-black text-[#22282E]">출석 체크</h3>
+          <span className="text-xs text-gray-400">일 1회 · +{ATTENDANCE_POINTS}P</span>
+        </div>
+        <div className="mt-3 flex items-center gap-3">
+          {attendanceChecked ? (
+            <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-green-50 border border-green-100 text-green-700">
+              <CheckCircle2 size={18} className="text-green-500" />
+              <span className="text-sm font-bold">오늘 출석 완료!</span>
+              {attendanceConsecutive > 1 && (
+                <span className="text-xs font-semibold text-green-600">· {attendanceConsecutive}일 연속</span>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={handleCheckAttendance}
+              disabled={attendanceLoading}
+              className="flex items-center gap-2 px-5 py-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {attendanceLoading ? (
+                <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+              ) : (
+                <span>✓</span>
+              )}
+              출석 체크하고 +{ATTENDANCE_POINTS}P 받기
+            </button>
+          )}
         </div>
       </div>
 
       {/* ══ 활동통계 물결그래프 ══ */}
-      <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-5 mb-6">
+      <div className={`${SECTION_CARD} p-5 mb-6`}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-black text-[#22282E]">활동통계</h3>
-          <div className="flex gap-1 bg-gray-100 rounded-full p-1">
+          <div className="flex gap-1 bg-fuchsia-100/45 rounded-full p-1 border border-pink-100/40">
             {[
               { id: 'weekly', label: '주간' },
               { id: 'monthly', label: '월간' },
@@ -330,7 +646,7 @@ export function MyPage() {
                 key={p.id}
                 onClick={() => setChartPeriod(p.id)}
                 className={`px-3 py-1.5 text-xs font-bold rounded-full transition-all ${
-                  chartPeriod === p.id ? 'bg-[#22282E] text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  chartPeriod === p.id ? 'bg-gradient-to-r from-fuchsia-600 to-pink-500 text-white shadow-sm' : 'text-fuchsia-800/60 hover:text-fuchsia-950'
                 }`}
               >
                 {p.label}
@@ -347,24 +663,24 @@ export function MyPage() {
         {/* ── 메인 컬럼 ── */}
         <div>
           {/* 탭 */}
-          <div className="flex bg-gray-100 rounded-xl p-1 mb-5 min-w-0">
+          <div className="flex bg-white/55 rounded-xl p-1 mb-5 min-w-0 border border-pink-100/50 shadow-inner shadow-pink-100/20">
             {[
               { id: 'created', label: '내가 만든 매치업', count: createdMatchups.length },
               { id: 'voted',   label: '내가 투표한 매치업', count: votedMatchups.length },
             ].map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => patchSearch({ tab: tab.id })}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs sm:text-sm font-bold rounded-lg transition-all min-w-0 ${
                   activeTab === tab.id
-                    ? 'bg-white text-[#22282E] shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'bg-white text-fuchsia-950 shadow-sm border border-pink-100/60'
+                    : 'text-fuchsia-800/65 hover:text-fuchsia-950'
                 }`}
               >
                 {tab.label}
                 {!loading && (
                   <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
-                    activeTab === tab.id ? 'bg-[#22282E] text-white' : 'bg-gray-200 text-gray-500'
+                    activeTab === tab.id ? 'bg-gradient-to-r from-fuchsia-600 to-pink-500 text-white' : 'bg-pink-100/70 text-fuchsia-700/80'
                   }`}>
                     {tab.count}
                   </span>
@@ -396,7 +712,7 @@ export function MyPage() {
               {/* 새 매치업 생성 버튼 */}
               <button
                 onClick={() => user ? openCreateDrawer() : openLoginModal()}
-                className="w-full flex items-center justify-between px-4 py-3.5 bg-white border-2 border-dashed border-gray-200 rounded-2xl hover:border-lime-400 hover:bg-lime-50 group transition-all mb-4"
+                className="w-full flex items-center justify-between px-4 py-3.5 bg-white/80 border-2 border-dashed border-pink-200/70 rounded-2xl hover:border-emerald-400 hover:bg-lime-50/90 group transition-all mb-4"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-full bg-gradient-to-br from-lime-400 to-emerald-400 flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
@@ -404,7 +720,7 @@ export function MyPage() {
                   </div>
                   <div className="text-left">
                     <p className="text-sm font-black text-[#22282E]">새로운 매치업 생성</p>
-                    <p className="text-xs text-gray-400">아직 당신의 안목을 기다리는 매치업이 많아요!</p>
+                    <p className="text-xs text-gray-400">아직 당신의 매치업을 기다리는 팬덤이 많아요!</p>
                   </div>
                 </div>
                 <ArrowRight size={16} className="text-gray-300 group-hover:text-lime-500 group-hover:translate-x-0.5 transition-all" />
@@ -412,15 +728,15 @@ export function MyPage() {
 
               {/* 필터 탭 + 정렬 */}
               <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-                <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1 min-w-0 flex-wrap">
+                <div className="flex items-center gap-1 bg-rose-100/45 rounded-full p-1 min-w-0 flex-wrap border border-pink-100/35">
                   {CREATED_FILTER.map((f) => (
                     <button
                       key={f.id}
                       onClick={() => handleFilterChange(f.id)}
                       className={`px-3 py-1.5 text-xs font-bold rounded-full transition-all ${
                         filterCreated === f.id
-                          ? 'bg-[#22282E] text-white shadow-sm'
-                          : 'text-gray-500 hover:text-gray-700'
+                          ? 'bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white shadow-sm'
+                          : 'text-fuchsia-800/65 hover:text-fuchsia-950'
                       }`}
                     >
                       {f.label}
@@ -434,15 +750,18 @@ export function MyPage() {
                     </button>
                   ))}
                 </div>
-                <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1">
+                <div className="flex items-center gap-1 bg-cyan-50/80 rounded-full p-1 border border-cyan-100/50">
                   {CREATED_SORT.map((s) => (
                     <button
                       key={s.id}
-                      onClick={() => { setSortCreated(s.id); setCreatedPage(1) }}
+                      onClick={() => {
+                        setSortCreated(s.id)
+                        patchSearch({ cp: 1 })
+                      }}
                       className={`px-2.5 py-1 text-[10px] font-bold rounded-full transition-all ${
                         sortCreated === s.id
-                          ? 'bg-white text-[#22282E] shadow-sm'
-                          : 'text-gray-400 hover:text-gray-600'
+                          ? 'bg-white text-fuchsia-900 shadow-sm border border-pink-100/50'
+                          : 'text-fuchsia-700/50 hover:text-fuchsia-900'
                       }`}
                     >
                       {s.label}
@@ -478,7 +797,7 @@ export function MyPage() {
                 : <EmptyState
                     emoji="🥊"
                     title={filterCreated === 'active' ? '진행 중인 매치업이 없어요' : filterCreated === 'ended' ? '종료된 매치업이 없어요' : '아직 만든 매치업이 없어요'}
-                    desc="첫 번째 매치업을 만들어 대결을 시작해보세요!"
+                    desc="첫 번째 매치업을 만들어 경쟁을 시작해보세요!"
                   />
               }
             </div>
@@ -505,7 +824,7 @@ export function MyPage() {
                   <span>·</span>
                   <span className="flex items-center gap-1">
                     <Gift size={11} />
-                    {formatNumber(votedMatchups.length * VOTE_POINTS)}P 누적 획득
+                    {formatNumber(totalVotedPoints)}P 누적 획득
                   </span>
                 </div>
               </div>
@@ -521,18 +840,18 @@ export function MyPage() {
                   </div>
                   <div>
                     <p className="text-sm font-black text-white">지금 핫한 매치업 투표하러 가기</p>
-                    <p className="text-[10px] text-white/70">투표할 때마다 {VOTE_POINTS}P 획득!</p>
+                    <p className="text-[10px] text-white/70">종료 후 결과에 따라 최대 {VOTER_RESULT_POINTS.win}P!</p>
                   </div>
                 </div>
                 <ArrowRight size={18} className="text-white/70 group-hover:translate-x-1 transition-transform" />
               </Link>
 
               {/* 필터 탭 */}
-              <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1 mb-4 overflow-x-auto scrollbar-hide">
+              <div className="flex items-center gap-1 bg-violet-100/40 rounded-full p-1 mb-4 overflow-x-auto scrollbar-hide border border-violet-100/50">
                 {VOTED_FILTER.map((f) => {
                   const count = f.id === 'all'  ? votedMatchups.length
-                              : f.id === 'win'  ? votedMatchups.filter(v => { const m = v.matchups; if (!m || m.status === 'active') return false; const w = m.left_votes >= m.right_votes ? 'left' : 'right'; return v.side === w && m.total_votes > 0 }).length
-                              : f.id === 'lose' ? votedMatchups.filter(v => { const m = v.matchups; if (!m || m.status === 'active') return false; const w = m.left_votes >= m.right_votes ? 'left' : 'right'; return v.side !== w && m.total_votes > 0 }).length
+                              : f.id === 'win'  ? votedMatchups.filter(v => { const m = v.matchups; if (!m || m.status === 'active') return false; const draw = (m.left_votes || 0) === (m.right_votes || 0); const w = draw ? null : (m.left_votes > m.right_votes ? 'left' : 'right'); return !draw && w && v.side === w && m.total_votes > 0 }).length
+                              : f.id === 'lose' ? votedMatchups.filter(v => { const m = v.matchups; if (!m || m.status === 'active') return false; const draw = (m.left_votes || 0) === (m.right_votes || 0); const w = draw ? null : (m.left_votes > m.right_votes ? 'left' : 'right'); return !draw && v.side !== w && m.total_votes > 0 }).length
                               : votedMatchups.filter(v => v.matchups?.status === 'active').length
                   return (
                     <button
@@ -540,14 +859,14 @@ export function MyPage() {
                       onClick={() => handleVotedFilterChange(f.id)}
                       className={`shrink-0 flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-full transition-all whitespace-nowrap ${
                         filterVoted === f.id
-                          ? 'bg-[#22282E] text-white shadow-sm'
-                          : 'text-gray-500 hover:text-gray-700'
+                          ? 'bg-gradient-to-r from-violet-600 to-fuchsia-500 text-white shadow-sm'
+                          : 'text-violet-800/70 hover:text-violet-950'
                       }`}
                     >
                       {f.id === 'win' ? '🎯' : f.id === 'lose' ? '💧' : f.id === 'live' ? '⏳' : null}
                       {f.label}
                       <span className={`text-[9px] px-1 rounded-full ${
-                        filterVoted === f.id ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-400'
+                        filterVoted === f.id ? 'bg-white/25 text-white' : 'bg-violet-200/70 text-violet-800/80'
                       }`}>{count}</span>
                     </button>
                   )
@@ -562,14 +881,26 @@ export function MyPage() {
                 : filteredVoted.length > 0
                 ? <>
                     <div className="space-y-4" style={{ scrollSnapType: 'y proximity' }}>
-                      {pagedVoted.map((v, idx) => (
-                        <VotedMatchupFullCard
-                          key={v.matchup_id}
-                          vote={v}
-                          matchup={v.matchups}
-                          pointsEarned={VOTE_POINTS}
-                        />
-                      ))}
+                      {pagedVoted.map((v, idx) => {
+                        const m = v.matchups
+                        const isActive = m?.status === 'active'
+                        const hasVotes = (m?.total_votes || 0) > 0
+                        const isDraw = (m?.left_votes || 0) === (m?.right_votes || 0)
+                        const winner = isDraw ? null : ((m?.left_votes || 0) > (m?.right_votes || 0) ? 'left' : 'right')
+                        const myWin = !isActive && hasVotes && !isDraw && v.side === winner
+                        const pts =
+                          !isActive && hasVotes
+                            ? (isDraw ? VOTER_RESULT_POINTS.draw : myWin ? VOTER_RESULT_POINTS.win : VOTER_RESULT_POINTS.lose)
+                            : 0
+                        return (
+                          <VotedMatchupFullCard
+                            key={v.matchup_id}
+                            vote={v}
+                            matchup={m}
+                            pointsEarned={pts}
+                          />
+                        )
+                      })}
                     </div>
                     {totalVotedPages > 1 && (
                       <CreatedPagination
@@ -598,8 +929,8 @@ export function MyPage() {
   )
 }
 
-// ── 원형 SVG 레벨 링 ────────────────────────────────────────────────
-function CircularLevelRing({ level, progressPercent, emoji }) {
+// ── 원형 링: 다음 매치업 등급 최소 보유 P까지 진행 + 중앙 티어 이모지·랭킹 등급 ─────────
+function CircularTierRing({ tierEmoji, rankLabel, progressPercent }) {
   const radius        = 50
   const circumference = 2 * Math.PI * radius
   const dashOffset    = circumference - (progressPercent / 100) * circumference
@@ -610,9 +941,9 @@ function CircularLevelRing({ level, progressPercent, emoji }) {
         {/* 배경 링 */}
         <circle
           cx="64" cy="64" r={radius}
-          fill="transparent" stroke="#e5e7eb" strokeWidth="9"
+          fill="transparent" stroke="#fbcfe8" strokeWidth="9"
         />
-        {/* 진행 링 */}
+        {/* 진행 링 — 현재 티어 보유 P 구간에서 다음 티어 최소 P까지 */}
         <circle
           cx="64" cy="64" r={radius}
           fill="transparent"
@@ -624,10 +955,13 @@ function CircularLevelRing({ level, progressPercent, emoji }) {
           style={{ transition: 'stroke-dashoffset 1s cubic-bezier(0.34, 1.56, 0.64, 1)' }}
         />
       </svg>
-      <div className="absolute flex flex-col items-center justify-center">
-        <span className="text-2xl leading-none">{emoji}</span>
-        <span className="text-xs text-gray-400 font-semibold">Lv.</span>
-        <span className="text-3xl font-black text-[#22282E] leading-tight">{level}</span>
+      <div className="absolute inset-0 flex flex-col items-center justify-center px-2 text-center">
+        <span className="text-2xl leading-none" aria-hidden>{tierEmoji}</span>
+        {rankLabel ? (
+          <span className="mt-0.5 text-[10px] font-black leading-tight tracking-tight text-[#22282E]">
+            {rankLabel}
+          </span>
+        ) : null}
       </div>
     </div>
   )
@@ -638,7 +972,8 @@ function CreatedMatchupFullCard({ matchup: m }) {
   const isActive   = m.status === 'active'
   const isComplete = m.right_type != null
   const hasVotes   = (m.total_votes || 0) > 0
-  const winner     = m.left_votes > m.right_votes ? 'left' : 'right'
+  const isDraw     = (m.left_votes || 0) === (m.right_votes || 0)
+  const winner     = isDraw ? 'draw' : (m.left_votes > m.right_votes ? 'left' : 'right')
 
   const leftThumb  = m.left_thumbnail_url  || (m.left_type  === 'image' ? m.left_url  : null)
   const rightThumb = m.right_thumbnail_url || (m.right_type === 'image' ? m.right_url : null)
@@ -646,7 +981,7 @@ function CreatedMatchupFullCard({ matchup: m }) {
 
   return (
     <div
-      className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-200"
+      className={`${LIST_CARD} overflow-hidden hover:shadow-md hover:shadow-pink-100/30 transition-all duration-200`}
       style={{ scrollSnapAlign: 'start' }}
     >
       {/* 카드 헤더: 상태 + 제목 */}
@@ -677,68 +1012,66 @@ function CreatedMatchupFullCard({ matchup: m }) {
       <div className="px-4 pb-3">
         <div className="relative grid grid-cols-2 gap-2">
           {/* A측 */}
-          <div className="relative aspect-square rounded-xl overflow-hidden bg-gray-50">
+          <MatchupThumbFrame side="left" className="aspect-square w-full">
             {leftThumb
-              ? <img src={leftThumb} alt="A" className="w-full h-full object-cover" />
-              : <div className="w-full h-full bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-3">
-                  <p className="text-xs font-bold text-gray-600 text-center line-clamp-4">{m.left_text}</p>
+              ? <img src={safeMediaUrl(leftThumb)} alt="A" className="h-full w-full object-cover" />
+              : <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-3">
+                  <p className="line-clamp-4 text-center text-xs font-bold text-gray-600">{m.left_text}</p>
                 </div>
             }
             {/* A 레이블 */}
             {m.left_label && (
-              <div className="absolute bottom-1.5 left-1.5">
-                <span className="text-[9px] font-black text-white bg-black/50 backdrop-blur-sm px-1.5 py-0.5 rounded-md block max-w-[90%] truncate">
+              <div className="absolute bottom-1.5 left-1.5 z-10">
+                <span className="block max-w-[90%] truncate rounded-md bg-black/50 px-1.5 py-0.5 text-[9px] font-black text-white backdrop-blur-sm">
                   {m.left_label}
                 </span>
               </div>
             )}
             {/* A WIN 뱃지 */}
             {isComplete && hasVotes && !isActive && winner === 'left' && (
-              <div className="absolute top-1.5 right-1.5">
-                <span className="inline-flex items-center gap-0.5 text-[10px] font-black bg-green-500 text-white px-1.5 py-0.5 rounded-full shadow-sm">
+              <div className="absolute right-1.5 top-1.5 z-10">
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-green-500 px-1.5 py-0.5 text-[10px] font-black text-white shadow-sm">
                   <CheckCircle2 size={9} /> WIN
                 </span>
               </div>
             )}
-          </div>
+          </MatchupThumbFrame>
 
           {/* 중앙 VS 뱃지 */}
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-            <div className="w-10 h-10 rounded-full bg-[#22282E] border-2 border-white shadow-xl flex items-center justify-center">
-              <span className="text-white text-[11px] font-black">VS</span>
-            </div>
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+            <VsBadge size="lg" />
           </div>
 
           {/* B측 */}
-          <div className="relative aspect-square rounded-xl overflow-hidden bg-gray-50">
+          <MatchupThumbFrame side="right" className="aspect-square w-full">
             {isComplete
               ? rightThumb
-                ? <img src={rightThumb} alt="B" className="w-full h-full object-cover" />
-                : <div className="w-full h-full bg-gradient-to-bl from-pink-50 to-red-100 flex items-center justify-center p-3">
-                    <p className="text-xs font-bold text-gray-600 text-center line-clamp-4">{m.right_text}</p>
+                ? <img src={safeMediaUrl(rightThumb)} alt="B" className="h-full w-full object-cover" />
+                : <div className="flex h-full w-full items-center justify-center bg-gradient-to-bl from-pink-50 to-red-100 p-3">
+                    <p className="line-clamp-4 text-center text-xs font-bold text-gray-600">{m.right_text}</p>
                   </div>
-              : <div className="w-full h-full bg-gray-50 flex flex-col items-center justify-center gap-2">
+              : <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-gray-50">
                   <span className="text-2xl">⏳</span>
-                  <p className="text-[10px] text-gray-400 font-bold text-center px-2">도전자를 기다리는 중</p>
+                  <p className="px-2 text-center text-[10px] font-bold text-gray-400">도전자를 기다리는 중</p>
                 </div>
             }
             {/* B 레이블 */}
             {isComplete && m.right_label && (
-              <div className="absolute bottom-1.5 right-1.5">
-                <span className="text-[9px] font-black text-white bg-black/50 backdrop-blur-sm px-1.5 py-0.5 rounded-md block max-w-[90%] truncate">
+              <div className="absolute bottom-1.5 right-1.5 z-10">
+                <span className="block max-w-[90%] truncate rounded-md bg-black/50 px-1.5 py-0.5 text-[9px] font-black text-white backdrop-blur-sm">
                   {m.right_label}
                 </span>
               </div>
             )}
             {/* B WIN 뱃지 */}
             {isComplete && hasVotes && !isActive && winner === 'right' && (
-              <div className="absolute top-1.5 left-1.5">
-                <span className="inline-flex items-center gap-0.5 text-[10px] font-black bg-green-500 text-white px-1.5 py-0.5 rounded-full shadow-sm">
+              <div className="absolute left-1.5 top-1.5 z-10">
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-green-500 px-1.5 py-0.5 text-[10px] font-black text-white shadow-sm">
                   <CheckCircle2 size={9} /> WIN
                 </span>
               </div>
             )}
-          </div>
+          </MatchupThumbFrame>
         </div>
       </div>
 
@@ -837,50 +1170,52 @@ function PageBtn({ page, current, onClick }) {
 function CreatedMatchupCard({ matchup: m }) {
   const isComplete = m.right_type != null
   const hasVotes   = m.total_votes > 0
-  const winner     = m.left_votes > m.right_votes ? 'left' : 'right'
+  const isDraw     = (m.left_votes || 0) === (m.right_votes || 0)
+  const winner     = isDraw ? 'draw' : (m.left_votes > m.right_votes ? 'left' : 'right')
   const thumb      = m.left_thumbnail_url || (m.left_type === 'image' ? m.left_url : null)
   const { left, right } = calcPercent(m.left_votes, m.right_votes)
 
   return (
     <Link
       to={`/matchup/${m.id}`}
-      className="block bg-white border border-gray-100 rounded-2xl overflow-hidden hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 group"
+      className={`block ${LIST_CARD} overflow-hidden hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 group`}
     >
       {/* 썸네일 (aspect-video) */}
-      <div className="relative aspect-video overflow-hidden bg-gray-100">
+      <MatchupThumbFrame side="left" className="aspect-video w-full">
         {thumb
-          ? <img src={thumb} alt={m.title} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
-          : <div className="w-full h-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center p-3">
-              <span className="text-xs text-gray-400 text-center line-clamp-3">{m.title}</span>
+          ? <img src={safeMediaUrl(thumb)} alt={m.title} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+          : <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-gray-100 to-gray-200 p-3">
+              <span className="line-clamp-3 text-center text-xs text-gray-400">{m.title}</span>
             </div>
         }
         {/* 하단 그라데이션 */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+        <div className="pointer-events-none absolute inset-0 z-[8] bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
 
         {/* 승패 뱃지 */}
         {isComplete && hasVotes && (
-          <span className={`absolute top-2 left-2 text-[10px] font-black px-2 py-0.5 rounded-full ${
-            winner === 'left'
+          <span className={`absolute left-2 top-2 z-10 ${winner === 'draw'
+              ? 'bg-gray-500 text-white'
+              : winner === 'left'
               ? 'bg-green-500 text-white'
               : 'bg-red-500 text-white'
-          }`}>
-            {winner === 'left' ? '✓ 승리' : '✗ 패배'}
+          } rounded-full px-2 py-0.5 text-[10px] font-black`}>
+            {winner === 'draw' ? '무승부' : winner === 'left' ? '✓ 승리' : '✗ 패배'}
           </span>
         )}
         {/* 도전자 대기 중 뱃지 */}
         {!isComplete && (
-          <span className="absolute top-2 left-2 text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-400 text-amber-900">
+          <span className="absolute left-2 top-2 z-10 rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-black text-amber-900">
             ⏳ 대기중
           </span>
         )}
 
         {/* 제목 오버레이 */}
-        <div className="absolute bottom-0 left-0 right-0 px-2.5 pb-2">
-          <p className="text-white text-xs font-bold line-clamp-2 leading-snug drop-shadow">
+        <div className="absolute bottom-0 left-0 right-0 z-10 px-2.5 pb-2">
+          <p className="line-clamp-2 text-xs font-bold leading-snug text-white drop-shadow">
             {m.title}
           </p>
         </div>
-      </div>
+      </MatchupThumbFrame>
 
       {/* 카드 바디 */}
       <div className="px-3 py-2.5">
@@ -911,10 +1246,11 @@ function VotedMatchupFullCard({ vote, matchup: m, pointsEarned }) {
 
   const isActive  = m.status === 'active'
   const hasVotes  = (m.total_votes || 0) > 0
-  const winner    = m.left_votes >= m.right_votes ? 'left' : 'right'
-  const myWin     = !isActive && hasVotes && vote.side === winner
-  const myLose    = !isActive && hasVotes && vote.side !== winner
-  const myLabel   = vote.side === 'left' ? (m.left_label || 'A') : (m.right_label || 'B')
+  const isDraw    = (m.left_votes || 0) === (m.right_votes || 0)
+  const winner   = isDraw ? null : (m.left_votes > m.right_votes ? 'left' : 'right')
+  const myWin    = !isActive && hasVotes && !isDraw && vote.side === winner
+  const myLose   = !isActive && hasVotes && !isDraw && vote.side !== winner
+  const myLabel  = vote.side === 'left' ? (m.left_label || 'A') : (m.right_label || 'B')
 
   const leftThumb  = m.left_thumbnail_url  || (m.left_type  === 'image' ? m.left_url  : null)
   const rightThumb = m.right_thumbnail_url || (m.right_type === 'image' ? m.right_url : null)
@@ -935,13 +1271,15 @@ function VotedMatchupFullCard({ vote, matchup: m, pointsEarned }) {
   // 상태 배지
   const statusBadge = isActive
     ? { label: '진행중 ⏳', cls: 'bg-amber-50 text-amber-600 border-amber-100' }
+    : isDraw
+    ? { label: '무승부 🤝', cls: 'bg-gray-100 text-gray-600 border-gray-200' }
     : myWin
     ? { label: '적중! 🎯', cls: 'bg-green-50 text-green-600 border-green-100' }
     : { label: '아쉬움 💧', cls: 'bg-blue-50 text-blue-500 border-blue-100' }
 
   return (
     <div
-      className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-200"
+      className={`${LIST_CARD} overflow-hidden hover:shadow-md hover:shadow-pink-100/30 transition-all duration-200`}
       style={{ scrollSnapAlign: 'start' }}
     >
       {/* 카드 헤더 */}
@@ -962,80 +1300,80 @@ function VotedMatchupFullCard({ vote, matchup: m, pointsEarned }) {
         <div className="relative grid grid-cols-2 gap-2">
 
           {/* A측 */}
-          <div className={`relative aspect-square rounded-xl overflow-hidden bg-gray-50 ${vote.side === 'left' ? 'ring-2 ring-[#22282E]' : ''}`}>
-            {leftThumb
-              ? <img src={leftThumb} alt="A" className="w-full h-full object-cover" />
-              : <div className="w-full h-full bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-3">
-                  <p className="text-xs font-bold text-gray-600 text-center line-clamp-4">{m.left_text}</p>
+          <div className={`relative w-full ${vote.side === 'left' ? 'rounded-xl ring-2 ring-[#22282E]' : ''}`}>
+            <MatchupThumbFrame side="left" className="aspect-square w-full">
+              {leftThumb
+                ? <img src={safeMediaUrl(leftThumb)} alt="A" className="h-full w-full object-cover" />
+                : <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-3">
+                    <p className="line-clamp-4 text-center text-xs font-bold text-gray-600">{m.left_text}</p>
+                  </div>
+              }
+              {/* MY PICK 오버레이 */}
+              {vote.side === 'left' && (
+                <div className="absolute inset-0 z-10 flex items-start justify-center pt-2">
+                  <span className="inline-flex items-center gap-0.5 rounded-full bg-[#22282E] px-2 py-0.5 text-[10px] font-black text-white shadow-md">
+                    ✓ MY PICK
+                  </span>
                 </div>
-            }
-            {/* MY PICK 오버레이 */}
-            {vote.side === 'left' && (
-              <div className="absolute inset-0 flex items-start justify-center pt-2">
-                <span className="inline-flex items-center gap-0.5 bg-[#22282E] text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-md">
-                  ✓ MY PICK
-                </span>
-              </div>
-            )}
-            {/* 퍼센트 */}
-            {hasVotes && (
-              <div className="absolute bottom-1.5 left-1.5">
-                <span className={`text-[11px] font-black px-1.5 py-0.5 rounded-lg ${
-                  !isActive && winner === 'left' ? 'bg-green-500 text-white' : 'bg-black/50 backdrop-blur-sm text-white'
-                }`}>{left}%</span>
-              </div>
-            )}
-            {/* 레이블 */}
-            {m.left_label && (
-              <div className="absolute bottom-1.5 right-1.5">
-                <span className="text-[9px] font-black text-white bg-black/50 backdrop-blur-sm px-1.5 py-0.5 rounded-md truncate block max-w-[80%]">
-                  {m.left_label}
-                </span>
-              </div>
-            )}
+              )}
+              {/* 퍼센트 */}
+              {hasVotes && (
+                <div className="absolute bottom-1.5 left-1.5 z-10">
+                  <span className={`rounded-lg px-1.5 py-0.5 text-[11px] font-black ${
+                    !isActive && winner === 'left' ? 'bg-green-500 text-white' : 'bg-black/50 text-white backdrop-blur-sm'
+                  }`}>{left}%</span>
+                </div>
+              )}
+              {/* 레이블 */}
+              {m.left_label && (
+                <div className="absolute bottom-1.5 right-1.5 z-10">
+                  <span className="block max-w-[80%] truncate rounded-md bg-black/50 px-1.5 py-0.5 text-[9px] font-black text-white backdrop-blur-sm">
+                    {m.left_label}
+                  </span>
+                </div>
+              )}
+            </MatchupThumbFrame>
           </div>
 
-          {/* 중앙 VS */}
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-            <div className={`w-10 h-10 rounded-full border-2 border-white shadow-xl flex items-center justify-center ${
-              isActive ? 'bg-amber-500' : myWin ? 'bg-green-500' : 'bg-[#22282E]'
-            }`}>
-              <span className="text-white text-[11px] font-black">VS</span>
-            </div>
+          {/* 중앙 VS (GNB 로고 + 청·적 그라데이션 배지 — 다른 매치업 카드와 동일) */}
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+            <VsBadge size="lg" />
           </div>
 
           {/* B측 */}
-          <div className={`relative aspect-square rounded-xl overflow-hidden bg-gray-50 ${vote.side === 'right' ? 'ring-2 ring-[#22282E]' : ''}`}>
-            {rightThumb
-              ? <img src={rightThumb} alt="B" className="w-full h-full object-cover" />
-              : <div className="w-full h-full bg-gradient-to-bl from-pink-50 to-red-100 flex items-center justify-center p-3">
-                  <p className="text-xs font-bold text-gray-600 text-center line-clamp-4">{m.right_text}</p>
+          <div className={`relative w-full ${vote.side === 'right' ? 'rounded-xl ring-2 ring-[#22282E]' : ''}`}>
+            <MatchupThumbFrame side="right" className="aspect-square w-full">
+              {rightThumb
+                ? <img src={safeMediaUrl(rightThumb)} alt="B" className="h-full w-full object-cover" />
+                : <div className="flex h-full w-full items-center justify-center bg-gradient-to-bl from-pink-50 to-red-100 p-3">
+                    <p className="line-clamp-4 text-center text-xs font-bold text-gray-600">{m.right_text}</p>
+                  </div>
+              }
+              {/* MY PICK 오버레이 */}
+              {vote.side === 'right' && (
+                <div className="absolute inset-0 z-10 flex items-start justify-center pt-2">
+                  <span className="inline-flex items-center gap-0.5 rounded-full bg-[#22282E] px-2 py-0.5 text-[10px] font-black text-white shadow-md">
+                    ✓ MY PICK
+                  </span>
                 </div>
-            }
-            {/* MY PICK 오버레이 */}
-            {vote.side === 'right' && (
-              <div className="absolute inset-0 flex items-start justify-center pt-2">
-                <span className="inline-flex items-center gap-0.5 bg-[#22282E] text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-md">
-                  ✓ MY PICK
-                </span>
-              </div>
-            )}
-            {/* 퍼센트 */}
-            {hasVotes && (
-              <div className="absolute bottom-1.5 right-1.5">
-                <span className={`text-[11px] font-black px-1.5 py-0.5 rounded-lg ${
-                  !isActive && winner === 'right' ? 'bg-green-500 text-white' : 'bg-black/50 backdrop-blur-sm text-white'
-                }`}>{right}%</span>
-              </div>
-            )}
-            {/* 레이블 */}
-            {m.right_label && (
-              <div className="absolute bottom-1.5 left-1.5">
-                <span className="text-[9px] font-black text-white bg-black/50 backdrop-blur-sm px-1.5 py-0.5 rounded-md truncate block max-w-[80%]">
-                  {m.right_label}
-                </span>
-              </div>
-            )}
+              )}
+              {/* 퍼센트 */}
+              {hasVotes && (
+                <div className="absolute bottom-1.5 right-1.5 z-10">
+                  <span className={`rounded-lg px-1.5 py-0.5 text-[11px] font-black ${
+                    !isActive && winner === 'right' ? 'bg-green-500 text-white' : 'bg-black/50 text-white backdrop-blur-sm'
+                  }`}>{right}%</span>
+                </div>
+              )}
+              {/* 레이블 */}
+              {m.right_label && (
+                <div className="absolute bottom-1.5 left-1.5 z-10">
+                  <span className="block max-w-[80%] truncate rounded-md bg-black/50 px-1.5 py-0.5 text-[9px] font-black text-white backdrop-blur-sm">
+                    {m.right_label}
+                  </span>
+                </div>
+              )}
+            </MatchupThumbFrame>
           </div>
         </div>
 
@@ -1111,20 +1449,21 @@ function VotedMatchupRow({ vote, matchup: m }) {
   if (!m) return null
   const isActive  = m.status === 'active'
   const hasVotes  = m.total_votes > 0
-  const winner    = m.left_votes >= m.right_votes ? 'left' : 'right'
-  const myWin     = vote.side === winner
+  const isDraw    = (m.left_votes || 0) === (m.right_votes || 0)
+  const winner   = isDraw ? null : (m.left_votes > m.right_votes ? 'left' : 'right')
+  const myWin    = !isDraw && vote.side === winner
   const myLabel   = vote.side === 'left' ? (m.left_label || 'A') : (m.right_label || 'B')
   const thumb     = m.left_thumbnail_url || (m.left_type === 'image' ? m.left_url : null)
 
   return (
     <Link
       to={`/matchup/${m.id}`}
-      className="flex items-center gap-3 p-3.5 bg-white border border-gray-100 rounded-2xl hover:shadow-md transition-all duration-200 group"
+      className={`flex items-center gap-3 p-3.5 ${LIST_CARD} hover:shadow-md transition-all duration-200 group`}
     >
       {/* 썸네일 */}
       <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100 shrink-0">
         {thumb
-          ? <img src={thumb} alt={m.title} className="w-full h-full object-cover" />
+          ? <img src={safeMediaUrl(thumb)} alt={m.title} className="w-full h-full object-cover" />
           : <div className="w-full h-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
               <span className="text-[8px] text-gray-400 text-center px-1 line-clamp-3">{m.title}</span>
             </div>
@@ -1141,7 +1480,11 @@ function VotedMatchupRow({ vote, matchup: m }) {
           <span className="text-xs text-gray-500">나의 선택:</span>
           <span className="text-xs font-black text-[#22282E]">{myLabel}</span>
           {!isActive && hasVotes && (
-            myWin
+            isDraw
+              ? <span className="inline-flex items-center gap-0.5 text-[10px] font-black text-gray-500">
+                  무승부
+                </span>
+              : myWin
               ? <span className="inline-flex items-center gap-0.5 text-[10px] font-black text-green-600">
                   <CheckCircle2 size={10} /> 승리
                 </span>
@@ -1161,9 +1504,9 @@ function VotedMatchupRow({ vote, matchup: m }) {
       <div className="shrink-0">
         {!isActive && hasVotes ? (
           <span className={`text-xs font-black px-2.5 py-1.5 rounded-xl ${
-            myWin ? 'bg-green-50 text-green-600 border border-green-100' : 'bg-red-50 text-red-500 border border-red-100'
+            isDraw ? 'bg-gray-100 text-gray-600 border border-gray-200' : myWin ? 'bg-green-50 text-green-600 border border-green-100' : 'bg-red-50 text-red-500 border border-red-100'
           }`}>
-            {myWin ? '✓ 승' : '✗ 패'}
+            {isDraw ? '무승부' : myWin ? '✓ 승' : '✗ 패'}
           </span>
         ) : isActive ? (
           <span className="text-[10px] font-semibold text-gray-400 bg-gray-50 px-2 py-1 rounded-lg border border-gray-100">
@@ -1276,7 +1619,7 @@ function ActivityWaveChart({ data }) {
 // ── 유틸 컴포넌트들 ────────────────────────────────────────────────
 function MiniStat({ icon, label, value }) {
   return (
-    <div className="bg-gray-50 rounded-xl p-3 text-center">
+    <div className="bg-gradient-to-br from-pink-50/60 to-rose-50/40 border border-pink-100/40 rounded-xl p-3 text-center">
       <div className="flex justify-center mb-1">{icon}</div>
       <p className="text-sm font-black text-[#22282E]">{value}</p>
       <p className="text-[10px] text-gray-400 font-semibold">{label}</p>
@@ -1284,30 +1627,85 @@ function MiniStat({ icon, label, value }) {
   )
 }
 
-function SideStatBox({ icon, label, value, color }) {
+const SIDE_STAT_VARIANT = {
+  rank: {
+    box: 'border-2 border-amber-400/75 bg-gradient-to-br from-amber-50 via-orange-50/80 to-yellow-50/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] shadow-amber-200/30',
+    label: 'text-amber-800/75',
+  },
+  rate: {
+    box: 'border-2 border-sky-400/70 bg-gradient-to-br from-sky-50 via-cyan-50/70 to-blue-50/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] shadow-sky-200/25',
+    label: 'text-sky-800/75',
+  },
+  wins: {
+    box: 'border-2 border-emerald-400/70 bg-gradient-to-br from-emerald-50 via-teal-50/60 to-green-50/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] shadow-emerald-200/25',
+    label: 'text-emerald-800/75',
+  },
+  total: {
+    box: 'border-2 border-violet-400/70 bg-gradient-to-br from-violet-50 via-fuchsia-50/50 to-purple-50/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] shadow-violet-200/30',
+    label: 'text-violet-800/75',
+  },
+}
+
+function SideStatBox({ variant = 'total', icon, label, value, color }) {
+  const v = SIDE_STAT_VARIANT[variant] || SIDE_STAT_VARIANT.total
   return (
-    <div className="bg-gray-50 rounded-xl p-3 text-center">
-      <p className="text-xl mb-0.5">{icon}</p>
-      <p className={`text-base font-black ${color}`}>{value}</p>
-      <p className="text-[10px] text-gray-400 font-semibold">{label}</p>
+    <div className={cn('rounded-xl p-3 text-center transition-transform hover:scale-[1.02]', v.box)}>
+      <p className="text-xl mb-0.5 drop-shadow-sm">{icon}</p>
+      <p className={cn('text-base font-black', color)}>{value}</p>
+      <p className={cn('text-[10px] font-bold', v.label)}>{label}</p>
     </div>
   )
 }
 
 function EmptyState({ emoji, title, desc }) {
   return (
-    <div className="py-16 text-center bg-white border border-gray-100 rounded-2xl">
+    <div className={`py-16 text-center ${SECTION_CARD}`}>
       <p className="text-4xl mb-3">{emoji}</p>
-      <p className="text-sm font-bold text-[#22282E] mb-1">{title}</p>
-      <p className="text-xs text-gray-400">{desc}</p>
+      <p className="text-sm font-bold text-fuchsia-950 mb-1">{title}</p>
+      <p className="text-xs text-fuchsia-700/60">{desc}</p>
+    </div>
+  )
+}
+
+function ProfileHeaderSkeleton() {
+  return (
+    <div className="flex w-full flex-col sm:flex-row items-center sm:items-start gap-6 animate-pulse">
+      <div className="flex w-full shrink-0 justify-center sm:w-auto sm:justify-start">
+        <div className="h-24 w-24 shrink-0 rounded-full bg-gray-100 sm:h-28 sm:w-28" />
+      </div>
+      <div className="flex w-full min-w-0 flex-1 flex-col space-y-3 text-center sm:w-auto sm:text-left">
+        <div className="h-7 w-32 bg-gray-100 rounded mx-auto sm:mx-0" />
+        <div className="h-4 w-48 bg-gray-100 rounded mx-auto sm:mx-0" />
+        <div className="flex flex-wrap justify-center sm:justify-start gap-2">
+          <div className="h-9 w-24 bg-gray-100 rounded-full" />
+          <div className="h-9 w-28 bg-gray-100 rounded-full" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ProfileLevelSkeleton() {
+  return (
+    <div className="flex flex-col sm:flex-row items-center gap-6 animate-pulse">
+      <div className="flex flex-col items-center shrink-0">
+        <div className="h-32 w-32 rounded-full bg-gray-100 ring-4 ring-gray-100" />
+        <div className="mt-3 h-4 w-24 rounded bg-gray-100" />
+        <div className="mt-2 h-3 w-20 rounded bg-gray-100" />
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 flex-1 w-full sm:w-auto">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="h-16 bg-gray-100 rounded-xl" />
+        ))}
+      </div>
     </div>
   )
 }
 
 function CardSkeleton() {
   return (
-    <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden animate-pulse">
-      <div className="aspect-video bg-gray-100" />
+    <div className={`${LIST_CARD} overflow-hidden animate-pulse`}>
+      <div className="aspect-video bg-pink-100/60" />
       <div className="p-3 space-y-2">
         <div className="h-2 bg-gray-100 rounded-full" />
         <div className="h-1.5 bg-gray-100 rounded-full w-3/4" />
@@ -1318,7 +1716,7 @@ function CardSkeleton() {
 
 function FullCardSkeleton() {
   return (
-    <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden animate-pulse">
+    <div className={`${LIST_CARD} overflow-hidden animate-pulse`}>
       <div className="px-4 pt-4 pb-3 flex items-center gap-3">
         <div className="w-14 h-5 bg-gray-100 rounded-full" />
         <div className="flex-1 h-4 bg-gray-100 rounded" />

@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import { UserProfileBlockLink } from '../ui/UserProfileLink'
 import { Trophy, ChevronDown } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { Avatar } from '../ui/Avatar'
 import { LevelBadge } from '../ui/LevelBadge'
+import { FeaturedBadgeSpan } from '../ui/FeaturedBadge'
 import { formatNumber } from '../../lib/utils'
+import { getCachedRanking, setCachedRanking } from '../../lib/rankingCache'
 
 const TABS = [
   { id: 'all', label: '전체' },
@@ -20,21 +23,29 @@ export function RankingBoard() {
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState(false)
 
+  const CACHE_KEY = 'home_sidebar_points'
+
   useEffect(() => {
+    const cached = getCachedRanking(CACHE_KEY)
+    if (cached?.data) {
+      setRankings(cached.data)
+      setLoading(false)
+      return
+    }
     fetchRankings()
   }, [activeTab])
 
   const fetchRankings = async () => {
     setLoading(true)
     try {
-      let query = supabase
+      const { data } = await supabase
         .from('profiles')
-        .select('id, nickname, avatar_url, points, total_matchups')
+        .select('id, nickname, avatar_url, points, total_matchups, featured_badge')
         .order('points', { ascending: false })
         .limit(10)
-
-      const { data } = await query
-      setRankings(data || [])
+      const list = data || []
+      setRankings(list)
+      setCachedRanking(CACHE_KEY, list)
     } catch (err) {
       console.error(err)
     } finally {
@@ -45,17 +56,17 @@ export function RankingBoard() {
   const displayedRankings = expanded ? rankings : rankings.slice(0, 3)
 
   return (
-    <div className="bg-white border border-gray-100 rounded-2xl shadow-card overflow-hidden">
+    <div className="overflow-hidden bg-gradient-to-b from-white/25 via-transparent to-teal-50/20">
       {/* 탭 */}
-      <div className="flex border-b border-gray-100">
+      <div className="flex border-b border-violet-200/35 bg-white/15">
         {TABS.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={`flex-1 py-3 text-xs font-medium transition-colors ${
               activeTab === tab.id
-                ? 'text-[#22282E] border-b-2 border-[#22282E]'
-                : 'text-gray-400 hover:text-gray-600'
+                ? 'text-violet-950 border-b-2 border-violet-600'
+                : 'text-violet-500/70 hover:text-violet-800'
             }`}
           >
             {tab.label}
@@ -64,7 +75,7 @@ export function RankingBoard() {
       </div>
 
       {/* 헤더 */}
-      <div className="grid grid-cols-12 px-4 py-2 text-xs text-gray-400 border-b border-gray-50">
+      <div className="grid grid-cols-12 px-4 py-2 text-xs text-violet-500/75 border-b border-violet-200/30">
         <span className="col-span-1">#</span>
         <span className="col-span-7">닉네임</span>
         <span className="col-span-2 text-right">포인트</span>
@@ -76,16 +87,16 @@ export function RankingBoard() {
         {loading
           ? Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="px-4 py-3 flex items-center gap-3 animate-pulse">
-                <div className="w-5 h-4 bg-gray-100 rounded" />
-                <div className="w-8 h-8 bg-gray-100 rounded-full" />
-                <div className="flex-1 h-4 bg-gray-100 rounded" />
+                <div className="w-5 h-4 bg-violet-100/80 rounded" />
+                <div className="w-8 h-8 bg-fuchsia-100/70 rounded-full" />
+                <div className="flex-1 h-4 bg-teal-100/60 rounded" />
               </div>
             ))
           : displayedRankings.map((profile, idx) => (
-              <Link
+              <UserProfileBlockLink
                 key={profile.id}
-                to={`/profile/${profile.id}`}
-                className="grid grid-cols-12 px-4 py-3 items-center hover:bg-gray-50 transition-colors"
+                userId={profile.id}
+                className="grid grid-cols-12 px-4 py-3 items-center hover:bg-white/35 transition-colors"
               >
                 <span className="col-span-1 text-sm font-bold">
                   {idx < 3 ? MEDALS[idx] : <span className="text-gray-400 text-xs">{idx + 1}</span>}
@@ -93,9 +104,12 @@ export function RankingBoard() {
                 <div className="col-span-7 flex items-center gap-2 min-w-0">
                   <Avatar src={profile.avatar_url} alt={profile.nickname} size="xs" />
                   <div className="min-w-0">
-                    <span className="text-xs font-medium text-[#22282E] truncate block">
-                      {profile.nickname}
-                    </span>
+                    <div className="flex min-w-0 items-center gap-1">
+                      <span className="text-xs font-medium text-[#22282E] truncate">
+                        {profile.nickname}
+                      </span>
+                      <FeaturedBadgeSpan badgeId={profile.featured_badge} className="translate-y-px shrink-0" />
+                    </div>
                     <LevelBadge points={profile.points || 0} variant="badge" className="text-[10px] px-1.5 py-0" />
                   </div>
                 </div>
@@ -105,7 +119,7 @@ export function RankingBoard() {
                 <span className="col-span-2 text-right text-xs text-gray-400">
                   {profile.total_matchups || 0}
                 </span>
-              </Link>
+              </UserProfileBlockLink>
             ))
         }
       </div>
@@ -114,7 +128,7 @@ export function RankingBoard() {
       {rankings.length > 3 && (
         <button
           onClick={() => setExpanded(!expanded)}
-          className="w-full py-3 flex items-center justify-center gap-1 text-xs text-gray-400 hover:text-[#22282E] hover:bg-gray-50 transition-colors border-t border-gray-50"
+          className="w-full py-3 flex items-center justify-center gap-1 text-xs text-violet-500/75 hover:text-violet-950 hover:bg-white/30 transition-colors border-t border-violet-200/30"
         >
           {expanded ? '접기' : '10위까지 보기'}
           <ChevronDown size={13} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />

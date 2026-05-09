@@ -103,8 +103,8 @@ export function DeletedPage() {
             <div className="w-1.5 h-1.5 rounded-full bg-gray-500" />
           </div>
           <p className="text-xs text-gray-500 leading-relaxed">
-            탈퇴 후에도 동일 이메일로
-            <span className="font-bold text-gray-700"> 언제든 재가입</span>할 수 있습니다.
+            동일 이메일로 재가입은
+            <span className="font-bold text-gray-700"> 탈퇴 시점으로부터 7일 후</span>부터 가능합니다.
           </p>
         </div>
       </div>

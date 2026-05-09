@@ -1,6 +1,23 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
 
+/** Auth 스토리지 락(steal)·중복 요청으로 인한 abort — 사용자 조치 불필요 */
+function isBenignNotificationFetchError(err) {
+  const msg = `${err?.message || ''} ${err?.details || ''} ${err?.hint || ''}`.toLowerCase()
+  if (err?.name === 'AbortError') return true
+  if (msg.includes('aborterror')) return true
+  if (msg.includes('lock broken')) return true
+  if (msg.includes("'steal'")) return true
+  if (msg.includes('steal')) return true
+  if (msg.includes('aborted')) return true
+  return false
+}
+
+/** 짧은 간격 다중 호출 시 Supabase 내부 락/abort 충돌 방지 */
+let notifFetchChain = Promise.resolve()
+/** reset(로그아웃) 이후 늦게 끝난 fetch가 상태를 덮어쓰지 않도록 */
+let notifFetchEpoch = 0
+
 export const useNotificationStore = create((set, get) => ({
   notifications: [],
   unreadCount: 0,
@@ -10,26 +27,37 @@ export const useNotificationStore = create((set, get) => ({
   // 알림 목록 로드
   fetchNotifications: async (userId) => {
     if (!userId) return
-    set({ loading: true })
-    try {
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(50)
+    const epoch = notifFetchEpoch
+    notifFetchChain = notifFetchChain.catch(() => {}).then(async () => {
+      set({ loading: true })
+      try {
+        const { data, error } = await supabase
+          .from('notifications')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(50)
 
-      if (error) throw error
-      const list = data || []
-      set({
-        notifications: list,
-        unreadCount: list.filter((n) => !n.is_read).length,
-      })
-    } catch (err) {
-      console.error('[Notifications] fetch error:', err)
-    } finally {
-      set({ loading: false })
-    }
+        if (error) throw error
+        if (epoch !== notifFetchEpoch) return
+        const list = data || []
+        set({
+          notifications: list,
+          unreadCount: list.filter((n) => !n.is_read).length,
+        })
+      } catch (err) {
+        if (isBenignNotificationFetchError(err)) {
+          if (import.meta.env.DEV) {
+            console.debug('[Notifications] fetch skipped (benign):', err?.message || err?.details)
+          }
+          return
+        }
+        console.error('[Notifications] fetch error:', err)
+      } finally {
+        if (epoch === notifFetchEpoch) set({ loading: false })
+      }
+    })
+    return notifFetchChain
   },
 
   // Supabase Realtime 구독 시작
@@ -101,6 +129,7 @@ export const useNotificationStore = create((set, get) => ({
 
   // 스토어 초기화 (로그아웃)
   reset: () => {
+    notifFetchEpoch += 1
     const { realtimeChannel } = get()
     if (realtimeChannel) supabase.removeChannel(realtimeChannel)
     set({ notifications: [], unreadCount: 0, loading: false, realtimeChannel: null })

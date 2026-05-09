@@ -5,6 +5,9 @@
       "label": "Start Dev Server",
       "type": "shell",
       "command": "npm run dev",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
       "presentation": {
         "reveal": "always",
         "panel": "dedicated",
@@ -13,7 +16,116 @@
       "runOptions": {
         "runOn": "folderOpen"
       },
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "vite",
+        "pattern": { "regexp": "^(.*)$" },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "VITE|vite",
+          "endsPattern": "Local:|ready in"
+        }
+      }
+    },
+    {
+      "label": "브라우저: 유저 앱 (localhost:5173)",
+      "type": "shell",
+      "windows": {
+        "command": "powershell",
+        "args": ["-NoProfile", "-Command", "Start-Process 'http://localhost:5173/'"]
+      },
+      "linux": {
+        "command": "xdg-open",
+        "args": ["http://localhost:5173/"]
+      },
+      "osx": {
+        "command": "open",
+        "args": ["http://localhost:5173/"]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "echo": false,
+        "focus": false,
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "브라우저: 관리자 (localhost:5173/admin)",
+      "type": "shell",
+      "windows": {
+        "command": "powershell",
+        "args": ["-NoProfile", "-Command", "Start-Process 'http://localhost:5173/admin'"]
+      },
+      "linux": {
+        "command": "xdg-open",
+        "args": ["http://localhost:5173/admin"]
+      },
+      "osx": {
+        "command": "open",
+        "args": ["http://localhost:5173/admin"]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "echo": false,
+        "focus": false,
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "브라우저: 유저 + 관리자 (동시)",
+      "dependsOn": [
+        "브라우저: 유저 앱 (localhost:5173)",
+        "브라우저: 관리자 (localhost:5173/admin)"
+      ],
+      "dependsOrder": "parallel",
       "problemMatcher": []
+    },
+    {
+      "label": "브라우저: 유저 화면 2개 (새 창·홈+마이)",
+      "detail": "Edge/Chrome이 있으면 새 창 2개. dev 서버 실행 후 사용하세요.",
+      "type": "shell",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}/scripts/open-dual-browser.ps1"
+        ]
+      },
+      "linux": {
+        "command": "bash",
+        "args": [
+          "-lc",
+          "xdg-open 'http://localhost:5173/' && sleep 0.5 && xdg-open 'http://localhost:5173/mypage'"
+        ]
+      },
+      "osx": {
+        "command": "bash",
+        "args": [
+          "-lc",
+          "open 'http://localhost:5173/' && sleep 0.5 && open 'http://localhost:5173/mypage'"
+        ]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "echo": false,
+        "focus": false,
+        "panel": "shared"
+      }
     }
   ]
 }

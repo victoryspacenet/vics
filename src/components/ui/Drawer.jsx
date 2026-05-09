@@ -23,9 +23,11 @@ export function Drawer({ isOpen, onClose, title, children, className }) {
       />
       <div
         className={cn(
-          'fixed right-0 top-0 h-full bg-white z-50 shadow-2xl transition-transform duration-300 ease-out flex flex-col',
-          'w-full max-w-[min(32rem,100vw)] sm:max-w-lg', // className prop으로 override 가능
-          isOpen ? 'translate-x-0' : 'translate-x-full',
+          // 가운데 정렬: 화면 오른쪽에만 붙어 잘리는 느낌 완화 (left+right+mx-auto)
+          'fixed inset-y-0 left-0 right-0 mx-auto h-full max-h-dvh bg-white z-50 shadow-2xl transition-transform duration-300 ease-out flex flex-col',
+          'w-full max-w-[min(32rem,calc(100vw-1rem))] sm:max-w-lg overflow-x-hidden',
+          // 닫힘: 패널 폭과 무관하게 화면 밖으로 (translate-x-full은 가운데 배치 시 덜 밀림)
+          isOpen ? 'translate-x-0' : 'translate-x-[100vw]',
           className
         )}
       >
@@ -38,7 +40,7 @@ export function Drawer({ isOpen, onClose, title, children, className }) {
             <X size={18} />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto">{children}</div>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">{children}</div>
       </div>
     </>
   )

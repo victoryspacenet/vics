@@ -1,11 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { X, Download, Share2, ChevronLeft, Check, ImageIcon } from 'lucide-react'
-import { Link } from 'react-router-dom'
-import { THEMES, drawCard, generateThumbnail, getPercentile, CARD_W, CARD_H } from '../../lib/cardDraw'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { X, Download, Share2, ChevronLeft, Check, ImageIcon, Lock } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
+import { THEMES, drawCard, generateThumbnail, getPercentile, CARD_W, CARD_H, resolveRankingCardThemeId } from '../../lib/cardDraw'
+import { getTier, getTierById, tierAtLeast } from '../../lib/tiers'
 import { saveToGallery } from '../../lib/galleryUtils'
 import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
 import { RankingCardSaveCompleteModal } from './RankingCardSaveCompleteModal'
+import { safeMediaUrl } from '../../lib/sanitize'
 
 function calcWinRate(wins, losses) {
   const total = (wins || 0) + (losses || 0)
@@ -14,13 +16,24 @@ function calcWinRate(wins, losses) {
 }
 
 // ── 메인 컴포넌트 ────────────────────────────────────────────────────
-export function RankingCardEditor({ rank, nickname, avatar_url, points, period = 'weekly', profile, onClose }) {
+export function RankingCardEditor({ rank, nickname, avatar_url, points, period = 'weekly', profile, rankInfo, onClose }) {
+  const navigate = useNavigate()
   const { user } = useAuthStore()
   const { showToast } = useUIStore()
   const previewRef = useRef(null)
   const avatarRef  = useRef(null)
 
-  const [themeId,     setThemeId]     = useState('platinum')
+  const mergedRankInfo = useMemo(() => {
+    const m = { ...(rankInfo || {}) }
+    if (m.overallRank == null && rank != null) m.overallRank = rank
+    return m
+  }, [rank, rankInfo])
+
+  const userTier = getTier(profile || {}, mergedRankInfo)
+
+  const [themeId,     setThemeId]     = useState(() =>
+    resolveRankingCardThemeId(profile, mergedRankInfo),
+  )
   const [showNick,    setShowNick]    = useState(true)
   const [showPts,     setShowPts]     = useState(true)
   const [showRank,    setShowRank]    = useState(true)
@@ -37,16 +50,13 @@ export function RankingCardEditor({ rank, nickname, avatar_url, points, period =
     img.crossOrigin = 'anonymous'
     img.onload  = () => { avatarRef.current = img; scheduleRedraw() }
     img.onerror = () => { avatarRef.current = null }
-    img.src = avatar_url
+    img.src = safeMediaUrl(avatar_url)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [avatar_url])
 
-  // ESC 닫기
   useEffect(() => {
-    const fn = (e) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', fn)
-    return () => window.removeEventListener('keydown', fn)
-  }, [onClose])
+    setThemeId(resolveRankingCardThemeId(profile, mergedRankInfo))
+  }, [profile, mergedRankInfo])
 
   const getOpts = useCallback(() => ({
     rank, nickname, points, period, themeId,
@@ -145,7 +155,8 @@ export function RankingCardEditor({ rank, nickname, avatar_url, points, period =
           40%     { transform: scale(1.06); }
         }
         .ec-theme-btn { transition: transform 0.15s, border-color 0.15s, background 0.15s; }
-        .ec-theme-btn:hover { transform: translateY(-2px); }
+        .ec-theme-btn:hover:not(:disabled) { transform: translateY(-2px); }
+        .ec-theme-btn:disabled { cursor: not-allowed; opacity: 0.42; }
         .ec-action { transition: filter 0.15s, transform 0.1s; }
         .ec-action:hover { filter: brightness(1.1); }
         .ec-action:active { transform: scale(0.97); }
@@ -160,7 +171,6 @@ export function RankingCardEditor({ rank, nickname, avatar_url, points, period =
           display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
           background: 'rgba(0,0,0,0.92)', backdropFilter: 'blur(12px)',
         }}
-        onClick={(e) => e.target === e.currentTarget && onClose()}
       >
         {/* 패널 */}
         <div style={{
@@ -234,35 +244,53 @@ export function RankingCardEditor({ rank, nickname, avatar_url, points, period =
               <div>
                 <p style={{ color:'rgba(255,255,255,0.4)',fontSize:10,fontWeight:900,
                   letterSpacing:'0.12em',textTransform:'uppercase',margin:'0 0 10px' }}>카드 테마</p>
-                <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
+                <p style={{ color:'rgba(255,255,255,0.22)', fontSize:10, margin:'0 0 10px', lineHeight:1.45 }}>
+                  현재 등급(<strong style={{ color:'rgba(251,191,36,0.85)' }}>{userTier.name}</strong>) 이하 티어의 테마를 골라 쓸 수 있어요.
+                </p>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(5, minmax(0, 1fr))', gap:6 }}>
                   {THEMES.map(th => {
                     const active = themeId === th.id
+                    const locked = !tierAtLeast(userTier, th.tierId)
+                    const tierName = getTierById(th.tierId).name
                     return (
-                      <button key={th.id} className="ec-theme-btn"
-                        onClick={() => setThemeId(th.id)}
+                      <button key={th.id} className="ec-theme-btn" type="button"
+                        disabled={locked}
+                        title={locked ? `${tierName} 등급 전용 테마입니다` : `${tierName} 테마`}
+                        onClick={() => { if (!locked) setThemeId(th.id) }}
                         style={{
-                          position:'relative', cursor:'pointer',
-                          display:'flex', flexDirection:'column', alignItems:'center', gap:7,
-                          padding:'10px 6px 8px',
+                          position:'relative',
+                          display:'flex', flexDirection:'column', alignItems:'center', gap:5,
+                          padding:'8px 4px 6px',
                           background: active ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.04)',
                           border: active ? '2px solid rgba(255,255,255,0.6)' : '2px solid rgba(255,255,255,0.1)',
-                          borderRadius:16,
+                          borderRadius:14,
                         }}>
                         <div style={{
-                          width:38, height:52, borderRadius:10,
+                          width:34, height:46, borderRadius:9,
                           background:`linear-gradient(135deg,${th.swatch[0]},${th.swatch[1]})`,
                           boxShadow:`0 3px 10px ${th.swatch[2]}55`, position:'relative', overflow:'hidden',
                         }}>
-                          <div style={{ position:'absolute',bottom:4,right:4,width:12,height:12,
+                          <div style={{ position:'absolute',bottom:3,right:3,width:10,height:10,
                             borderRadius:'50%',background:th.swatch[2],opacity:0.8 }} />
+                          {locked && (
+                            <div style={{
+                              position:'absolute', inset:0, background:'rgba(0,0,0,0.45)',
+                              display:'flex', alignItems:'center', justifyContent:'center',
+                            }}>
+                              <Lock size={14} color="rgba(255,255,255,0.85)" strokeWidth={2.5} />
+                            </div>
+                          )}
                         </div>
-                        <p style={{ color:active?'#fff':'rgba(255,255,255,0.55)',fontSize:10,fontWeight:900,margin:0 }}>
+                        <p style={{
+                          color:active?'#fff':'rgba(255,255,255,0.55)',fontSize:9,fontWeight:900,margin:0,
+                          textAlign:'center', lineHeight:1.2,
+                        }}>
                           {th.emoji} {th.label}
                         </p>
-                        {active && (
-                          <div style={{ position:'absolute',top:5,right:5,width:15,height:15,
+                        {active && !locked && (
+                          <div style={{ position:'absolute',top:4,right:4,width:14,height:14,
                             borderRadius:'50%',background:'#fff',display:'flex',alignItems:'center',justifyContent:'center' }}>
-                            <Check size={9} color="#0f1117" />
+                            <Check size={8} color="#0f1117" />
                           </div>
                         )}
                       </button>
@@ -376,7 +404,10 @@ export function RankingCardEditor({ rank, nickname, avatar_url, points, period =
           rank={rank}
           nickname={nickname}
           winRate={calcWinRate(profile?.wins, profile?.losses)}
-          onClose={() => setShowSaveComplete(false)}
+          onClose={() => {
+            navigate('/ranking')
+            onClose()
+          }}
           onConfirm={onClose}
         />
       )}

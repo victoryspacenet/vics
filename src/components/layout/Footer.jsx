@@ -1,33 +1,40 @@
 import { Link } from 'react-router-dom'
 import { Logo } from '../ui/Logo'
+import { useAuthStore } from '../../store/authStore'
+import { canAccessAdmin } from '../../lib/adminAuth'
 
 const SITEMAP = {
   SERVICE: [
     { label: '매치업 피드', to: '/matchups' },
     { label: '실시간 투표', to: '/' },
-    { label: '이벤트/챌린지', to: '/landing' },
+    { label: '이벤트/챌린지', to: '/events' },
   ],
   COMMUNITY: [
     { label: '유저 랭킹', to: '/ranking' },
-    { label: '명예의 전당', to: '/ranking' },
-    { label: '커뮤니티 가이드', to: '/landing' },
+    { label: '명예의 전당', to: '/hall-of-fame' },
+    { label: '커뮤니티 가이드', to: '/community-policy' },
   ],
   SUPPORT: [
-    { label: '공지사항', to: '/landing' },
-    { label: '자주 묻는 질문(FAQ)', to: '/landing' },
-    { label: '1:1 문의하기', to: '/landing' },
+    { label: '공지사항', to: '/notice' },
+    { label: '자주 묻는 질문(FAQ) & 1:1 문의하기', to: '/inquiry' },
   ],
 }
 
 const SOCIAL = [
   { label: 'Instagram', icon: '📸', href: 'https://instagram.com' },
   { label: 'Youtube', icon: '📺', href: 'https://youtube.com' },
-  { label: 'Discord', icon: '💬', href: 'https://discord.com' },
+  { label: '틱톡', icon: '🎵', href: 'https://www.tiktok.com' },
 ]
 
 export function Footer() {
+  const { user } = useAuthStore()
+  const supportLinks = [
+    ...SITEMAP.SUPPORT,
+    ...(canAccessAdmin(user) ? [{ label: '관리자', to: '/admin/dashboard' }] : []),
+  ]
+
   return (
-    <footer className="bg-[#1A1A1A] text-[#999999]">
+    <footer className="bg-gradient-to-b from-[#1e1e1e] via-[#1A1A1A] to-[#111111] text-[#999999] max-lg:pb-[calc(4.25rem+env(safe-area-inset-bottom,0px)+0.75rem)]">
       <div className="max-w-screen-lg mx-auto px-4 py-8 sm:py-10">
         {/* ① 브랜드 슬로건 (가로형) */}
         <div className="flex flex-row items-center gap-3 sm:gap-4 mb-6 pb-4 border-b border-white/10">
@@ -41,8 +48,8 @@ export function Footer() {
           </p>
         </div>
 
-        {/* ② 4열 사이트맵 (가로형) */}
-        <div className="flex flex-col gap-3 mb-6">
+        {/* ② 사이트맵 + INFORMATION (행 간격 동일: gap-3) */}
+        <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="text-white text-xs font-black uppercase tracking-widest shrink-0">SERVICE</span>
             <span className="text-[#999999]/50">|</span>
@@ -70,17 +77,17 @@ export function Footer() {
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="text-white text-xs font-black uppercase tracking-widest shrink-0">SUPPORT</span>
             <span className="text-[#999999]/50">|</span>
-            {SITEMAP.SUPPORT.map((item, i) => (
+            {supportLinks.map((item, i) => (
               <span key={item.label} className="inline-flex items-center gap-x-3">
                 <Link to={item.to} className="text-sm hover:text-white transition-colors break-words">
                   {item.label}
                 </Link>
-                {i < SITEMAP.SUPPORT.length - 1 && <span className="text-[#999999]/50">|</span>}
+                {i < supportLinks.length - 1 && <span className="text-[#999999]/50">|</span>}
               </span>
             ))}
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="text-white text-xs font-black uppercase tracking-widest shrink-0">FOLLOW US</span>
+            <span className="text-white text-xs font-black uppercase tracking-widest shrink-0">WITH US</span>
             <span className="text-[#999999]/50">|</span>
             {SOCIAL.map((item, i) => (
               <span key={item.label} className="inline-flex items-center gap-x-3">
@@ -96,21 +103,28 @@ export function Footer() {
               </span>
             ))}
           </div>
-        </div>
-
-        {/* ③ 법적 고지 및 정책 */}
-        <div className="space-y-2 text-xs break-words">
-          <div className="flex flex-wrap gap-x-4 gap-y-1">
-            <Link to="/privacy" className="font-bold text-white hover:text-white/80 break-words">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="text-white text-xs font-black uppercase tracking-widest shrink-0">INFORMATION</span>
+            <span className="text-[#999999]/50">|</span>
+            <Link to="/privacy" className="text-sm hover:text-white transition-colors break-words">
               개인정보처리방침
             </Link>
-            <Link to="/terms" className="hover:text-white transition-colors break-words">이용약관</Link>
-            <Link to="/community-policy" className="hover:text-white transition-colors break-words">커뮤니티운영정책</Link>
-            <a href="mailto:contact@victoryspace.com" className="hover:text-white transition-colors break-words">광고/제휴문의</a>
+            <span className="text-[#999999]/50">|</span>
+            <Link to="/terms" className="text-sm hover:text-white transition-colors break-words">
+              이용약관
+            </Link>
+            <span className="text-[#999999]/50">|</span>
+            <Link
+              to="/events?from=partner"
+              className="text-sm hover:text-white transition-colors break-words"
+            >
+              광고/제휴문의
+            </Link>
           </div>
-          <p className="text-[#999999]/80 leading-relaxed break-words">
-            (주)빅토리스페이스 | 대표: 임성빈 | 사업자등록번호: 000-00-00000 | 서울특별시 강남구 테헤란로 123
-          </p>
+        </div>
+
+        {/* ③ 사업자·저작권 */}
+        <div className="mt-3 space-y-2 text-xs break-words">
           <p className="text-[#999999]/60">
             Copyright © 2026 VictorySpace Inc. All Rights Reserved.
           </p>

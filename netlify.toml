@@ -3,6 +3,40 @@
   publish = "dist"
 
 [[redirects]]
+  from = "/api/vote"
+  to = "/.netlify/functions/vote"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/inquiry-reply-email"
+  to = "/.netlify/functions/inquiry-reply-email"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/system-push-dispatch"
+  to = "/.netlify/functions/system-push-dispatch"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/login-fail-notify"
+  to = "/.netlify/functions/login-fail-notify"
+  status = 200
+  force = true
+
+# SLA 미처리 문의 리마인드 — 매시간 Supabase RPC `check_sla_and_notify` 호출
+[functions."sla-inquiry-reminders"]
+schedule = "@hourly"
+
+[[redirects]]
+  from = "/matchup/*"
+  to = "/.netlify/functions/matchup-og"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

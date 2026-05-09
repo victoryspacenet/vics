@@ -1,13 +1,44 @@
+import { TIERS, getTier } from './tiers'
+
 // ── 카드 원본 해상도 ──────────────────────────────────────────────────
 export const CARD_W = 1080
 export const CARD_H = 1920
 
-// ── 테마 정의 ─────────────────────────────────────────────────────────
+// ── 테마 정의 (tierId = 매치업 등급 Player·Star·Master·Vip·Goat, id는 갤러리 호환 유지) ──
 export const THEMES = [
   {
+    id: 'slate',
+    tierId: 'player',
+    label: 'Player',
+    emoji: '🎮',
+    swatch: ['#111827', '#374151', '#9ca3af'],
+    accent: '#9CA3AF', accentRGB: '156,163,175',
+    bgFn: (ctx, W, H) => {
+      const g = ctx.createLinearGradient(0, 0, W, H)
+      g.addColorStop(0, '#0b0f14'); g.addColorStop(1, '#1f2937')
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H)
+    },
+    textQuote: 'rgba(255,255,255,0.45)',
+  },
+  {
+    id: 'ember',
+    tierId: 'star',
+    label: 'Star',
+    emoji: '⭐',
+    swatch: ['#451a03', '#b45309', '#fde68a'],
+    accent: '#FBBF24', accentRGB: '251,191,36',
+    bgFn: (ctx, W, H) => {
+      const g = ctx.createRadialGradient(W * 0.35, H * 0.12, 0, W * 0.5, H * 0.45, H * 0.75)
+      g.addColorStop(0, '#78350f'); g.addColorStop(0.45, '#451a03'); g.addColorStop(1, '#0c0a09')
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H)
+    },
+    textQuote: 'rgba(255,255,255,0.55)',
+  },
+  {
     id: 'platinum',
-    label: '플래티넘',
-    emoji: '🎨',
+    tierId: 'master',
+    label: 'Master',
+    emoji: '🔥',
     swatch: ['#1f2040', '#2a2a55', '#9ca3af'],
     accent: '#CBD5E1', accentRGB: '203,213,225',
     bgFn: (ctx, W, H) => {
@@ -19,7 +50,8 @@ export const THEMES = [
   },
   {
     id: 'diamond',
-    label: '다이아',
+    tierId: 'vip',
+    label: 'Vip',
     emoji: '💎',
     swatch: ['#020818', '#0d1b3e', '#60a5fa'],
     accent: '#60A5FA', accentRGB: '96,165,250',
@@ -38,8 +70,9 @@ export const THEMES = [
   },
   {
     id: 'gradient',
-    label: '그라데이션',
-    emoji: '🌈',
+    tierId: 'goat',
+    label: 'Goat',
+    emoji: '👑',
     swatch: ['#7c3aed', '#db2777', '#f97316'],
     accent: '#FDE68A', accentRGB: '253,230,138',
     bgFn: (ctx, W, H) => {
@@ -54,6 +87,13 @@ export const THEMES = [
   },
 ]
 
+/** 현재 프로필·랭크 정보에 맞는 카드 테마 id (편집기 초기값·동기화용) */
+export function resolveRankingCardThemeId(profile, rankInfo = {}) {
+  const tier = getTier(profile || {}, rankInfo || {})
+  const th = THEMES.find((x) => x.tierId === tier.id)
+  return th?.id ?? THEMES[0].id
+}
+
 // ── 헬퍼 ──────────────────────────────────────────────────────────────
 export function getPercentile(rank) {
   if (rank === 1) return '상위 0.01%'
@@ -66,13 +106,14 @@ export function getMedal(rank) {
   return { 1: '🥇', 2: '🥈', 3: '🥉' }[rank] || '🎖️'
 }
 
+/** 순위 구간별 표시 — 랜딩 «매치업 등급 배지»(Player·Star·Master·Vip·Goat)와 동일 명칭 */
 export function getTierInfo(rank) {
-  if (rank === 1)  return { name: 'CHAMPION',   emoji: '👑', color: '#FFD700', bg: 'linear-gradient(135deg,#78350f,#fbbf24)' }
-  if (rank === 2)  return { name: 'DIAMOND I',  emoji: '💎', color: '#60A5FA', bg: 'linear-gradient(135deg,#1e3a5f,#60a5fa)' }
-  if (rank === 3)  return { name: 'DIAMOND II', emoji: '💎', color: '#93C5FD', bg: 'linear-gradient(135deg,#1e3a5f,#93c5fd)' }
-  if (rank <= 5)   return { name: 'PLATINUM I', emoji: '🔷', color: '#CBD5E1', bg: 'linear-gradient(135deg,#1f2040,#cbd5e1)' }
-  if (rank <= 7)   return { name: 'GOLD I',     emoji: '⭐', color: '#FCD34D', bg: 'linear-gradient(135deg,#451a03,#fcd34d)' }
-  return             { name: 'GOLD II',    emoji: '⭐', color: '#F59E0B', bg: 'linear-gradient(135deg,#451a03,#f59e0b)' }
+  const [player, star, master, vip, goat] = TIERS
+  if (rank === 1) return { name: goat.name, emoji: goat.emoji, color: '#CA8A04', bg: 'linear-gradient(135deg,#78350f,#fbbf24)' }
+  if (rank <= 3) return { name: vip.name, emoji: vip.emoji, color: '#7C3AED', bg: 'linear-gradient(135deg,#1e1b4b,#a78bfa)' }
+  if (rank <= 5) return { name: master.name, emoji: master.emoji, color: '#EA580C', bg: 'linear-gradient(135deg,#7c2d12,#fb923c)' }
+  if (rank <= 7) return { name: star.name, emoji: star.emoji, color: '#F59E0B', bg: 'linear-gradient(135deg,#451a03,#fcd34d)' }
+  return { name: player.name, emoji: player.emoji, color: '#6B7280', bg: 'linear-gradient(135deg,#1f2937,#9ca3af)' }
 }
 
 export function getPeriodLines(period) {
