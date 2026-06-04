@@ -160,6 +160,9 @@ export function RankingCelebrationModal({
           if (d.reason === 'not_top10') {
             setBonusNotTop10(true)
             showToast('실제 랭킹 기준으로는 TOP10 보너스 대상이 아니에요.', 'error')
+          } else if (d.reason === 'no_platform_activity' || d.reason === 'no_ranking_activity') {
+            setBonusNotTop10(true)
+            showToast('아직 투표가 진행된 매치업이 없어 축하 보너스를 받을 수 없어요.', 'info')
           } else {
             setBonusRpcError(d.error || 'unknown')
             const msg = d.error === 'not_authenticated'
@@ -181,7 +184,7 @@ export function RankingCelebrationModal({
         if (seq === claimSeqRef.current) setBonusLoading(false)
       }
     })()
-  }, [userId, typeTab, sortBy, period, expectedBonusP])
+  }, [userId, profile, typeTab, sortBy, period, expectedBonusP])
 
   // ── 캔버스 공유 카드 생성 (9:16) ────────────────────────────────
   const generateCard = useCallback(async () => {

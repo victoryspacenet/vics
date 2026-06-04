@@ -1,5 +1,7 @@
 /** 문의하기 FAQ 공통 데이터 */
 
+import { RANKING_CELEBRATION_AMOUNTS } from './rankingCelebrationRewards'
+
 /** 메인 페이지 상단 노출용 FAQ ID 순서 (Supabase 설정 전 기본값) */
 export const FAQ_MAIN_IDS = ['1', '2', '3']
 
@@ -16,7 +18,7 @@ export const FAQ_MAIN_IDS = ['1', '2', '3']
  * @property {string[]} [steps] - 번호 매긴 단계별 답변 (가독성)
  * @property {FaqAction[]} [actions] - 즉시 실행 딥링크
  * @property {string} [illustration] - 'points' | 'vote' | 'report' | 'profile' | 'ranking' | 'delete' - 간단 일러스트 타입
- * @property {'matchup'|'account'|'report'} [category] - 문의하기 카테고리별 도움말 구분
+ * @property {'matchup'|'account'|'report'|'ranking'} [category] - 문의하기 카테고리별 도움말 구분
  */
 
 export const FAQ_ITEMS = {
@@ -110,12 +112,28 @@ export const FAQ_ITEMS = {
       { text: '마이페이지', to: '/mypage' },
     ],
     illustration: 'ranking',
-    category: 'matchup',
+    category: 'ranking',
+  },
+  '8': {
+    question: '랭킹 축하 보너스 금액 기준은?',
+    answer: '랭킹 TOP10에 들면 순위별 축하 보너스 포인트가 지급됩니다.',
+    steps: [
+      `1위 ${RANKING_CELEBRATION_AMOUNTS.rank1.toLocaleString('ko-KR')}P, 2위 ${RANKING_CELEBRATION_AMOUNTS.rank2.toLocaleString('ko-KR')}P, 3위 ${RANKING_CELEBRATION_AMOUNTS.rank3.toLocaleString('ko-KR')}P, 4~10위 각 ${RANKING_CELEBRATION_AMOUNTS.rank4to10.toLocaleString('ko-KR')}P입니다.`,
+      '이번 주·이번 달·전체 등 랭킹 기간·탭·정렬 조합마다 1회씩 수령할 수 있어요.',
+      '랭킹 화면에서 축하 카드가 뜨면 보너스를 받을 수 있습니다.',
+      '실제 랭킹 집계·투표 활동이 없으면 지급되지 않을 수 있어요.',
+    ],
+    actions: [
+      { text: '랭킹 보기', to: '/ranking' },
+      { text: '포인트 리워드', to: '/rewards' },
+    ],
+    illustration: 'ranking',
+    category: 'ranking',
   },
 }
 
 /** 관리자 화면에서 고를 수 있는 전체 FAQ id */
 export const FAQ_ALL_IDS = Object.keys(FAQ_ITEMS).sort((a, b) => Number(a) - Number(b))
 
-/** 문의하기 — 카테고리 슬러그 (매치업 / 계정 / 신고) */
-export const INQUIRY_CATEGORY_SLUGS = ['matchup', 'account', 'report']
+/** 문의하기 — 카테고리 슬러그 (매치업 / 계정 / 신고 / 랭킹) */
+export const INQUIRY_CATEGORY_SLUGS = ['matchup', 'account', 'report', 'ranking']

@@ -4,6 +4,8 @@ import { ChevronDown, ImagePlus, List, Loader2, Pencil, Rocket } from 'lucide-re
 import { useUIStore } from '../store/uiStore'
 import { savePopupNotice, getImmediateStartAt, resolveImmediateEndAt } from '../lib/popupNoticeStorage'
 import { getNoticeOptionsForPopup } from '../lib/noticeStorage'
+import { compressImageFileToDataUrl } from '../lib/imageCompression'
+import { MATCHUP_IMAGE_INPUT_ACCEPT, validateSelectableRasterImageUpload } from '../lib/uploadMediaValidation'
 import { TIERS } from '../lib/tiers'
 import { Modal } from '../components/ui/Modal'
 
@@ -87,6 +89,7 @@ export function PopupNoticeAdminPage() {
   const [linkNoticeId, setLinkNoticeId] = useState('')
   const [linkMatchupId, setLinkMatchupId] = useState('')
   const [editId, setEditId] = useState(null)
+  const [imageBusy, setImageBusy] = useState(false)
 
   const [noticeOptions, setNoticeOptions] = useState([])
   useEffect(() => {
@@ -128,16 +131,32 @@ export function PopupNoticeAdminPage() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const handleImageChange = (e) => {
+  const handleImageChange = async (e) => {
     const file = e.target.files?.[0]
+    e.target.value = ''
     if (!file) return
     if (!file.type.startsWith('image/')) {
       showToast('이미지 파일만 업로드 가능해요.', 'error')
       return
     }
-    const reader = new FileReader()
-    reader.onload = () => setImageUrl(reader.result)
-    reader.readAsDataURL(file)
+    const sniff = await validateSelectableRasterImageUpload(file)
+    if (!sniff.ok) {
+      showToast(sniff.message, 'error')
+      return
+    }
+    setImageBusy(true)
+    try {
+      const dataUrl = await compressImageFileToDataUrl(file, {
+        maxEdge: 900,
+        quality: 0.78,
+        maxBytes: 600 * 1024,
+      })
+      setImageUrl(dataUrl)
+    } catch {
+      showToast('이미지를 불러오지 못했어요.', 'error')
+    } finally {
+      setImageBusy(false)
+    }
   }
 
   const handleSaveDraft = async () => {
@@ -504,10 +523,10 @@ export function PopupNoticeAdminPage() {
               <label className="mb-1 block text-sm font-bold text-gray-700">팝업 이미지</label>
               <p className="mb-2 text-xs text-gray-500">권장 사이즈: 600×800px</p>
               <div className="flex flex-wrap items-start gap-4">
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-2 text-sm font-bold text-gray-700 hover:bg-gray-100">
+                <label className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-2 text-sm font-bold text-gray-700 hover:bg-gray-100 ${imageBusy ? 'pointer-events-none opacity-60' : ''}`}>
                   <ImagePlus size={18} />
-                  파일 선택
-                  <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
+                  {imageBusy ? '압축 중…' : '파일 선택'}
+                  <input type="file" accept={MATCHUP_IMAGE_INPUT_ACCEPT} onChange={handleImageChange} className="hidden" disabled={imageBusy} />
                 </label>
                 {imageUrl && (
                   <div className="h-36 w-28 shrink-0 overflow-hidden rounded-lg border border-gray-200">

@@ -12,7 +12,7 @@ export function Button({
     <button
       disabled={disabled}
       className={cn(
-        'inline-flex items-center justify-center font-medium transition-all duration-150 rounded-xl select-none',
+        'inline-flex items-center justify-center font-medium transition-all duration-150 rounded-xl select-none touch-manipulation',
         {
           'bg-[#22282E] text-white hover:bg-[#363d46] active:scale-[0.98]': variant === 'primary',
           'bg-white text-[#22282E] border border-gray-200 hover:bg-gray-50 active:scale-[0.98]': variant === 'outline',
@@ -23,10 +23,11 @@ export function Button({
           'opacity-40 pointer-events-none': disabled,
         },
         {
-          'px-3 py-1.5 text-xs gap-1.5': size === 'sm',
-          'px-4 py-2 text-sm gap-2': size === 'md',
-          'px-6 py-3 text-base gap-2': size === 'lg',
-          'w-full px-4 py-3 text-sm gap-2': size === 'full',
+          /* 모바일: 최소 44px 터치 높이 · lg 이상에서 기존 컴팩트 값 */
+          'min-h-11 gap-1.5 px-4 py-2.5 text-sm lg:min-h-9 lg:px-3 lg:py-1.5 lg:text-xs': size === 'sm',
+          'min-h-12 gap-2 px-5 py-3 text-sm lg:min-h-10 lg:px-4 lg:py-2': size === 'md',
+          'min-h-12 gap-2 px-6 py-3.5 text-base lg:min-h-11 lg:py-3': size === 'lg',
+          'min-h-12 w-full gap-2 px-4 py-3.5 text-sm lg:min-h-11 lg:py-3': size === 'full',
         },
         className
       )}

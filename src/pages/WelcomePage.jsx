@@ -4,6 +4,7 @@ import confetti from 'canvas-confetti'
 import { Trophy, Zap, Star } from 'lucide-react'
 import { Logo } from '../components/ui/Logo'
 import { supabase } from '../lib/supabase'
+import { SIGNUP_BONUS_POINTS } from '../lib/signupRewards'
 
 // 컨페티 색상 — 네온 브랜드 계열
 const CONFETTI_COLORS = [
@@ -168,9 +169,11 @@ export function WelcomePage() {
                   <Zap size={20} className="text-white" />
                 </div>
                 <div className="flex-1">
-                  <p className="text-xs font-bold text-white/60 mb-0.5">가입 보상 포인트</p>
-                  <p className="text-lg font-black text-white leading-none">
-                    💎 <span className="bg-gradient-to-r from-amber-300 to-orange-400 bg-clip-text text-transparent">+1,000 P</span>
+                  <p className="text-lg font-black text-white leading-snug">
+                    <span className="text-white">가입 보상 포인트 💎 </span>
+                    <span className="bg-gradient-to-r from-amber-300 to-orange-400 bg-clip-text text-transparent">
+                      +{SIGNUP_BONUS_POINTS.toLocaleString('ko-KR')} P
+                    </span>
                   </p>
                 </div>
                 <span className="px-2.5 py-1 rounded-full bg-amber-400/20 border border-amber-400/30 text-amber-300 text-[10px] font-black">
@@ -180,15 +183,15 @@ export function WelcomePage() {
 
               <div className="border-t border-white/10" />
 
-              {/* 배지 보상 */}
+              {/* 티어 보상 */}
               <div className="flex items-center gap-3">
                 <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-violet-500/30 shrink-0">
                   <Star size={20} className="text-white" />
                 </div>
                 <div className="flex-1">
-                  <p className="text-xs font-bold text-white/60 mb-0.5">첫 번째 배지 획득</p>
+                  <p className="text-xs font-bold text-white/60 mb-0.5">첫 번째 티어 획득</p>
                   <p className="text-base font-black text-white leading-none">
-                    🏅 <span className="text-fuchsia-300">'새싹의 안목'</span>
+                    <span className="text-fuchsia-300">'🎮Player'</span>
                   </p>
                 </div>
                 <span className="px-2.5 py-1 rounded-full bg-fuchsia-400/20 border border-fuchsia-400/30 text-fuchsia-300 text-[10px] font-black">

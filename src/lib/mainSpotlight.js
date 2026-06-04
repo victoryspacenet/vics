@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
-import { SPOTLIGHT_DEMO_MATCHUP_IDS } from './spotlightDemo'
+import { isSpotlightDemoMatchup, SPOTLIGHT_DEMO_MATCHUP_IDS } from './spotlightDemo'
+import { isMainSeedMatchup } from './seedMatchupTitles'
 
 export const MAIN_SPOTLIGHT_1H_COST = 5000
 /** 서버 RPC 노출 구간과 동일 (6시간) */
@@ -145,16 +146,17 @@ export async function fetchSpotlightDemoMatchups(viewerUserId) {
   }))
 }
 
-/** 내가 만든·완료된 활성 매치업 — 스포트라이트 후보 */
+/** 내가 만든·완료된 활성 매치업 — 스포트라이트 후보 (스포트라이트 데모·is_demo 제외) */
 export async function fetchSpotlightEligibleMatchups(userId) {
   if (!userId) return []
   const { data, error } = await supabase
     .from('matchups')
     .select(
-      'id, title, left_label, right_label, left_thumbnail_url, right_thumbnail_url, left_type, right_type, total_votes, created_at'
+      'id, title, left_label, right_label, left_thumbnail_url, right_thumbnail_url, left_type, right_type, total_votes, created_at, is_demo, category'
     )
     .eq('user_id', userId)
     .eq('status', 'active')
+    .eq('is_demo', false)
     .not('right_type', 'is', null)
     .order('created_at', { ascending: false })
     .limit(50)
@@ -163,7 +165,12 @@ export async function fetchSpotlightEligibleMatchups(userId) {
     if (import.meta.env.DEV) console.warn('[fetchSpotlightEligibleMatchups]', error.message)
     return []
   }
-  return data || []
+  return (data || []).filter(
+    (m) =>
+      !isSpotlightDemoMatchup(m) &&
+      !isMainSeedMatchup(m) &&
+      m.category !== 'spotlight_demo'
+  )
 }
 
 const emptySlotStatus = () => ({

@@ -1,10 +1,12 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, ChevronRight, Flame, LayoutTemplate, Pencil, MessageCircle } from 'lucide-react'
-import { getAdminNotices } from '../lib/noticeStorage'
+import { ArrowLeft, ChevronRight, Flame, LayoutTemplate, List, Pencil, MessageCircle } from 'lucide-react'
+import { getAdminNoticesPaged, getAdminPinnedNoticeCandidates } from '../lib/noticeStorage'
+import { filterPublicNoticeRows } from '../lib/noticePublicFeed'
 import { useAuthStore } from '../store/authStore'
 import { canAccessAdmin } from '../lib/adminAuth'
 import { cn } from '../lib/utils'
+import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../lib/layoutShellClasses'
 import { canViewNotice } from '../lib/tiers'
 import { NoticeExposureBadge } from '../components/notice/NoticeExposureBadge'
 import {
@@ -20,18 +22,6 @@ const SECTION_CARD =
   'rounded-2xl border border-pink-100/60 bg-white/92 shadow-[0_4px_28px_-10px_rgba(244,114,182,0.18)] backdrop-blur-[2px]'
 const HEADER_GLASS =
   'bg-gradient-to-b from-white/90 via-rose-50/40 to-fuchsia-50/20 backdrop-blur-md border-b border-pink-100/55'
-
-// ── 목업 데이터 (카테고리별 2개씩) ──────────────────────────────────
-const MOCK_NOTICES = [
-  { id: '1', category: 'event',  tag: '이벤트',  tagColor: 'bg-amber-100 text-amber-700',                                       title: '나이키 vs 아디다스 배틀 오픈!',    summary: '역대급 브랜드 경쟁에 참여하고 포인트를 받아가세요.', date: '2026.01.24', author: '운영팀',  isBanner: true  },
-  { id: '2', category: 'notice', tag: '공지',    tagColor: 'bg-fuchsia-100 text-fuchsia-800 border border-fuchsia-200/50',     title: '시스템 점검 안내',                 summary: '2026년 1월 25일 새벽 2시~4시 서비스 점검이 진행됩니다.', date: '2026.01.24', author: '관리자', isBanner: false },
-  { id: '3', category: 'event',  tag: '이벤트',  tagColor: 'bg-amber-100 text-amber-700',                                       title: '승리 예측 성공하고 포인트 받자!',   summary: '투표 적중 시 추가 포인트 2배 이벤트 진행 중.', date: '2026.01.23', author: '운영팀',  isBanner: false },
-  { id: '4', category: 'update', tag: '업데이트', tagColor: 'bg-sky-100 text-sky-800 border border-sky-200/50',                 title: '프로필 배지 기능 추가!',           summary: '새로운 배지로 나의 성과를 자랑해 보세요.', date: '2026.01.20', author: '개발팀', isBanner: false },
-  { id: '5', category: 'winner', tag: '당첨자',  tagColor: 'bg-emerald-100 text-emerald-700',                                   title: '1월 2주차 이벤트 당첨자 발표',     summary: '나이키 vs 아디다스 투표 이벤트 당첨자를 확인하세요.', date: '2026.01.18', author: '운영팀', isBanner: false },
-  { id: '6', category: 'notice', tag: '공지',    tagColor: 'bg-fuchsia-100 text-fuchsia-800 border border-fuchsia-200/50',     title: '개인정보처리방침 개정 안내',       summary: '2026년 1월 15일부터 개정된 방침이 적용됩니다.', date: '2026.01.14', author: '관리자', isBanner: false },
-  { id: '7', category: 'update', tag: '업데이트', tagColor: 'bg-sky-100 text-sky-800 border border-sky-200/50',                 title: '알림 기능 개선',                   summary: '실시간 알림 푸시 지원', date: '2026.01.10', author: '개발팀', isBanner: false },
-  { id: '8', category: 'winner', tag: '당첨자',  tagColor: 'bg-emerald-100 text-emerald-700',                                   title: '1월 1주차 당첨자',                 summary: '연말 이벤트 당첨자 발표', date: '2026.01.08', author: '운영팀', isBanner: false },
-]
 
 const FILTER_TABS = [
   { id: 'all', label: '전체' },
@@ -50,51 +40,67 @@ export function NoticePage() {
   const filterFromUrl = searchParams.get('filter')
   const filter = FILTER_TABS.some((t) => t.id === filterFromUrl) ? filterFromUrl : 'all'
 
-  const [adminNotices, setAdminNotices] = useState([])
+  const [adminListRows, setAdminListRows] = useState([])
+  const [adminTotalCount, setAdminTotalCount] = useState(0)
+  const [bannerNotice, setBannerNotice] = useState(null)
+  const [listLoading, setListLoading] = useState(true)
+
+  const pageFromUrl = parseNoticePageParam(searchParams.get('page'))
+  const totalPages = Math.max(1, Math.ceil(adminTotalCount / PAGE_SIZE))
+  const page = Math.min(pageFromUrl, totalPages)
 
   useEffect(() => {
     let cancelled = false
-    const reload = () => {
-      getAdminNotices().then((list) => { if (!cancelled) setAdminNotices(list) })
+    const reload = async () => {
+      setListLoading(true)
+      try {
+        const [pinned, pageData] = await Promise.all([
+          getAdminPinnedNoticeCandidates({ category: filter, limit: 10, forPublicFeed: true }),
+          getAdminNoticesPaged({
+            page,
+            pageSize: PAGE_SIZE,
+            category: filter,
+            listOnly: true,
+            forPublicFeed: true,
+          }),
+        ])
+        if (cancelled) return
+        const prof = profile ?? null
+        const visibleRows = filterPublicNoticeRows(pageData.notices).filter((n) =>
+          canViewNotice(n, prof),
+        )
+        const pinnedVisible = filterPublicNoticeRows(pinned)
+        const banner =
+          pinnedVisible.find((n) => canViewNotice(n, prof)) ||
+          visibleRows.find((n) => canViewNotice(n, prof)) ||
+          null
+        setBannerNotice(banner)
+        const list = banner
+          ? visibleRows.filter((n) => n.id !== banner.id)
+          : visibleRows
+        setAdminListRows(list)
+        setAdminTotalCount(pageData.totalCount)
+      } catch {
+        if (!cancelled) {
+          setAdminListRows([])
+          setAdminTotalCount(0)
+          setBannerNotice(null)
+        }
+      } finally {
+        if (!cancelled) setListLoading(false)
+      }
     }
-    reload()
+    void reload()
     window.addEventListener('vics:notices:updated', reload)
     return () => {
       cancelled = true
       window.removeEventListener('vics:notices:updated', reload)
     }
-  }, [])
+  }, [filter, page, profile])
 
   const handleFilterChange = (newFilter) => {
-    const next = new URLSearchParams()
-    if (newFilter !== 'all') next.set('filter', newFilter)
-    setSearchParams(next)
+    setSearchParams(buildNoticeListSearchParams(newFilter, 1))
   }
-
-  const allNotices = useMemo(() => {
-    const merged = [...adminNotices, ...MOCK_NOTICES]
-    const visible = merged.filter((n) => canViewNotice(n, profile ?? null))
-    return visible.sort((a, b) => {
-      const pinnedA = a.isBanner ? 1 : 0
-      const pinnedB = b.isBanner ? 1 : 0
-      if (pinnedB !== pinnedA) return pinnedB - pinnedA
-      const da = a.date?.replace(/\./g, '') || '0'
-      const db = b.date?.replace(/\./g, '') || '0'
-      return db.localeCompare(da)
-    })
-  }, [adminNotices, profile])
-
-  const filteredNotices = useMemo(() => {
-    if (filter === 'all') return allNotices
-    return allNotices.filter((n) => n.category === filter)
-  }, [filter, allNotices])
-
-  const bannerNotice = filteredNotices.find((n) => n.isBanner) || filteredNotices[0]
-  const listNotices = filteredNotices.filter((n) => !n.isBanner || n.id !== bannerNotice?.id)
-
-  const totalPages = Math.max(1, Math.ceil(listNotices.length / PAGE_SIZE))
-  const pageFromUrl = parseNoticePageParam(searchParams.get('page'))
-  const page = Math.min(pageFromUrl, totalPages)
 
   const goToPage = (nextPage) => {
     const p = buildNoticeListSearchParams(filter, nextPage)
@@ -107,12 +113,12 @@ export function NoticePage() {
     setSearchParams(p, { replace: true })
   }, [pageFromUrl, totalPages, filter, setSearchParams])
 
-  const paginatedList = listNotices.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const paginatedList = adminListRows
   const listQs = buildNoticeListSearchString(filter, page)
 
   return (
     <div className={cn('min-h-screen w-full min-w-0', PAGE_BG)}>
-      <div className="max-w-screen-lg mx-auto w-full">
+      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto w-full')}>
         {/* 헤더 */}
         <div className={cn('sticky top-0 z-10 px-4 py-3 flex items-center gap-2 sm:gap-3 flex-wrap', HEADER_GLASS)}>
           <button
@@ -125,6 +131,14 @@ export function NoticePage() {
           <h1 className="text-lg font-black text-fuchsia-950 flex-1 min-w-0 tracking-tight">공지사항</h1>
           {canAccessAdmin(user) && (
             <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end">
+              <Link
+                to="/admin/notice/list"
+                className="flex items-center gap-1 px-2.5 sm:px-3 py-2 rounded-2xl border border-sky-200/70 bg-gradient-to-br from-sky-50 to-cyan-50/80 text-sky-900 text-xs font-black hover:border-sky-300 hover:shadow-md transition-all"
+                title="공지 목록·삭제"
+              >
+                <List size={17} className="shrink-0" />
+                <span className="hidden sm:inline">목록</span>
+              </Link>
               <Link
                 to="/admin/notice/popup/list"
                 className="flex items-center gap-1 px-2.5 sm:px-3 py-2 rounded-2xl border border-violet-200/70 bg-gradient-to-br from-violet-50 to-indigo-50/80 text-violet-800 text-xs font-black hover:border-violet-300 hover:shadow-md transition-all"
@@ -213,7 +227,21 @@ export function NoticePage() {
           <section>
             <h2 className="text-sm font-black text-fuchsia-950 mb-3 tracking-tight">최신 게시글</h2>
             <div className="space-y-2.5">
-              {paginatedList.map((notice) => (
+              {listLoading ? (
+                <div className="space-y-2.5">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className={cn(SECTION_CARD, 'h-20 animate-pulse border-pink-100/60 bg-fuchsia-50/40')}
+                    />
+                  ))}
+                </div>
+              ) : paginatedList.length === 0 ? (
+                <div className={cn(SECTION_CARD, 'py-12 text-center text-sm text-fuchsia-700/60 font-medium')}>
+                  등록된 공지가 없어요
+                </div>
+              ) : (
+                paginatedList.map((notice) => (
                 <Link
                   key={notice.id}
                   to={`/notice/${notice.id}${listQs}`}
@@ -247,7 +275,8 @@ export function NoticePage() {
                     <ChevronRight size={18} className="text-fuchsia-400 group-hover:text-fuchsia-600 group-hover:translate-x-0.5 transition-all" />
                   </div>
                 </Link>
-              ))}
+              ))
+              )}
             </div>
 
             {/* 페이지네이션 */}
@@ -293,6 +322,7 @@ export function NoticePage() {
               </div>
             )}
           </section>
+
         </div>
       </div>
     </div>

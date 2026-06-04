@@ -21,6 +21,13 @@ const STATIC_SECTIONS = [
     title: '[2] 서비스 운영 정책 (Operational Policy)',
     items: [
       { id: 'sla',     label: 'SLA 처리 기준',    desc: '미처리 문의 리마인드 기준(시간). 저장값은 DB 함수·스케줄 작업이 사용합니다.', type: 'sla' },
+      {
+        id: 'server_maintenance',
+        label: '서버 점검·다운 안내',
+        desc: '서버 다운 시 위트 있는 점검 화면 및 예상 복구 시각 공지',
+        action: '편집하기',
+        href: '/admin/settings/server-maintenance',
+      },
       { id: 'bot',     label: '자동 답변/봇 설정', desc: '유저 문의 시 1차 자동 응대 시나리오 관리', action: '편집하기', href: '/admin/settings/autobot' },
       { id: 'banned',  label: '금칙어 관리',       desc: '서비스 내 부적절한 단어 필터링 리스트 관리', action: '편집하기', href: '/admin/settings/banned-words' },
     ],

@@ -13,6 +13,15 @@ export function getLastPathBeforeLogin() {
   return sessionStorage.getItem(LAST_PATH_BEFORE_LOGIN_KEY)
 }
 
+/** 비번 재설정 완료 등 — 로그인 복귀 경로 오염 방지 */
+export function clearLastPathBeforeLogin() {
+  try {
+    sessionStorage.removeItem(LAST_PATH_BEFORE_LOGIN_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * @param {string} raw
  * @param {string} [fallback='/']
@@ -25,7 +34,14 @@ export function getSafeReturnPath(raw, fallback = '/') {
     if (url.origin !== window.location.origin) return fallback
     const path = `${url.pathname}${url.search}${url.hash}`
     if (!path || path === '/') return path || fallback
-    if (path.startsWith('/login') || path.startsWith('/signup')) return fallback
+    if (
+      path.startsWith('/login') ||
+      path.startsWith('/signup') ||
+      path.startsWith('/reset-password') ||
+      path.startsWith('/forgot-password')
+    ) {
+      return fallback
+    }
     return path
   } catch {
     return fallback

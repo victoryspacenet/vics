@@ -1,5 +1,7 @@
 import { Link, useNavigate, useLocation, Navigate } from 'react-router-dom'
 import { ArrowLeft, X, CheckCircle2, FolderOpen, Home, Lightbulb } from 'lucide-react'
+import { cn } from '../lib/utils'
+import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../lib/layoutShellClasses'
 
 export function AppealCompletePage() {
   const navigate = useNavigate()
@@ -20,7 +22,7 @@ export function AppealCompletePage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-screen-lg mx-auto">
+      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto')}>
         {/* 헤더: 뒤로 + 제목 + X */}
         <div className="sticky top-0 z-10 bg-gray-50 border-b border-gray-100 px-4 py-3 flex items-center gap-3">
           <button

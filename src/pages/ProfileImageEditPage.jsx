@@ -1,11 +1,20 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Camera, X, Loader2, Sparkles, ImageIcon } from 'lucide-react'
+import { ArrowLeft, Camera, X, Loader2, Sparkles, ImageIcon, ChevronLeft } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { uploadMatchupMediaValidated } from '../lib/matchupMediaBucketUpload'
 import { safeMediaUrl } from '../lib/sanitize'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
 import { cn } from '../lib/utils'
+import { compressImageContain } from '../lib/imageCompression'
+import { cameraPhotoToFile } from '../lib/cameraPhotoToFile'
+import { SmartphoneCameraCapture } from '../components/mobile/SmartphoneCameraCapture'
+import {
+  MATCHUP_IMAGE_INPUT_ACCEPT,
+  validateSelectableRasterImageUpload,
+  validatePipelineJpegOutput,
+} from '../lib/uploadMediaValidation'
 
 /** MZ 파스텔 — 프로필 편집·마이페이지와 동일 계열 */
 const PAGE_BG =
@@ -14,35 +23,6 @@ const SECTION_CARD =
   'rounded-2xl border border-pink-100/50 bg-white/92 shadow-[0_4px_28px_-10px_rgba(244,114,182,0.18)] backdrop-blur-[2px]'
 const HEADER_GLASS =
   'bg-gradient-to-b from-white/90 via-rose-50/40 to-fuchsia-50/20 backdrop-blur-md border-b border-pink-100/55'
-
-// ── 이미지 압축 (최대 512px, JPEG 0.85) ────────────────────────────
-async function compressImage(file) {
-  return new Promise((resolve) => {
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      const img = new Image()
-      img.onload = () => {
-        const MAX = 512
-        let { width, height } = img
-        if (width > MAX || height > MAX) {
-          const ratio = Math.min(MAX / width, MAX / height)
-          width  = Math.round(width  * ratio)
-          height = Math.round(height * ratio)
-        }
-        const canvas = document.createElement('canvas')
-        canvas.width  = width
-        canvas.height = height
-        canvas.getContext('2d').drawImage(img, 0, 0, width, height)
-        canvas.toBlob(
-          (blob) => resolve(new File([blob], file.name, { type: 'image/jpeg' })),
-          'image/jpeg', 0.85
-        )
-      }
-      img.src = e.target.result
-    }
-    reader.readAsDataURL(file)
-  })
-}
 
 // ── 배경 효과 프리셋 ────────────────────────────────────────────────
 const BG_EFFECTS = [
@@ -96,6 +76,8 @@ export function ProfileImageEditPage() {
   const [avatarFile,    setAvatarFile]    = useState(null)
   const [bgEffect,      setBgEffect]      = useState('none')
   const [sheetOpen,     setSheetOpen]     = useState(false)
+  /** 'menu' | 'camera' — 하단 시트에서 앨범 vs 카메라 UI 전환 */
+  const [sheetView,     setSheetView]     = useState('menu')
   const [saving,        setSaving]        = useState(false)
 
   const fileInputRef = useRef(null)
@@ -111,27 +93,58 @@ export function ProfileImageEditPage() {
     setBgEffect(normalizeAvatarRingEffect(profile.avatar_ring_effect))
   }, [profile?.id, profile?.avatar_ring_effect])
 
-  // 이미지 파일 처리
-  const handleFileChange = async (e) => {
-    const file = e.target.files?.[0]
+  useEffect(() => {
+    if (!sheetOpen) setSheetView('menu')
+  }, [sheetOpen])
+
+  const openSheet = () => {
+    setSheetView('menu')
+    setSheetOpen(true)
+  }
+
+  const applyAvatarFile = async (file) => {
     if (!file) return
     if (!file.type.startsWith('image/')) {
-      showToast('이미지 파일만 업로드할 수 있어요', 'error'); return
+      showToast('이미지 파일만 업로드할 수 있어요', 'error')
+      return
     }
     if (file.size > 5 * 1024 * 1024) {
-      showToast('이미지는 5MB 이하만 가능해요', 'error'); return
+      showToast('이미지는 5MB 이하만 가능해요', 'error')
+      return
+    }
+    const sniff = await validateSelectableRasterImageUpload(file)
+    if (!sniff.ok) {
+      showToast(sniff.message, 'error')
+      return
     }
     setAvatarPreview(URL.createObjectURL(file))
     setAvatarFile(file)
     setSheetOpen(false)
-    // input 초기화 (같은 파일 재선택 가능하도록)
+    setSheetView('menu')
+  }
+
+  // 이미지 파일 처리
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0]
     e.target.value = ''
+    if (!file) return
+    void applyAvatarFile(file)
+  }
+
+  const handleCameraCapture = async (photo) => {
+    try {
+      const file = await cameraPhotoToFile(photo, 'profile-camera.jpg')
+      await applyAvatarFile(file)
+    } catch (err) {
+      showToast(err?.message ? String(err.message) : '카메라 사진을 불러오지 못했어요', 'error')
+    }
   }
 
   const resetAvatar = () => {
     setAvatarPreview(null)
     setAvatarFile(null)
     setSheetOpen(false)
+    setSheetView('menu')
   }
 
   const serverRing = normalizeAvatarRingEffect(profile?.avatar_ring_effect)
@@ -147,21 +160,36 @@ export function ProfileImageEditPage() {
 
       if (avatarFile) {
         showToast('이미지 압축 중…', 'info')
-        const compressed = await compressImage(avatarFile)
+        const compressed = await compressImageContain(avatarFile, {
+          maxEdge: 512,
+          quality: 0.85,
+          maxBytes: 380 * 1024,
+        })
+        const outChk = await validatePipelineJpegOutput(compressed)
+        if (!outChk.ok) {
+          showToast(outChk.message, 'error')
+          setSaving(false)
+          return
+        }
+
         const path = `avatars/${user.id}/profile.jpg`
 
         showToast('이미지 업로드 중…', 'info')
-        const { error: uploadErr } = await supabase.storage
-          .from('matchup-media')
-          .upload(path, compressed, { upsert: true, cacheControl: '3600' })
+        const { error: uploadErr, publicUrl: uploadedUrl } = await uploadMatchupMediaValidated(supabase, {
+          objectPath: path,
+          body: compressed,
+          fileKind: 'image',
+          upsert: true,
+          cacheControl: '3600',
+          contentType: compressed.type || 'image/jpeg',
+        })
 
-        if (uploadErr) {
-          showToast('이미지 업로드에 실패했어요', 'error')
+        if (uploadErr || !uploadedUrl) {
+          showToast(uploadErr?.message || '이미지 업로드에 실패했어요', 'error')
           setSaving(false); return
         }
 
-        const { data: urlData } = supabase.storage.from('matchup-media').getPublicUrl(path)
-        avatarUrl = `${urlData.publicUrl}?t=${Date.now()}`
+        avatarUrl = `${uploadedUrl}?t=${Date.now()}`
       }
 
       const payload = { avatar_ring_effect: localRing }
@@ -170,9 +198,9 @@ export function ProfileImageEditPage() {
       const { error } = await updateProfile(payload)
       if (error) { showToast('저장에 실패했어요', 'error'); return }
 
-      await fetchProfile(user.id)
       showToast(avatarFile ? '프로필 사진이 업데이트됐어요 ✓' : '배경 효과가 저장됐어요 ✓', 'success')
       navigate('/mypage/edit')
+      void fetchProfile(user.id)
     } catch {
       showToast('저장 중 오류가 발생했어요', 'error')
     } finally {
@@ -220,14 +248,14 @@ export function ProfileImageEditPage() {
               {effectObj.isGradient
                 ? <div className={`rounded-full ${effectObj.wrapCls}`}>
                     <div
-                      onClick={() => setSheetOpen(true)}
+                      onClick={openSheet}
                       className="relative w-36 h-36 rounded-full overflow-hidden cursor-pointer group bg-white p-0.5"
                     >
                       <AvatarInner currentImage={currentImage} profile={profile} />
                     </div>
                   </div>
                 : <div
-                    onClick={() => setSheetOpen(true)}
+                    onClick={openSheet}
                     className={`relative w-36 h-36 rounded-full overflow-hidden cursor-pointer group ${effectObj.ringCls}`}
                   >
                     <AvatarInner currentImage={currentImage} profile={profile} />
@@ -236,7 +264,7 @@ export function ProfileImageEditPage() {
 
               {/* 편집 뱃지 */}
               <button
-                onClick={() => setSheetOpen(true)}
+                onClick={openSheet}
                 className="absolute bottom-1 right-1 w-10 h-10 bg-gradient-to-br from-fuchsia-600 to-pink-500 text-white rounded-full flex items-center justify-center shadow-lg shadow-fuchsia-300/45 hover:brightness-105 active:scale-95 transition-all"
               >
                 <Camera size={18} />
@@ -245,7 +273,7 @@ export function ProfileImageEditPage() {
 
             {/* 버튼 */}
             <button
-              onClick={() => setSheetOpen(true)}
+              onClick={openSheet}
               className="text-sm font-black text-fuchsia-800 underline underline-offset-2 hover:text-fuchsia-600 transition-colors"
             >
               사진 변경하기
@@ -307,7 +335,7 @@ export function ProfileImageEditPage() {
       </div>
 
       {/* ── 숨긴 파일 입력 ── */}
-      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+      <input ref={fileInputRef} type="file" accept={MATCHUP_IMAGE_INPUT_ACCEPT} className="hidden" onChange={handleFileChange} />
 
       {/* ══ 하단 시트 ══ */}
       {sheetOpen && (
@@ -326,8 +354,35 @@ export function ProfileImageEditPage() {
             >
               {/* 핸들 */}
               <div className="w-10 h-1 bg-pink-200/80 rounded-full mx-auto mb-5" />
-              <p className="text-sm font-black text-fuchsia-950 text-center mb-4">사진 선택</p>
+              <p className="text-sm font-black text-fuchsia-950 text-center mb-4">
+                {sheetView === 'camera' ? '카메라로 촬영' : '사진 선택'}
+              </p>
 
+              {sheetView === 'camera' ? (
+                <div className="max-h-[min(72vh,560px)] space-y-3 overflow-y-auto pb-1">
+                  <button
+                    type="button"
+                    onClick={() => setSheetView('menu')}
+                    className="flex items-center gap-1 text-xs font-bold text-fuchsia-700 hover:text-fuchsia-900"
+                  >
+                    <ChevronLeft size={16} aria-hidden />
+                    다른 방법으로 선택
+                  </button>
+                  <SmartphoneCameraCapture
+                    quality={90}
+                    className="border-fuchsia-100/80 bg-white/80 shadow-none"
+                    onCapture={handleCameraCapture}
+                    onError={(msg) => showToast(msg, 'error')}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setSheetOpen(false)}
+                    className="w-full py-3.5 rounded-2xl text-sm font-black border-2 border-fuchsia-400/90 bg-white text-fuchsia-900 hover:bg-fuchsia-50 active:scale-[0.99] transition-all"
+                  >
+                    닫기
+                  </button>
+                </div>
+              ) : (
               <div className="space-y-2">
                 {/* 앨범에서 선택 */}
                 <button
@@ -340,6 +395,21 @@ export function ProfileImageEditPage() {
                   <div className="text-left">
                     <p className="text-sm font-bold text-fuchsia-950">앨범에서 선택</p>
                     <p className="text-xs text-fuchsia-700/55">갤러리에서 사진을 선택해요</p>
+                  </div>
+                </button>
+
+                {/* 카메라로 촬영 */}
+                <button
+                  type="button"
+                  onClick={() => setSheetView('camera')}
+                  className="w-full flex items-center gap-4 px-5 py-4 bg-white/70 rounded-2xl border border-emerald-100/70 hover:bg-emerald-50/90 transition-colors"
+                >
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-100 to-teal-100 flex items-center justify-center flex-shrink-0 border border-emerald-200/50">
+                    <Camera size={18} className="text-emerald-700" />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-bold text-fuchsia-950">카메라로 촬영</p>
+                    <p className="text-xs text-fuchsia-700/55">촬영 후 미리보기에서 확인해요</p>
                   </div>
                 </button>
 
@@ -368,6 +438,7 @@ export function ProfileImageEditPage() {
                   취소
                 </button>
               </div>
+              )}
             </div>
           </div>
         </>

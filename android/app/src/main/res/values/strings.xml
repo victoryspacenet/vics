@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">VICS</string>
+    <string name="title_activity_main">VICS</string>
+    <string name="package_name">app.vics.space</string>
+    <string name="custom_url_scheme">app.vics.space</string>
+</resources>

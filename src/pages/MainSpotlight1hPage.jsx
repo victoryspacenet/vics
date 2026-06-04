@@ -320,10 +320,12 @@ export function MainSpotlight1hPage() {
               ))}
             </ul>
           ) : eligibles.length === 0 ? (
-            <div className="mt-8 rounded-xl border border-dashed border-slate-200 bg-slate-50/80 py-10 text-center text-sm font-semibold text-slate-500">
-              선택 가능한 매치업이 없어요.
-              <br />
-              <Link to="/" className="mt-2 inline-block font-black text-orange-600 hover:underline">
+            <div className="mt-8 flex flex-col items-center rounded-xl border border-dashed border-slate-200 bg-slate-50/80 py-10 text-center text-sm font-semibold text-slate-500">
+              <p>선택 가능한 매치업이 없어요.</p>
+              <Link
+                to="/"
+                className="mt-2 inline-flex items-center justify-center whitespace-nowrap font-black text-orange-600 hover:underline"
+              >
                 메인에서 매치업 만들기 →
               </Link>
             </div>

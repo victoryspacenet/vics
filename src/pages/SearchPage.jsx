@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Search, ArrowLeft, SlidersHorizontal, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { cn } from '../lib/utils'
-import { MATCHUP_CREATOR_PROFILE_FIELDS } from '../lib/creatorRankSnapshot'
+import { MATCHUP_CREATOR_PROFILE_FIELDS, EMPTY_TIER_RANK_INFO } from '../lib/creatorRankSnapshot'
 import { storedCategoryValuesForFilter } from '../lib/matchupCategoryAliases'
 import { MainMatchupCard } from '../components/main/MainMatchupCard'
 import { MainCardSkeleton } from '../components/main/MainCardSkeleton'
@@ -43,13 +43,18 @@ export function SearchPage() {
   const totalPages = Math.ceil(totalCount / PAGE_SIZE)
 
   const doSearch = useCallback(async (q, sort, p) => {
-    if (!q.trim()) { setResults([]); setTotalCount(0); return }
+    if (!q.trim()) {
+      setResults([])
+      setTotalCount(0)
+      return
+    }
     setLoading(true)
     try {
       const sortOpt = SORT_OPTIONS.find((s) => s.id === sort) || SORT_OPTIONS[0]
       const embed = `*, profiles:user_id(${MATCHUP_CREATOR_PROFILE_FIELDS}), right_profiles:right_user_id(${MATCHUP_CREATOR_PROFILE_FIELDS})`
-      const keyword = `%${q.trim()}%`
-      const qLower  = q.trim().toLowerCase()
+      const qLower = q.trim().toLowerCase()
+      /** PostgREST or() 안에서 쉼표·따옴표와 충돌하지 않도록 ilike 패턴을 큰따옴표로 감쌈 */
+      const ilikePatternQuoted = `"${`%${q.trim()}%`.replace(/"/g, '""')}"`
 
       // 카테고리 목록을 Supabase에서 직접 가져와 최신 상태로 사용
       let catList = DEFAULT_CAT_OPTIONS
@@ -68,7 +73,6 @@ export function SearchPage() {
       }
 
       // 검색어와 label이 일치하는 카테고리 ID 수집 + 레거시 별칭 확장
-      // (DB에는 'balance_game' 외에 '밸런스게임', '밸런스', 'balance' 등도 저장될 수 있음)
       const matchedCategoryIds = [
         ...new Set(
           catList
@@ -77,52 +81,36 @@ export function SearchPage() {
         ),
       ]
 
-      // ① 텍스트 검색 (제목 · A라벨 · B라벨)
-      const textQuery = supabase
-        .from('matchups')
-        .select(embed)
-        .eq('status', 'active')
-        .or(`title.ilike.${keyword},left_label.ilike.${keyword},right_label.ilike.${keyword}`)
-        .order(sortOpt.col, { ascending: sortOpt.asc, nullsFirst: false })
-
-      // ② 카테고리 검색 — or() 안에 in()을 섞으면 PostgREST 파싱 충돌이 생기므로 별도 쿼리
-      const promises = [textQuery]
+      // 텍스트 ilike 3종 OR (선택) category.in — 한 쿼리로 합쳐 서버에서 count + range
+      const orParts = [
+        `title.ilike.${ilikePatternQuoted}`,
+        `left_label.ilike.${ilikePatternQuoted}`,
+        `right_label.ilike.${ilikePatternQuoted}`,
+      ]
       if (matchedCategoryIds.length > 0) {
-        const catQuery = supabase
-          .from('matchups')
-          .select(embed)
-          .eq('status', 'active')
-          .in('category', matchedCategoryIds)
-          .order(sortOpt.col, { ascending: sortOpt.asc, nullsFirst: false })
-        promises.push(catQuery)
+        orParts.push(`category.in.(${matchedCategoryIds.join(',')})`)
       }
 
-      const settled = await Promise.all(promises)
-      const firstErr = settled.find((r) => r.error)
-      if (firstErr) throw firstErr.error
+      const from = p * PAGE_SIZE
+      const to = from + PAGE_SIZE - 1
 
-      // 두 결과 합산 + ID 기준 중복 제거
-      const merged = []
-      const seen   = new Set()
-      for (const r of settled) {
-        for (const item of (r.data || [])) {
-          if (!seen.has(item.id)) { seen.add(item.id); merged.push(item) }
-        }
-      }
+      let query = supabase
+        .from('matchups')
+        .select(embed, { count: 'exact' })
+        .eq('status', 'active')
+        .or(orParts.join(','))
+        .order(sortOpt.col, { ascending: sortOpt.asc, nullsFirst: false })
+        .order('id', { ascending: true })
 
-      // 클라이언트 재정렬
-      merged.sort((a, b) => {
-        const va = a[sortOpt.col] ?? ''
-        const vb = b[sortOpt.col] ?? ''
-        if (va < vb) return sortOpt.asc ? -1 : 1
-        if (va > vb) return sortOpt.asc ? 1 : -1
-        return 0
-      })
+      const { data, error, count } = await query.range(from, to)
+      if (error) throw error
 
-      const from     = p * PAGE_SIZE
-      const pageData = merged.slice(from, from + PAGE_SIZE)
-      setTotalCount(merged.length)
-      setResults(pageData)
+      const rows = (data || []).map((m) => ({
+        ...m,
+        _creatorRankInfo: { ...EMPTY_TIER_RANK_INFO },
+      }))
+      setResults(rows)
+      setTotalCount(typeof count === 'number' ? count : 0)
     } catch (err) {
       console.error('[SearchPage]', err)
       setResults([])

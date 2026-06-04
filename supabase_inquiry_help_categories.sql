@@ -50,7 +50,8 @@ select v.slug, v.label, v.sort_order
 from (values
   ('matchup', '매치업', 0),
   ('account', '계정', 1),
-  ('report', '신고', 2)
+  ('report', '신고', 2),
+  ('ranking', '랭킹', 3)
 ) as v(slug, label, sort_order)
 where not exists (select 1 from public.inquiry_help_categories where inquiry_help_categories.slug = v.slug);
 

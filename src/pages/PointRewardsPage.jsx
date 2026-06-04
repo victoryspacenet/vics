@@ -17,6 +17,7 @@ import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
 import { cn } from '../lib/utils'
 import { isLegendDiamondShellActive } from '../lib/legendDiamondUiTheme'
+import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../lib/layoutShellClasses'
 import { BANNER_HIGHLIGHT_COST } from '../lib/bannerHighlightBoost'
 import { isRankingBadgeActive, getRankingBadgeDays, getRankingBadgeRemainingDays } from '../lib/rankingBadge'
 
@@ -105,7 +106,7 @@ export function PointRewardsPage() {
 
   return (
     <div className={cn('min-h-[70vh] pb-10', PAGE_BG)}>
-      <div className="mx-auto max-w-screen-lg px-4 pt-2">
+      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto px-4 pt-2')}>
         <button
           type="button"
           onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/'))}

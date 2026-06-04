@@ -8,6 +8,7 @@
  */
 const { createClient } = require('@supabase/supabase-js')
 const { deliverSystemPush } = require('../lib/systemPushCore.cjs')
+const { withIpRateLimit } = require('../lib/rateLimitMiddleware.cjs')
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || ''
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || ''
@@ -26,7 +27,7 @@ function parseEmailList(raw) {
   return raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
 }
 
-exports.handler = async (event) => {
+exports.handler = withIpRateLimit(async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) }
   }
@@ -92,4 +93,4 @@ exports.handler = async (event) => {
     console.error('[system-push-dispatch]', e)
     return { statusCode: 500, body: JSON.stringify({ error: e?.message || 'dispatch failed' }) }
   }
-}
+})

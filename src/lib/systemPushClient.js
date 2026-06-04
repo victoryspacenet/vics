@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { resolveSiteUrl } from './siteApiBase'
 
 const fpKey = (userId) => `vics_admin_ua_fp_v1_${userId}`
 
@@ -12,7 +13,7 @@ export async function notifyNewAdminLoginDevice(user) {
     if (prev && prev !== fp) {
       const { data: { session } } = await supabase.auth.getSession()
       if (session?.access_token) {
-        await fetch(`${window.location.origin}/.netlify/functions/system-push-dispatch`, {
+        await fetch(resolveSiteUrl('/api/system-push-dispatch'), {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${session.access_token}`,

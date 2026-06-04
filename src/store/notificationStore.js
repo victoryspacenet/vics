@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
+import { startVisibilityPolling } from '../lib/visibilityPolling'
 
 /** Auth 스토리지 락(steal)·중복 요청으로 인한 abort — 사용자 조치 불필요 */
 function isBenignNotificationFetchError(err) {
@@ -22,7 +23,7 @@ export const useNotificationStore = create((set, get) => ({
   notifications: [],
   unreadCount: 0,
   loading: false,
-  realtimeChannel: null,
+  pollingCleanup: null,
 
   // 알림 목록 로드
   fetchNotifications: async (userId) => {
@@ -60,44 +61,26 @@ export const useNotificationStore = create((set, get) => ({
     return notifFetchChain
   },
 
-  // Supabase Realtime 구독 시작
+  /** Realtime 대신 60초 폴링 (Disk I/O 절감) */
   subscribeRealtime: (userId) => {
     if (!userId) return
-    const prev = get().realtimeChannel
-    if (prev) { supabase.removeChannel(prev) }
+    const prev = get().pollingCleanup
+    if (prev) prev()
 
-    const channel = supabase
-      .channel(`notifications:${userId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notifications',
-          filter: `user_id=eq.${userId}`,
-        },
-        (payload) => {
-          const newNotif = payload.new
-          set((state) => ({
-            notifications: [newNotif, ...state.notifications],
-            unreadCount: state.unreadCount + 1,
-          }))
-        }
-      )
-      .subscribe((status) => {
-        console.log('[Notifications] realtime:', status)
-      })
-
-    set({ realtimeChannel: channel })
+    const cleanup = startVisibilityPolling({
+      intervalMs: 60_000,
+      runImmediately: false,
+      onTick: () => {
+        void get().fetchNotifications(userId)
+      },
+    })
+    set({ pollingCleanup: cleanup })
   },
 
-  // Realtime 구독 해제
   unsubscribeRealtime: () => {
-    const { realtimeChannel } = get()
-    if (realtimeChannel) {
-      supabase.removeChannel(realtimeChannel)
-      set({ realtimeChannel: null })
-    }
+    const { pollingCleanup } = get()
+    if (pollingCleanup) pollingCleanup()
+    set({ pollingCleanup: null })
   },
 
   // 단건 읽음 처리
@@ -130,8 +113,8 @@ export const useNotificationStore = create((set, get) => ({
   // 스토어 초기화 (로그아웃)
   reset: () => {
     notifFetchEpoch += 1
-    const { realtimeChannel } = get()
-    if (realtimeChannel) supabase.removeChannel(realtimeChannel)
-    set({ notifications: [], unreadCount: 0, loading: false, realtimeChannel: null })
+    const { pollingCleanup } = get()
+    if (pollingCleanup) pollingCleanup()
+    set({ notifications: [], unreadCount: 0, loading: false, pollingCleanup: null })
   },
 }))

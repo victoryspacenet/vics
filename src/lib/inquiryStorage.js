@@ -49,21 +49,41 @@ export async function saveInquiry() {
 }
 
 /**
+ * 내 문의 목록 (페이징 + 전체 건수) — `InquiryHistoryPage`용
+ * @returns {{ rows: object[]; totalCount: number }}
+ */
+export async function fetchUserInquiriesPaged(userId, { page = 1, pageSize = 10 } = {}) {
+  if (!userId) return { rows: [], totalCount: 0 }
+  const size = Math.min(50, Math.max(1, pageSize))
+  const p = Math.max(1, page)
+  const from = (p - 1) * size
+  const to = from + size - 1
+  const { data, error, count } = await inquiriesQueryForUser(userId, { count: true })
+    .order('created_at', { ascending: false })
+    .range(from, to)
+  if (error) {
+    console.warn('[inquiryStorage] fetchUserInquiriesPaged:', error.message)
+    return { rows: [], totalCount: 0 }
+  }
+  return {
+    rows: filterDemoInquiryRows(data),
+    totalCount: typeof count === 'number' ? count : 0,
+  }
+}
+
+/**
  * @returns {Promise<Array>}
  */
 export async function getInquiryHistory(userId) {
   if (!userId) return []
-  const { data, error } = await supabase
-    .from('inquiries')
-    .select('id, receipt_id, category, category_label, title, content, status, created_at')
-    .eq('user_id', userId)
+  const { data, error } = await inquiriesQueryForUser(userId)
     .order('created_at', { ascending: false })
     .limit(50)
   if (error) {
     console.warn('[inquiryStorage] getInquiryHistory:', error.message)
     return []
   }
-  return (data || []).map(rowToListItem)
+  return filterDemoInquiryRows(data).map(rowToListItem)
 }
 
 export async function removeInquiryByReceiptId(receiptId, userId) {
@@ -114,73 +134,35 @@ export function getAppealKeywordHints(item, maxWords = 2) {
   return out
 }
 
-const VIRTUAL_ITEMS = (() => {
-  const base = new Date()
-  return [
-    {
-      receiptId: 'INQ-VIRT-001',
-      id: 'INQ-VIRT-001',
-      category: 'point',
-      categoryLabel: '매치업/포인트',
-      title: '매치업에서 이겼는데 100P가 안 들어와요..',
-      content: '매치업에서 이겼는데 100P가 안 들어와요..',
-      status: INQUIRY_STATUS.replied,
-      reply: '안녕하세요, 고객님! 확인 결과 시스템 지연으로 지급이 늦어졌습니다. 지금 바로 보너스를 포함해 지급해 드렸습니다! 💎',
-      receiptTime: new Date(base.getTime() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-      createdAt: new Date(base.getTime() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-      _virtual: true,
-    },
-    {
-      receiptId: 'INQ-VIRT-002',
-      id: 'INQ-VIRT-002',
-      category: 'account',
-      categoryLabel: '계정',
-      title: '닉네임 변경권은 어디서 사나요?',
-      content: '닉네임 변경권 구매 후 사용 방법을 알려주세요.',
-      status: INQUIRY_STATUS.processing,
-      reply: null,
-      receiptTime: new Date(base.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-      createdAt: new Date(base.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-      _virtual: true,
-    },
-    {
-      receiptId: 'INQ-VIRT-003',
-      id: 'INQ-VIRT-003',
-      category: 'matchup',
-      categoryLabel: '매치업',
-      title: '매치업 생성 오류 제보합니다.',
-      content: '매치업 생성 시 이미지 업로드가 되지 않습니다.',
-      status: INQUIRY_STATUS.received,
-      reply: null,
-      receiptTime: new Date(base.getTime() - 8 * 24 * 60 * 60 * 1000).toISOString(),
-      createdAt: new Date(base.getTime() - 8 * 24 * 60 * 60 * 1000).toISOString(),
-      _virtual: true,
-    },
-    {
-      receiptId: 'OB_20260206_001',
-      id: 'OB_20260206_001',
-      category: 'appeal',
-      categoryLabel: '이의 신청',
-      title: '영구 정지 처분 이의 신청',
-      content: '안녕하세요. 어제 채팅 중 오해가 있었습니다.\n상대방이 먼저 도발한 캡처본 첨부합니다.',
-      status: INQUIRY_STATUS.replied,
-      reply: '안녕하세요, 안목대장님.\n보내주신 자료를 면밀히 검토한 결과, 상대방의 선제적 위반 행위가 확인되어 정지 처분을 해제 조치해 드렸습니다. 이용에 불편을 드려 죄송합니다.',
-      receiptTime: new Date(base.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-      replyAt: new Date(base.getTime() - 2 * 24 * 60 * 60 * 1000 + 3 * 60 * 60 * 1000).toISOString(),
-      attachments: ['evidence_01.jpg'],
-      _virtual: true,
-    },
-  ]
-})()
+/** 예전 UI 더미 접수번호 — DB에 남아 있어도 목록·상세에서 제외 */
+export function isDemoInquiryReceiptId(receiptId) {
+  const id = String(receiptId || '').replace(/^#/, '').trim()
+  return id.startsWith('INQ-VIRT-') || id.startsWith('OB_20260206_')
+}
 
+function filterDemoInquiryRows(rows) {
+  return (rows || []).filter((row) => !isDemoInquiryReceiptId(row.receipt_id))
+}
+
+const INQUIRY_LIST_SELECT =
+  'id, receipt_id, category, category_label, title, content, status, created_at'
+
+function inquiriesQueryForUser(userId, { count } = {}) {
+  return supabase
+    .from('inquiries')
+    .select(INQUIRY_LIST_SELECT, count ? { count: 'exact' } : undefined)
+    .eq('user_id', userId)
+    .not('receipt_id', 'like', 'INQ-VIRT%')
+    .not('receipt_id', 'like', 'OB_20260206%')
+}
+
+/** @deprecated `getInquiryHistory`와 동일 — 더미 병합 제거 */
 export async function getInquiryHistoryForDisplay(userId) {
-  const real = userId ? await getInquiryHistory(userId) : []
-  return [...VIRTUAL_ITEMS, ...real]
+  return getInquiryHistory(userId)
 }
 
 export async function getInquiryByReceiptId(receiptId, userId) {
-  const virtual = VIRTUAL_ITEMS.find((item) => item.receiptId === receiptId || item.id === receiptId)
-  if (virtual) return virtual
+  if (isDemoInquiryReceiptId(receiptId)) return null
   if (!userId) return null
   const norm = String(receiptId || '').replace(/^#/, '')
   const { data, error } = await supabase

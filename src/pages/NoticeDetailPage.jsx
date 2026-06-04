@@ -1,14 +1,16 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, ChevronUp, ChevronDown, List, Pencil, Share2, Swords, Vote } from 'lucide-react'
+import { ArrowLeft, ChevronUp, ChevronDown, List, Pencil, Share2, Swords, Trash2, Vote } from 'lucide-react'
 import { useUIStore } from '../store/uiStore'
 import { useAuthStore } from '../store/authStore'
 import { copyToClipboard, cn } from '../lib/utils'
-import { getAdminNotices } from '../lib/noticeStorage'
+import { getNoticeById, getAdminNoticesPaged, deleteNotice } from '../lib/noticeStorage'
 import { canAccessAdmin } from '../lib/adminAuth'
 import { canViewNotice, getTierById } from '../lib/tiers'
 import { NoticeExposureBadge } from '../components/notice/NoticeExposureBadge'
 import { buildNoticeListSearchString, parseNoticePageParam } from '../lib/noticeListNav'
+import { refreshMatchupMediaImagesInHtmlRoot } from '../lib/noticeInlineImageUpload'
+import { NoticeDeleteConfirmModal } from '../components/notice/NoticeDeleteConfirmModal'
 
 /** MZ 파스텔 — 공지 목록과 동일 계열 */
 const PAGE_BG =
@@ -18,32 +20,6 @@ const SECTION_CARD =
 const HEADER_GLASS =
   'bg-gradient-to-b from-white/90 via-rose-50/40 to-fuchsia-50/20 backdrop-blur-md border-b border-pink-100/55'
 
-// 목업 데이터 (NoticePage와 동일)
-const MOCK_NOTICES = [
-  { id: '1', category: 'event', tag: '이벤트', tagColor: 'bg-amber-100 text-amber-700', title: '나이키 vs 아디다스 배틀 오픈!', date: '2026.01.24', author: '운영팀', isBanner: true, content: '역대급 브랜드 경쟁이 시작됩니다!\n\n나이키와 아디다스, 당신의 선택은?\n투표에 참여하고 포인트를 받아가세요.\n\n■ 이벤트 기간: 2026.01.24 ~ 2026.02.07\n■ 참여 방법: 해당 매치업에 투표\n■ 보상: 참여 시 포인트 10점, 적중 시 추가 포인트 20점' },
-  { id: '2', category: 'notice', tag: '공지', tagColor: 'bg-fuchsia-100 text-fuchsia-800 border border-fuchsia-200/50', title: '시스템 점검 안내', date: '2026.01.24', author: '관리자', content: '안녕하세요, VictorySpace입니다.\n\n서비스 안정화를 위한 시스템 점검이 진행됩니다.\n\n■ 일시: 2026년 1월 25일 02:00 ~ 04:00\n■ 내용: 서버 업그레이드 및 DB 최적화\n■ 영향: 해당 시간대 서비스 이용이 일시 중단됩니다.\n\n불편을 드려 죄송합니다.' },
-  { id: '3', category: 'event', tag: '이벤트', tagColor: 'bg-amber-100 text-amber-700', title: '승리 예측 성공하고 포인트 받자!', date: '2026.01.23', author: '운영팀', content: '투표 적중 시 추가 포인트 2배 이벤트!\n\n■ 기간: 2026.01.23 ~ 2026.01.30\n■ 조건: 투표한 매치업에서 승리 측 선택 시\n■ 보상: 기존 포인트 + 추가 2배 지급' },
-  { id: '4', category: 'update', tag: '업데이트', tagColor: 'bg-sky-100 text-sky-800 border border-sky-200/50', title: '프로필 배지 기능 추가!', date: '2026.01.20', author: '개발팀', content: '새로운 프로필 배지 기능이 추가되었습니다.\n\n■ 크리에이터 배지: 첫 매치업 생성 시\n■ 투표 마니아: 10회 투표 완료 시\n■ 안목 마스터: 10번 연속 적중 시\n\n나의 성과를 배지로 자랑해 보세요!' },
-  { id: '5', category: 'winner', tag: '당첨자', tagColor: 'bg-emerald-100 text-emerald-700', title: '1월 2주차 이벤트 당첨자 발표', date: '2026.01.18', author: '운영팀', content: '나이키 vs 아디다스 투표 이벤트 당첨자를 발표합니다.\n\n■ 1등: user_*** (포인트 500점)\n■ 2등: user_*** (포인트 300점)\n■ 3등: user_*** (포인트 100점)\n\n당첨자분들께는 1월 20일까지 포인트가 지급됩니다.' },
-  { id: '6', category: 'notice', tag: '공지', tagColor: 'bg-fuchsia-100 text-fuchsia-800 border border-fuchsia-200/50', title: '개인정보처리방침 개정 안내', date: '2026.01.14', author: '관리자', content: '개인정보처리방침이 개정됩니다.\n\n■ 시행일: 2026년 1월 15일\n■ 주요 변경: 제3자 제공 항목 보완, 보유 기간 명시\n\n자세한 내용은 개인정보처리방침 페이지를 확인해 주세요.' },
-  { id: '7', category: 'event', tag: '이벤트', tagColor: 'bg-amber-100 text-amber-700', title: '신규 가입 이벤트', date: '2026.01.12', author: '운영팀', content: '가입 시 포인트 50점을 지급합니다.\n\n■ 대상: 신규 가입자\n■ 보상: 포인트 50점\n■ 기간: 상시 진행' },
-  { id: '8', category: 'update', tag: '업데이트', tagColor: 'bg-sky-100 text-sky-800 border border-sky-200/50', title: '알림 기능 개선', date: '2026.01.10', author: '개발팀', content: '실시간 알림 푸시 지원이 추가되었습니다.\n\n■ 새 기능: 투표 결과, 댓글 알림\n■ 설정: 마이페이지에서 알림 on/off 가능' },
-  { id: '9', category: 'winner', tag: '당첨자', tagColor: 'bg-emerald-100 text-emerald-700', title: '1월 1주차 당첨자', date: '2026.01.08', author: '운영팀', content: '연말 이벤트 당첨자를 발표합니다.\n\n■ 당첨자: 서비스 내 알림으로 개별 안내\n■ 보상: 1월 10일까지 지급 완료' },
-  { id: '10', category: 'notice', tag: '공지', tagColor: 'bg-fuchsia-100 text-fuchsia-800 border border-fuchsia-200/50', title: '서비스 이용 안내', date: '2026.01.05', author: '관리자', content: '이용약관 및 커뮤니티 가이드라인을 확인해 주세요.\n\n■ 이용약관: /terms\n■ 개인정보처리방침: /privacy\n■ 커뮤니티 가이드라인: /community-policy' },
-  { id: '11', category: 'event', tag: '이벤트', tagColor: 'bg-amber-100 text-amber-700', title: '첫 투표 보너스', date: '2026.01.03', author: '운영팀', content: '첫 투표 시 포인트 10점을 추가로 지급합니다.\n\n■ 대상: 첫 투표 완료 유저\n■ 보상: 포인트 10점' },
-  { id: '12', category: 'update', tag: '업데이트', tagColor: 'bg-sky-100 text-sky-800 border border-sky-200/50', title: '랭킹 시스템 업데이트', date: '2026.01.01', author: '개발팀', content: '시즌제 랭킹이 도입되었습니다.\n\n■ 주간/월간/전체 랭킹\n■ 시즌 종료 시 보상 지급' },
-  { id: '13', category: 'winner', tag: '당첨자', tagColor: 'bg-emerald-100 text-emerald-700', title: '12월 4주차 당첨자', date: '2025.12.30', author: '운영팀', content: '연말 특별 이벤트 당첨자를 발표합니다.\n\n■ 당첨자: 개별 알림 안내' },
-  { id: '14', category: 'notice', tag: '공지', tagColor: 'bg-fuchsia-100 text-fuchsia-800 border border-fuchsia-200/50', title: '연말 연휴 운영 안내', date: '2025.12.28', author: '관리자', content: '12/31~1/2 고객센터 휴무 안내입니다.\n\n■ 휴무: 12월 31일 ~ 1월 2일\n■ 긴급 문의: contact@victoryspace.com' },
-  { id: '15', category: 'event', tag: '이벤트', tagColor: 'bg-amber-100 text-amber-700', title: '연말 경쟁 페스티벌', date: '2025.12.25', author: '운영팀', content: '12월 한 달간 특별 이벤트가 진행됩니다.\n\n■ 기간: 12월 1일 ~ 31일\n■ 보상: 참여 시 포인트 2배' },
-  { id: '16', category: 'update', tag: '업데이트', tagColor: 'bg-sky-100 text-sky-800 border border-sky-200/50', title: '다크모드 지원', date: '2025.12.22', author: '개발팀', content: '눈이 편한 다크 테마가 추가되었습니다.\n\n■ 설정: 시스템 설정에 따라 자동 적용' },
-  { id: '17', category: 'winner', tag: '당첨자', tagColor: 'bg-emerald-100 text-emerald-700', title: '12월 3주차 당첨자', date: '2025.12.20', author: '운영팀', content: '주간 이벤트 당첨자를 발표합니다.' },
-  { id: '18', category: 'notice', tag: '공지', tagColor: 'bg-fuchsia-100 text-fuchsia-800 border border-fuchsia-200/50', title: '정기 점검 완료', date: '2025.12.18', author: '관리자', content: '1월 15일 정기 점검이 완료되었습니다.\n\n■ 점검 시간: 02:00 ~ 04:00\n■ 서비스 정상화 완료' },
-  { id: '19', category: 'event', tag: '이벤트', tagColor: 'bg-amber-100 text-amber-700', title: '친구 초대 이벤트', date: '2025.12.15', author: '운영팀', content: '친구 초대 시 양쪽 모두 포인트를 지급합니다.\n\n■ 초대자: 포인트 30점\n■ 피초대자: 포인트 50점' },
-  { id: '20', category: 'update', tag: '업데이트', tagColor: 'bg-sky-100 text-sky-800 border border-sky-200/50', title: '공지사항 페이지 오픈', date: '2025.12.12', author: '개발팀', content: '공지·이벤트·업데이트를 한곳에서 확인할 수 있습니다.\n\n■ 경로: /notice' },
-  { id: '21', category: 'winner', tag: '당첨자', tagColor: 'bg-emerald-100 text-emerald-700', title: '12월 2주차 당첨자', date: '2025.12.10', author: '운영팀', content: '주간 랭킹 보상 당첨자를 발표합니다.' },
-  { id: '22', category: 'notice', tag: '공지', tagColor: 'bg-fuchsia-100 text-fuchsia-800 border border-fuchsia-200/50', title: '개발팀 인사', date: '2025.12.08', author: '관리자', content: '새로운 개발자가 합류했습니다.\n\n앞으로 더 나은 서비스를 위해 노력하겠습니다.' },
-]
-
 const FILTER_TABS = [
   { id: 'all', label: '전체' },
   { id: 'notice', label: '공지' },
@@ -51,6 +27,30 @@ const FILTER_TABS = [
   { id: 'update', label: '업데이트' },
   { id: 'winner', label: '당첨자' },
 ]
+
+function isUuidParam(id) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id || ''))
+}
+
+function sortNoticesForNav(a, b) {
+  const pinnedA = a.isBanner ? 1 : 0
+  const pinnedB = b.isBanner ? 1 : 0
+  if (pinnedB !== pinnedA) return pinnedB - pinnedA
+  const da = a.date?.replace(/\./g, '') || '0'
+  const db = b.date?.replace(/\./g, '') || '0'
+  return db.localeCompare(da)
+}
+
+/** 본문 HTML의 Supabase 스토리지 이미지를 서명 URL 등으로 바꿔 비공개 버킷에서도 보이게 합니다. */
+function NoticeArticleHtml({ html, className }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    void refreshMatchupMediaImagesInHtmlRoot(el)
+  }, [html])
+  return <div ref={ref} className={className} dangerouslySetInnerHTML={{ __html: html }} />
+}
 
 export function NoticeDetailPage() {
   const { id } = useParams()
@@ -60,40 +60,88 @@ export function NoticeDetailPage() {
   const { showToast, openCreateDrawer, openLoginModal } = useUIStore()
   const { user, profile } = useAuthStore()
 
-  const [adminNotices, setAdminNotices] = useState([])
+  const [notice, setNotice] = useState(null)
+  const [navList, setNavList] = useState([])
+  const [loadState, setLoadState] = useState('loading')
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  const filterParam = FILTER_TABS.some((t) => t.id === filter) ? filter : 'all'
 
   useEffect(() => {
     let cancelled = false
-    const reload = () => {
-      getAdminNotices().then((list) => { if (!cancelled) setAdminNotices(list) })
+    const reload = async () => {
+      setLoadState('loading')
+      const prof = profile ?? null
+      try {
+        const forPublicFeed = true
+        const n = isUuidParam(id) ? await getNoticeById(id, { forPublicFeed }) : null
+        if (cancelled) return
+        setNotice(n)
+
+        const { notices: dbRows } = await getAdminNoticesPaged({
+          page: 1,
+          pageSize: 100,
+          category: filterParam,
+          listOnly: false,
+          forPublicFeed,
+        })
+        if (cancelled) return
+        const visible = dbRows.filter((x) => canViewNotice(x, prof))
+        const banner = visible.find((x) => x.isBanner) || visible[0]
+        const nav = banner ? [banner, ...visible.filter((x) => x.id !== banner.id)] : visible
+        setNavList(nav)
+        setLoadState(n ? 'ok' : 'notfound')
+      } catch {
+        if (!cancelled) {
+          setNotice(null)
+          setNavList([])
+          setLoadState('notfound')
+        }
+      }
     }
-    reload()
+    void reload()
     window.addEventListener('vics:notices:updated', reload)
     return () => {
       cancelled = true
       window.removeEventListener('vics:notices:updated', reload)
     }
-  }, [])
+  }, [id, filterParam, profile])
 
-  const allNotices = useMemo(() => [...adminNotices, ...MOCK_NOTICES], [adminNotices])
-  const notice = allNotices.find((n) => n.id === id)
-
-  // 탭 필터에 맞는 목록 (NoticePage와 동일한 순서, 접근 가능한 것만)
-  const filteredNotices = (filter === 'all' ? allNotices : allNotices.filter((n) => n.category === filter))
-    .filter((n) => canViewNotice(n, profile ?? null))
-  const bannerNotice = filteredNotices.find((n) => n.isBanner) || filteredNotices[0]
-  const navList = bannerNotice
-    ? [bannerNotice, ...filteredNotices.filter((n) => n.id !== bannerNotice.id)]
-    : filteredNotices
-  const currentIndex = navList.findIndex((n) => n.id === id)
+  const currentIndex = navList.findIndex((n) => String(n.id) === String(id))
   const prevNotice = currentIndex > 0 ? navList[currentIndex - 1] : null
   const nextNotice = currentIndex >= 0 && currentIndex < navList.length - 1 ? navList[currentIndex + 1] : null
 
-  const filterParam = FILTER_TABS.some((t) => t.id === filter) ? filter : 'all'
   const listQs = buildNoticeListSearchString(filterParam, parseNoticePageParam(searchParams.get('page')))
 
+  const canDeleteNotice =
+    canAccessAdmin(user) && isUuidParam(id) && notice?.source === 'admin'
+
+  const handleDeleteConfirm = async () => {
+    if (!id || !canDeleteNotice) return
+    setDeleting(true)
+    try {
+      await deleteNotice(id)
+      setDeleteOpen(false)
+      showToast('삭제됐어요.', 'success')
+      navigate('/admin/notice/list')
+    } catch (e) {
+      showToast(e?.message || '삭제에 실패했어요.', 'error')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  if (loadState === 'loading') {
+    return (
+      <div className={cn('min-h-screen flex flex-col items-center justify-center px-4', PAGE_BG)}>
+        <div className={cn(SECTION_CARD, 'px-8 py-10 text-sm font-medium text-fuchsia-800/75')}>불러오는 중…</div>
+      </div>
+    )
+  }
+
   // 공지 없음
-  if (!notice) {
+  if (loadState === 'notfound' || !notice) {
     return (
       <div className={cn('min-h-screen flex flex-col items-center justify-center px-4', PAGE_BG)}>
         <div className={cn(SECTION_CARD, 'text-center px-8 py-10 max-w-sm w-full')}>
@@ -165,21 +213,33 @@ export function NoticeDetailPage() {
             </button>
             <h1 className="text-lg font-black text-fuchsia-950 truncate tracking-tight">공지사항</h1>
           </div>
-          {notice.category === 'event' && (
-            <button
-              type="button"
-              onClick={async () => {
-                const url = window.location.href
-                const text = `${notice.title}\n${url}`
-                await copyToClipboard(text)
-                showToast('친구에게 공유할 링크가 복사됐어요! 💬', 'success')
-              }}
-              className="p-2 rounded-xl border border-amber-200/70 bg-amber-50/90 text-amber-700 hover:bg-amber-100 transition-colors shrink-0 shadow-sm"
-              aria-label="공유"
-            >
-              <Share2 size={20} />
-            </button>
-          )}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {notice.category === 'event' && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const url = window.location.href
+                  const text = `${notice.title}\n${url}`
+                  await copyToClipboard(text)
+                  showToast('친구에게 공유할 링크가 복사됐어요! 💬', 'success')
+                }}
+                className="p-2 rounded-xl border border-amber-200/70 bg-amber-50/90 text-amber-700 hover:bg-amber-100 transition-colors shadow-sm"
+                aria-label="공유"
+              >
+                <Share2 size={20} />
+              </button>
+            )}
+            {canDeleteNotice && (
+              <button
+                type="button"
+                onClick={() => setDeleteOpen(true)}
+                className="flex items-center gap-1 px-2.5 py-2 text-xs font-bold rounded-xl bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+              >
+                <Trash2 size={16} />
+                삭제
+              </button>
+            )}
+          </div>
         </div>
 
         <article className={cn(SECTION_CARD, 'mx-4 mt-4 mb-4 p-5 border-pink-100/70')}>
@@ -199,9 +259,9 @@ export function NoticeDetailPage() {
             {notice.date} | {notice.author}
           </p>
           {notice.content?.includes('<') ? (
-            <div
+            <NoticeArticleHtml
+              html={notice.content}
               className="text-[15px] text-fuchsia-900/90 leading-[1.8] prose prose-p:my-2 prose-img:rounded-lg max-w-none prose-headings:text-fuchsia-950"
-              dangerouslySetInnerHTML={{ __html: notice.content }}
             />
           ) : (
             <div className="text-[15px] text-fuchsia-900/90 leading-[1.8] whitespace-pre-line">
@@ -282,6 +342,14 @@ export function NoticeDetailPage() {
           </div>
         </div>
       </div>
+
+      <NoticeDeleteConfirmModal
+        isOpen={deleteOpen}
+        onClose={() => !deleting && setDeleteOpen(false)}
+        onConfirm={handleDeleteConfirm}
+        itemLabel={notice.title}
+        confirming={deleting}
+      />
     </div>
   )
 }

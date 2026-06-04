@@ -6,7 +6,14 @@ import { formatNumber } from '../../lib/utils'
 import { safeMediaUrl, encodeForUrl } from '../../lib/sanitize'
 import { getCurrentSeason, getRankColumns } from '../../lib/season'
 import { getCachedRanking, setCachedRanking } from '../../lib/rankingCache'
+import { getRankingEligibleProfileIds, RANKING_ELIGIBLE_CACHE_TAG } from '../../lib/rankingEligibleProfiles'
+import { enrichProfileRowsWithTierSnapshot, EMPTY_TIER_RANK_INFO } from '../../lib/creatorRankSnapshot'
+import { attachCompetitionRanksInMemory } from '../../lib/rankingCompetitionRank'
 import { FeaturedBadgeSpan } from '../ui/FeaturedBadge'
+import { TierBadge } from '../ui/TierBadge'
+
+/** 메인 랭킹 위젯 캐시 — 티어 스냅샷 포함 */
+const MAIN_RANKING_TIER_CACHE_VER = 't2'
 
 const MODE_TABS = [
   { id: 'all', label: '전체' },
@@ -19,13 +26,13 @@ const TYPE_TABS = [
 ]
 
 const CREATOR_SORT = [
-  { id: 'votes', label: '투표받은 수' },
   { id: 'points', label: '포인트' },
+  { id: 'votes', label: '투표받은 수' },
 ]
 
 const VOTER_SORT = [
-  { id: 'hitrate', label: '적중률' },
   { id: 'points', label: '포인트' },
+  { id: 'hitrate', label: '적중률' },
 ]
 
 function calcHitRate(hits, total) {
@@ -36,15 +43,15 @@ function calcHitRate(hits, total) {
 export function MainRankingBoard() {
   const [mode, setMode] = useState('all')
   const [typeTab, setTypeTab] = useState('creator')
-  const [sortBy, setSortBy] = useState({ creator: 'votes', voter: 'hitrate' })
+  const [sortBy, setSortBy] = useState({ creator: 'points', voter: 'points' })
   const [rankings, setRankings] = useState([])
   const [loading, setLoading] = useState(true)
 
-  const currentSort = sortBy[typeTab] ?? (typeTab === 'creator' ? 'votes' : 'hitrate')
+  const currentSort = sortBy[typeTab] ?? 'points'
   const sortTabs = typeTab === 'creator' ? CREATOR_SORT : VOTER_SORT
   const cols = getRankColumns(mode === 'season')
 
-  const cacheKey = `main_${mode}_${typeTab}_${currentSort}`
+  const cacheKey = `main_${RANKING_ELIGIBLE_CACHE_TAG}_${MAIN_RANKING_TIER_CACHE_VER}_${mode}_${typeTab}_${currentSort}`
 
   useEffect(() => {
     const cached = getCachedRanking(cacheKey)
@@ -59,12 +66,19 @@ export function MainRankingBoard() {
   const fetchRankings = async () => {
     setLoading(true)
     try {
+      const eligibleIds = await getRankingEligibleProfileIds()
+      if (Array.isArray(eligibleIds) && eligibleIds.length === 0) {
+        setRankings([])
+        setCachedRanking(cacheKey, [])
+        return
+      }
+
       const isCreator = typeTab === 'creator'
       const orderCol =
         isCreator
           ? (currentSort === 'votes' ? cols.total_votes_received : cols.points)
           : (currentSort === 'hitrate' ? cols.hit_rate : cols.points)
-      const selectCols = `id, nickname, avatar_url, points, season_points, total_matchups, total_votes_received, season_total_votes_received, vote_hits, vote_total, season_vote_hits, season_vote_total, hit_rate, season_hit_rate, featured_badge`
+      const selectCols = `id, nickname, avatar_url, points, season_points, total_matchups, creator_wins, total_votes_received, season_total_votes_received, vote_hits, vote_total, season_vote_hits, season_vote_total, hit_rate, season_hit_rate, featured_badge`
 
       let query = supabase
         .from('profiles')
@@ -73,9 +87,11 @@ export function MainRankingBoard() {
         .limit(5)
 
       if (!isCreator) query = query.gte(cols.vote_total, 1)
+      if (eligibleIds?.length) query = query.in('id', eligibleIds)
 
       const { data } = await query
-      const list = data || []
+      const enriched = await enrichProfileRowsWithTierSnapshot(data || [])
+      const list = attachCompetitionRanksInMemory(enriched, orderCol)
       setRankings(list)
       setCachedRanking(cacheKey, list)
     } catch (err) {
@@ -114,8 +130,8 @@ export function MainRankingBoard() {
   const { number: seasonNum } = getCurrentSeason()
 
   return (
-    <div className="bg-gradient-to-b from-white via-emerald-50/15 to-teal-50/10 rounded-2xl border border-emerald-200/70 shadow-sm shadow-emerald-200/25 ring-1 ring-teal-100/40 overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 bg-gradient-to-r from-emerald-50/50 via-white/70 to-teal-50/35 border-b border-emerald-200/55">
+    <div className="bg-gradient-to-b from-slate-100/90 via-emerald-50/14 to-teal-50/12 rounded-2xl border border-emerald-200/70 shadow-sm shadow-emerald-200/25 ring-1 ring-teal-100/40 overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2 bg-gradient-to-r from-emerald-50/50 via-slate-100/88 to-teal-50/35 border-b border-emerald-200/55">
         <div className="flex gap-1">
           {MODE_TABS.map((tab) => (
             <button
@@ -133,7 +149,7 @@ export function MainRankingBoard() {
           <span className="text-[10px] text-gray-400">S{seasonNum}</span>
         )}
       </div>
-      <div className="flex border-b border-teal-100/90 bg-gradient-to-r from-white/80 via-emerald-50/20 to-cyan-50/25">
+      <div className="flex border-b border-teal-100/90 bg-gradient-to-r from-slate-100/78 via-emerald-50/20 to-cyan-50/25">
         {TYPE_TABS.map((tab) => (
           <button
             key={tab.id}
@@ -164,7 +180,7 @@ export function MainRankingBoard() {
           </button>
         ))}
       </div>
-      <div className="grid grid-cols-12 px-4 py-2 text-xs text-emerald-700/80 font-semibold border-b border-emerald-200/60 bg-gradient-to-r from-emerald-50/45 via-white/50 to-teal-50/35">
+      <div className="grid grid-cols-12 px-4 py-2 text-xs text-emerald-700/80 font-semibold border-b border-emerald-200/60 bg-gradient-to-r from-emerald-50/45 via-slate-100/72 to-teal-50/35">
         <span className="col-span-1">순위</span>
         <span className="col-span-6">닉네임</span>
         <span className="col-span-2 text-right">{col1Label}</span>
@@ -187,16 +203,28 @@ export function MainRankingBoard() {
                 style={{ '--stagger-delay': `${idx * 42}ms` }}
               >
                 <span className="col-span-1 text-sm font-bold">
-                  {idx < 3 ? MEDALS[idx] : <span className="text-gray-400 text-xs">{idx + 1}</span>}
+                  {(profile._displayRank ?? idx + 1) <= 3
+                    ? MEDALS[(profile._displayRank ?? idx + 1) - 1]
+                    : <span className="text-gray-400 text-xs">{profile._displayRank ?? idx + 1}</span>}
                 </span>
-                <div className="col-span-6 flex items-center gap-2 min-w-0">
+                <div className="col-span-6 flex items-start gap-2 min-w-0">
                   <img
                     src={safeMediaUrl(profile.avatar_url) || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeForUrl(profile.nickname || '')}`}
                     alt=""
-                    className="w-6 h-6 rounded-full object-cover"
+                    className="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5"
                   />
-                  <span className="text-xs font-medium truncate text-[#22282E]">{profile.nickname}</span>
-                  <FeaturedBadgeSpan badgeId={profile.featured_badge} className="translate-y-px shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                      <span className="text-xs font-medium truncate text-[#22282E]">{profile.nickname}</span>
+                      <FeaturedBadgeSpan badgeId={profile.featured_badge} className="translate-y-px shrink-0" />
+                    </div>
+                    <TierBadge
+                      profile={profile}
+                      rankInfo={profile._tierRankInfo ?? { ...EMPTY_TIER_RANK_INFO }}
+                      variant="compact"
+                      className="!text-[9px] mt-0.5"
+                    />
+                  </div>
                 </div>
                 <span className="col-span-2 text-right text-xs font-bold">{getCol1(profile)}</span>
                 <span className="col-span-3 text-right text-xs text-gray-500">{getCol2(profile)}</span>

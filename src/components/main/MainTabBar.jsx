@@ -1,4 +1,5 @@
-import { Link, useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
+import { PrefetchLink } from '../navigation/PrefetchLink'
 import { Flame, Sparkles, Zap } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
@@ -45,21 +46,21 @@ export function MainTabBar({ currentVariant }) {
   const location = useLocation()
 
   return (
-    <div className="sticky top-14 z-20 -mx-4 px-4 py-3 mb-5">
-      {/* 글래스 트랙 + 소프트 글로우 (MZ 톤) */}
+    <div className="sticky top-14 z-20 -mx-4 mb-5 px-4 py-3 max-lg:touch-manipulation">
+      {/* 글래스 트랙 — 순백·과포화 완화 (메인/피드 눈부심 완화) */}
       <div
         className={cn(
-          'mx-auto max-w-lg rounded-[1.75rem] border border-white/70',
-          'bg-gradient-to-b from-white/90 via-white/75 to-slate-50/65',
-          'shadow-[0_12px_40px_-12px_rgba(139,92,246,0.18),0_4px_16px_-4px_rgba(14,165,233,0.12)]',
-          'backdrop-blur-xl backdrop-saturate-150',
-          'p-1.5 sm:p-2'
+          'mx-auto max-w-lg rounded-[1.75rem] border border-slate-200/55',
+          'bg-gradient-to-b from-slate-200/45 via-slate-100/92 to-slate-200/35',
+          'shadow-[0_10px_32px_-12px_rgba(100,116,139,0.2),0_4px_14px_-4px_rgba(45,212,191,0.08)]',
+          'backdrop-blur-xl backdrop-saturate-110',
+          'p-2 lg:p-1.5',
         )}
       >
         <div
           role="tablist"
           aria-label="매치업 피드 종류"
-          className="flex items-stretch justify-center gap-1 sm:gap-1.5 overflow-x-auto pb-0.5 [&::-webkit-scrollbar]:hidden"
+          className="flex items-stretch justify-start gap-2 overflow-x-auto overscroll-x-contain scroll-smooth touch-pan-x snap-x snap-mandatory pb-0.5 scrollbar-hide lg:justify-center lg:gap-1.5 lg:overflow-visible"
         >
           {FEED_TABS.map((tab) => {
             const Icon = tab.icon
@@ -67,18 +68,19 @@ export function MainTabBar({ currentVariant }) {
               currentVariant === tab.id || location.pathname === tab.path
 
             return (
-              <Link
+              <PrefetchLink
                 key={tab.id}
                 to={tab.path}
                 role="tab"
                 aria-selected={active}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
-                  'group relative flex min-w-0 flex-1 sm:flex-none flex-col items-center justify-center gap-0.5 rounded-2xl px-2.5 py-2 sm:px-5 sm:py-2.5',
+                  'group relative flex min-h-[3.25rem] shrink-0 snap-start touch-manipulation flex-col items-center justify-center gap-1 rounded-2xl px-4 py-3',
+                  'min-w-[7.25rem] max-lg:flex-none lg:min-h-0 lg:min-w-0 lg:flex-none lg:px-5 lg:py-2.5',
                   'transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-400/80 focus-visible:ring-offset-2 focus-visible:ring-offset-white/90',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-400/80 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-100',
                   active
-                    ? cn('scale-[1.02] sm:scale-100', tab.active)
+                    ? cn('scale-[1.02] lg:scale-100', tab.active)
                     : cn(
                         'border',
                         'hover:scale-[1.03] active:scale-[0.98]',
@@ -89,20 +91,20 @@ export function MainTabBar({ currentVariant }) {
                 {/* 비활성일 때 은은한 시머 */}
                 {!active && (
                   <span
-                    className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br from-white/50 via-transparent to-white/0 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+                    className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br from-slate-100/40 via-transparent to-slate-50/0 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
                     aria-hidden
                   />
                 )}
 
-                <span className="relative flex items-center gap-1 sm:gap-1.5">
+                <span className="relative flex items-center gap-1.5 lg:gap-1.5">
                   <span
                     className={cn(
-                      'flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-xl transition-transform duration-300',
+                      'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-transform duration-300 lg:h-8 lg:w-8',
                       active ? 'bg-white/20 shadow-inner' : cn('group-hover:scale-110', tab.idleIcon)
                     )}
                   >
                     <Icon
-                      size={15}
+                      size={16}
                       strokeWidth={active ? 2.75 : 2.25}
                       className={cn(active ? 'text-white drop-shadow-sm' : '')}
                     />
@@ -134,7 +136,7 @@ export function MainTabBar({ currentVariant }) {
                     aria-hidden
                   />
                 )}
-              </Link>
+              </PrefetchLink>
             )
           })}
         </div>

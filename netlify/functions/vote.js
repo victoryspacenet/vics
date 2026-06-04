@@ -4,6 +4,9 @@
  */
 const { createClient } = require('@supabase/supabase-js')
 const { deliverSystemPush } = require('../lib/systemPushCore.cjs')
+const { withIpRateLimit } = require('../lib/rateLimitMiddleware.cjs')
+const { withDistributedRateLimit } = require('../lib/rateLimitDistributed.cjs')
+const fcm = require('../lib/fcmCore.cjs')
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || ''
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || ''
@@ -14,7 +17,11 @@ function getClientIp(event) {
   return event.headers['x-real-ip'] || event.headers['cf-connecting-ip'] || null
 }
 
-exports.handler = async (event) => {
+/**
+ * FCM 알림은 투표 응답을 막지 않도록 `context.waitUntil`로 연장 실행합니다.
+ * (Netlify Functions — waitUntil 사용 가능 배포 기준. 로컬·구형 런타임은 fire-and-forget.)
+ */
+const voteHandler = async (event, context) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) }
   }
@@ -92,5 +99,52 @@ exports.handler = async (event) => {
     return { statusCode: 500, body: JSON.stringify({ error: '투표 중 오류가 발생했어요' }) }
   }
 
+  const runFcmAfterVote = async () => {
+    if (!fcm.isFcmConfigured() || !serviceRoleKey) return
+    try {
+      const svc = createClient(supabaseUrl, serviceRoleKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      })
+      const { data: mu } = await svc
+        .from('matchups')
+        .select('user_id, right_user_id')
+        .eq('id', matchup_id)
+        .maybeSingle()
+      const targets = []
+      if (mu?.user_id && mu.user_id !== user.id) targets.push(mu.user_id)
+      if (mu?.right_user_id && mu.right_user_id !== user.id) targets.push(mu.right_user_id)
+      if (targets.length) {
+        await fcm.sendMulticastToUserIds(svc, targets, {
+          title: '새 투표',
+          body: '회원님의 매치업에 새 투표가 들어왔어요.',
+          data: {
+            type: 'vote',
+            route: `/matchup/${matchup_id}`,
+            matchup_id: String(matchup_id),
+          },
+        })
+      }
+    } catch (e) {
+      console.warn('[vote] fcm notify participants:', e?.message || e)
+    }
+  }
+
+  const fcmWork = runFcmAfterVote()
+  const waitUntil =
+    (context && typeof context.waitUntil === 'function' && context.waitUntil.bind(context)) ||
+    (typeof globalThis.Netlify?.context?.waitUntil === 'function' &&
+      globalThis.Netlify.context.waitUntil.bind(globalThis.Netlify.context)) ||
+    null
+  if (waitUntil) {
+    waitUntil(fcmWork)
+  } else {
+    void fcmWork.catch((e) => console.warn('[vote] fcm (no waitUntil):', e?.message || e))
+  }
+
   return { statusCode: 200, body: JSON.stringify({ ok: true }) }
 }
+
+exports.handler = withIpRateLimit(
+  withDistributedRateLimit(voteHandler, { scope: 'vote', maxRequests: 90, windowSeconds: 60 }),
+  { scope: 'vote', maxRequests: 120 },
+)

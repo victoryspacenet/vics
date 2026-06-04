@@ -16,6 +16,10 @@ dist-ssr
 .env
 .env.local
 .env.*.local
+.env.production
+
+# Firebase Android (비밀·프로젝트별 — Firebase 콘솔에서만 받아 android/app/에 배치)
+android/app/google-services.json
 
 # Editor directories and files
 .vscode/*
@@ -32,3 +36,12 @@ dist-ssr
 
 # Local Netlify folder
 .netlify
+
+# Capacitor 네이티브 — 로컬/CI 빌드 산출물 (android·ios 템플릿은 커밋)
+android/app/build/
+android/.gradle/
+android/captures/
+*.apk
+*.aab
+ios/App/Pods/
+ios/App/build/

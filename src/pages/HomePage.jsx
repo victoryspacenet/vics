@@ -4,13 +4,16 @@ import {
   ChevronLeft, ChevronRight, Plus, ChevronDown,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { fetchMainFeaturedFeedRestriction } from '../lib/mainFeed'
 import {
   MATCHUP_CREATOR_PROFILE_FIELDS,
+  EMPTY_TIER_RANK_INFO,
   enrichMatchupsWithCreatorRankInfo,
 } from '../lib/creatorRankSnapshot'
 import { useUIStore } from '../store/uiStore'
 import { useAuthStore } from '../store/authStore'
 import { FeedCard } from '../components/matchup/FeedCard'
+import { MatchupEngagementProvider } from '../components/matchup/MatchupEngagementContext'
 import { cn } from '../lib/utils'
 import { getFeedCategoryNavItems } from '../lib/categoryAdminStorage'
 import { storedCategoryValuesForFilter } from '../lib/matchupCategoryAliases'
@@ -26,7 +29,8 @@ const SORT_OPTIONS = [
   { id: 'popular', label: '인기순', icon: '🔥' },
 ]
 
-const PAGE_SIZE = 12
+/** DB·UI 공통 페이지 크기 (한 번에 가져오는 행 수) */
+const PAGE_SIZE = 20
 
 const VALID_FILTERS = ['active', 'completed', 'mine']
 
@@ -74,6 +78,7 @@ export function HomePage({ refreshRef }) {
   const [sortBy,     setSortBy]     = useState('newest')
   const [sortOpen,   setSortOpen]   = useState(false)
   const [data,       setData]       = useState([])
+  const [totalCount, setTotalCount] = useState(0)
   const [loading,    setLoading]    = useState(true)
   const [page,       setPage]       = useState(1)
   const [lnbOpen,    setLnbOpen]    = useState(false)
@@ -131,21 +136,44 @@ export function HomePage({ refreshRef }) {
     if (!ids.has(category)) setCategory('all')
   }, [feedCategories, category])
 
-  useEffect(() => { fetchMatchups() }, [category, filter, sortBy, user?.id])
+  useEffect(() => { void fetchMatchups() }, [category, filter, sortBy, user?.id, page])
   useEffect(() => { if (refreshRef) refreshRef.current = fetchMatchups }, [])
   useEffect(() => { setPage(1); window.scrollTo({ top: 0, behavior: 'smooth' }) }, [category, filter, sortBy])
 
   const fetchMatchups = async () => {
     setLoading(true)
+    let rows = []
+    /** enrich 단계까지 유지합니다. 빈 객체로 시작해 이전 요청 상태가 남지 않게 합니다 */
+    let rowsForEnrich = []
     try {
       /** 비로그인 시 URL에 filter=mine 이 있어도 목록은 진행 중 매치업 기준으로 조회 */
       const queryFilter = filter === 'mine' && !user?.id ? 'active' : filter
 
+      /** 메인 홈 베스트·추천과 동일한 매치업만 노출 (시드/더미 대량 노출 방지) */
+      let featuredIds = null
+      /** 활성 피드: 메인 베스트/추천과 같은 뱃지 문구용 — 키는 소문자 UUID */
+      let featuredRoleById = {}
+      if (queryFilter === 'active') {
+        const fed = await fetchMainFeaturedFeedRestriction()
+        featuredIds = fed.ids
+        featuredRoleById = fed.roleById
+        if (!featuredIds.length) {
+          setTotalCount(0)
+          setData([])
+          setLoading(false)
+          return
+        }
+      }
+
       const embed = `*, profiles:user_id(${MATCHUP_CREATOR_PROFILE_FIELDS}), right_profiles:right_user_id(${MATCHUP_CREATOR_PROFILE_FIELDS})`
       let q = supabase
         .from('matchups')
-        .select(embed)
+        .select(embed, { count: 'exact' })
         .not('right_type', 'is', null)
+
+      if (featuredIds?.length) {
+        q = q.in('id', featuredIds)
+      }
 
       if (category !== 'all') {
         const catVals = storedCategoryValuesForFilter(category)
@@ -161,16 +189,45 @@ export function HomePage({ refreshRef }) {
         q = q.not('expires_at', 'is', null).lt('expires_at', new Date().toISOString())
       }
 
-      const { data: base } = await q.limit(100)
-      const pool = base || []
-      const sorted = sortBy === 'popular'
-        ? [...pool].sort((a, b) => (b.total_votes || 0) - (a.total_votes || 0))
-        : [...pool].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-      setData(await enrichMatchupsWithCreatorRankInfo(sorted))
+      if (sortBy === 'popular') {
+        q = q
+          .order('total_votes', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false })
+      } else {
+        q = q.order('created_at', { ascending: false })
+      }
+
+      const from = (page - 1) * PAGE_SIZE
+      const to = from + PAGE_SIZE - 1
+      const { data: base, error, count } = await q.range(from, to)
+      if (error) throw error
+      setTotalCount(typeof count === 'number' ? count : 0)
+      rows = base || []
+      const roleHint = (_id) => {
+        if (queryFilter !== 'active') return undefined
+        const key = String(_id ?? '').trim().toLowerCase()
+        return featuredRoleById[key]
+      }
+      rowsForEnrich = rows.map((m) => ({
+        ...m,
+        _creatorRankInfo: { ...EMPTY_TIER_RANK_INFO },
+        _feedListBadgeVariant: roleHint(m.id),
+      }))
+      setData(rowsForEnrich)
     } catch (err) {
       console.error(err)
+      setData([])
+      setTotalCount(0)
+      rows = []
+      rowsForEnrich = []
     } finally {
       setLoading(false)
+    }
+    if (!rows.length) return
+    try {
+      setData(await enrichMatchupsWithCreatorRankInfo(rowsForEnrich))
+    } catch (e) {
+      console.warn('[HomePage] creator rank enrich failed', e)
     }
   }
 
@@ -185,11 +242,15 @@ export function HomePage({ refreshRef }) {
     return () => window.removeEventListener('vics:matchup-banner-highlight:updated', on)
   }, [])
 
-  const totalPages  = Math.max(1, Math.ceil(data.length / PAGE_SIZE))
-  const pagedItems  = data.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-  const goPage      = (p) => { setPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }) }
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+  const goPage = (p) => {
+    setPage(p)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
 
   const handleCreate = () => { user ? openCreateDrawer() : openLoginModal() }
+
+  const feedMatchupIds = useMemo(() => data.map((m) => m.id).filter(Boolean), [data])
 
   const LNBContent = () => (
     <div className="space-y-1">
@@ -199,7 +260,7 @@ export function HomePage({ refreshRef }) {
       {feedCategories.map((c) => (
         <button
           key={c.id}
-          onClick={() => { setCategory(c.id) }}
+          onClick={() => { setPage(1); setCategory(c.id) }}
           className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all ${
             category === c.id ? LNB_ROW_ON : LNB_ROW_OFF
           }`}
@@ -224,7 +285,14 @@ export function HomePage({ refreshRef }) {
         {FILTERS.map((f) => (
           <button
             key={f.id}
-            onClick={() => { setSearchParams((p) => { const n = new URLSearchParams(p); n.set('filter', f.id); return n }) }}
+            onClick={() => {
+              setPage(1)
+              setSearchParams((p) => {
+                const n = new URLSearchParams(p)
+                n.set('filter', f.id)
+                return n
+              })
+            }}
             disabled={f.id === 'mine' && !user}
             className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all disabled:opacity-50 ${
               filter === f.id ? LNB_ROW_ON : LNB_ROW_OFF
@@ -273,7 +341,7 @@ export function HomePage({ refreshRef }) {
                 type="button"
                 role="tab"
                 aria-selected={sortBy === s.id}
-                onClick={() => setSortBy(s.id)}
+                onClick={() => { setPage(1); setSortBy(s.id) }}
                 className={cn(
                   'flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold transition-all',
                   sortBy === s.id
@@ -314,7 +382,7 @@ export function HomePage({ refreshRef }) {
                   {SORT_OPTIONS.map((s) => (
                     <button
                       key={s.id}
-                      onClick={() => { setSortBy(s.id); setSortOpen(false) }}
+                      onClick={() => { setPage(1); setSortBy(s.id); setSortOpen(false) }}
                       className={`w-full flex items-center gap-2 px-4 py-2.5 text-sm font-bold transition-colors ${
                         sortBy === s.id ? 'bg-[#22282E] text-white' : 'text-violet-900/75 hover:bg-white/50'
                       }`}
@@ -329,39 +397,42 @@ export function HomePage({ refreshRef }) {
         </div>
 
         {/* ── 피드 (모바일: 한 화면에 한 카드 느낌 / 웹: 뷰포트 비율에 맞춰 카드·썸네일 확대) ── */}
-        <div className="overflow-y-auto overscroll-contain max-h-[calc(100vh-16rem)] sm:max-h-[calc(100vh-14rem)] lg:max-h-[calc(100vh-10rem)] xl:max-h-[calc(100vh-9.5rem)] snap-y snap-mandatory">
-          {loading
-            ? Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="snap-center snap-always py-3 lg:py-5">
-                  <FeedCardSkeleton />
-                </div>
-              ))
-            : pagedItems.length > 0
-            ? pagedItems.map((m, i) => (
-                <div
-                  key={`${filter}-${category}-${sortBy}-${page}-${m.id}`}
-                  className="snap-center snap-always py-3 lg:py-5 min-h-[min(72vh,400px)] lg:min-h-[min(82vh,560px)] xl:min-h-[min(85vh,680px)] flex items-center justify-center w-full animate-fade-in-feed-stagger"
-                  style={{ '--stagger-delay': `${Math.min(i, 11) * 52}ms` }}
-                >
-                  <div className="w-full max-w-full lg:max-w-[min(100%,52rem)] xl:max-w-[min(100%,56rem)] mx-auto">
-                    <FeedCard
-                      matchup={m}
-                      listBadge
-                      onVoteUpdate={fetchMatchups}
-                    />
+        <MatchupEngagementProvider matchupIds={feedMatchupIds}>
+          <div className="overflow-y-auto overscroll-contain max-h-[calc(100vh-16rem)] sm:max-h-[calc(100vh-14rem)] lg:max-h-[calc(100vh-10rem)] xl:max-h-[calc(100vh-9.5rem)] snap-y snap-mandatory">
+            {loading
+              ? Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="snap-center snap-always py-3 lg:py-5">
+                    <FeedCardSkeleton />
                   </div>
+                ))
+              : data.length > 0
+              ? data.map((m, i) => (
+                  <div
+                    key={m.id}
+                    className="snap-center snap-always py-3 lg:py-5 min-h-[min(72vh,400px)] lg:min-h-[min(82vh,560px)] xl:min-h-[min(85vh,680px)] flex items-center justify-center w-full animate-fade-in-feed-stagger"
+                    style={{ '--stagger-delay': `${Math.min(i, 11) * 52}ms` }}
+                  >
+                    <div className="w-full max-w-full lg:max-w-[min(100%,52rem)] xl:max-w-[min(100%,56rem)] mx-auto">
+                      <FeedCard
+                        matchup={m}
+                        listBadge={filter === 'active'}
+                        listBadgeVariant={m._feedListBadgeVariant}
+                        eagerMedia={page === 1 && i < 2}
+                        onVoteUpdate={fetchMatchups}
+                      />
+                    </div>
+                  </div>
+                ))
+              : (
+                <div className="py-16 animate-fade-in-feed">
+                  <EmptyFeed onCreateClick={handleCreate} />
                 </div>
-              ))
-            : (
-              <div className="py-16 animate-fade-in-feed">
-                <EmptyFeed onCreateClick={handleCreate} />
-              </div>
-            )
-          }
-        </div>
+              )}
+          </div>
+        </MatchupEngagementProvider>
 
         {/* ── 3-5. 하단 페이지네이션 (원형 버튼) ── */}
-        {!loading && pagedItems.length > 0 && (
+        {!loading && data.length > 0 && (
           <div className="mt-8 pb-24 sm:pb-8 flex justify-center">
             <div className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl border border-gray-100 bg-white/90 shadow-sm">
               <Pagination current={page} total={totalPages} onPage={goPage} />

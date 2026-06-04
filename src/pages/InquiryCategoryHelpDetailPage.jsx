@@ -4,6 +4,7 @@ import { ArrowLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { getCategoryHelpById } from '../lib/inquiryCategoryHelp'
 import { FaqIllustration } from '../components/inquiry/FaqIllustration'
 import { cn } from '../lib/utils'
+import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../lib/layoutShellClasses'
 
 const PAGE_BG =
   'bg-gradient-to-br from-rose-50/98 via-fuchsia-50/35 to-cyan-50/50'
@@ -66,7 +67,7 @@ export function InquiryCategoryHelpDetailPage() {
 
   return (
     <div className={cn('min-h-screen', PAGE_BG)}>
-      <div className="max-w-screen-lg mx-auto">
+      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto')}>
         <div className={cn('sticky top-0 z-10 px-4 py-3 flex items-center gap-3', HEADER_GLASS)}>
           <button
             type="button"

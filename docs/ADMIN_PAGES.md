@@ -21,9 +21,10 @@
 
 | 구성 | 내용 |
 |------|------|
-| 실시간 현황 | 진행중 매치업, 오늘의 투표, 신규 가입, 긴급신고 |
-| 긴급 모니터링 | AI 부적절 판정 알림 테이블 (ID, 카테고리, 유사도, 상태, 액션) |
-| 액션 | 유지 / 경고 / 차단 버튼 |
+| 실시간 현황 | 전체 회원, 탈퇴 회원, 신규 가입, 진행중 매치업, 오늘의 투표, 긴급신고 |
+| 회원 집계 | RPC `get_admin_member_stats` (`supabase_admin_member_stats.sql`) — 탈퇴는 `account_withdrawal_cooldowns` 누적 |
+| 긴급 모니터링 | Supabase `matchup_moderation_alerts` 큐 (신고+AI·저유사도 적재) |
+| 액션 | 유지(목록 제거) / 차단(종료) / 삭제 — RPC `resolve_matchup_moderation_alert` |
 
 ---
 

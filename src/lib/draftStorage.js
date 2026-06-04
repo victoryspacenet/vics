@@ -162,6 +162,7 @@ export function saveChallengeDraft(matchupId, data, userId) {
 
   const draft = {
     matchupId,
+    rightDescription: typeof data.rightDescription === 'string' ? data.rightDescription : '',
     rightContentType: data.rightContent?.type || null,
     rightContentText: data.rightContent?.type === 'text' ? data.rightContent?.text || '' : '',
     savedAt: Date.now(),
@@ -207,6 +208,7 @@ export async function loadChallengeDraft(matchupId, userId) {
     }
 
     return {
+      rightDescription: typeof draft.rightDescription === 'string' ? draft.rightDescription : '',
       rightContent,
       hasRestoredFile: !!rightContent?.file,
     }

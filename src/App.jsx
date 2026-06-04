@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from './store/authStore'
 import { useUIStore } from './store/uiStore'
@@ -8,92 +8,35 @@ import { Modal } from './components/ui/Modal'
 import { CreateMatchupDrawer } from './components/matchup/CreateMatchupDrawer'
 import { ChallengeDrawer } from './components/matchup/ChallengeDrawer'
 import { LoginModal, LoginPage } from './pages/LoginPage'
-import { HomePage } from './pages/HomePage'
-import { MatchupDetailPage } from './pages/MatchupDetailPage'
-import { RankingPage } from './pages/RankingPage'
-import { MyPage } from './pages/MyPage'
-import { PublicProfilePage } from './pages/PublicProfilePage'
-import { SignupPage } from './pages/SignupPage'
-import { WelcomePage } from './pages/WelcomePage'
-import { ProfileEditPage } from './pages/ProfileEditPage'
-import { ProfileImageEditPage } from './pages/ProfileImageEditPage'
-import { DeleteAccountPage } from './pages/DeleteAccountPage'
-import { DeletedPage } from './pages/DeletedPage'
-import { LandingPage } from './pages/LandingPage'
-import { EventsComingSoonPage } from './pages/EventsComingSoonPage'
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
+import { ResetPasswordPage } from './pages/ResetPasswordPage'
 import { MainPage } from './pages/MainPage'
 import { MainFeedPage } from './pages/MainFeedPage'
-import { RankingGalleryPage } from './pages/RankingGalleryPage'
-import { SearchPage } from './pages/SearchPage'
-import { TermsPage } from './pages/TermsPage'
-import { PrivacyPage } from './pages/PrivacyPage'
-import { CommunityPolicyPage } from './pages/CommunityPolicyPage'
-import { PointRewardsPage } from './pages/PointRewardsPage'
-import { MainSpotlight1hPage } from './pages/MainSpotlight1hPage'
-import { VictoryReportPage } from './pages/VictoryReportPage'
-import { VictoryReportCheerPage } from './pages/VictoryReportCheerPage'
-import { FandomDashboardPage } from './pages/FandomDashboardPage'
-import { DevFandomMilestonePreviewPage } from './pages/DevFandomMilestonePreviewPage'
-import { DevFandomBronzeBadgePreviewPage } from './pages/DevFandomBronzeBadgePreviewPage'
-import { DevDiamondLegendPreviewPage } from './pages/DevDiamondLegendPreviewPage'
-import { DevLegendFeedBannerPage } from './pages/DevLegendFeedBannerPage'
-import { ProfilePublicRewardPage } from './pages/ProfilePublicRewardPage'
-import { NeonProfileThemePage } from './pages/NeonProfileThemePage'
-import { BannerHighlightBoostPage } from './pages/BannerHighlightBoostPage'
-import { VoteStatsUnlockPage } from './pages/VoteStatsUnlockPage'
-import { AccessRestrictedPage } from './pages/AccessRestrictedPage'
-import { NoticePage } from './pages/NoticePage'
-import { NoticeDetailPage } from './pages/NoticeDetailPage'
-import { ContentDeletionNoticePage } from './pages/ContentDeletionNoticePage'
-import { NoticeAdminPage } from './pages/NoticeAdminPage'
-import { NoticeEditPage } from './pages/NoticeEditPage'
-import { NoticePublishCompletePage } from './pages/NoticePublishCompletePage'
-import { PopupNoticeAdminPage } from './pages/PopupNoticeAdminPage'
-import { PopupNoticeListPage } from './pages/PopupNoticeListPage'
-import { PopupNoticeCompletePage } from './pages/PopupNoticeCompletePage'
-import { PopupNoticeDetailPage } from './pages/PopupNoticeDetailPage'
-import { PopupNoticeStatsPage } from './pages/PopupNoticeStatsPage'
-import { InquiryMainPage } from './pages/InquiryMainPage'
-import { InquirySearchPage } from './pages/InquirySearchPage'
-import { InquiryCategoryPage } from './pages/InquiryCategoryPage'
-import { InquiryCategoryHelpDetailPage } from './pages/InquiryCategoryHelpDetailPage'
-import { InquiryFormPage } from './pages/InquiryFormPage'
-import { AppealFormPage } from './pages/AppealFormPage'
-import { AppealCompletePage } from './pages/AppealCompletePage'
-import { AppealDetailPage } from './pages/AppealDetailPage'
-import { AppealResultPage } from './pages/AppealResultPage'
-import { InquiryFaqDetailPage } from './pages/InquiryFaqDetailPage'
-import { InquiryCompletePage } from './pages/InquiryCompletePage'
-import { InquiryHistoryPage } from './pages/InquiryHistoryPage'
-import { InquiryHistoryDetailPage } from './pages/InquiryHistoryDetailPage'
+import { ModerationRestrictionGate } from './components/layout/ModerationRestrictionGate'
+import { ServerMaintenanceGate } from './components/system/ServerMaintenanceGate'
+import { PushNotificationNavBridge } from './components/system/PushNotificationNavBridge'
 import { AdminLayout } from './components/layout/AdminLayout'
-import { AdminDashboardPage } from './pages/admin/AdminDashboardPage'
-import { AdminSettingsPage } from './pages/admin/AdminSettingsPage'
-import { AdminOperatorAccountPage } from './pages/admin/AdminOperatorAccountPage'
-import { AdminOperatorSecurityLogPage } from './pages/admin/AdminOperatorSecurityLogPage'
-import { AdminOperatorNewPage } from './pages/admin/AdminOperatorNewPage'
-import { AdminOperatorEditPage } from './pages/admin/AdminOperatorEditPage'
-import { AdminOperatorDeletePage } from './pages/admin/AdminOperatorDeletePage'
-import { AdminPermissionGroupPage } from './pages/admin/AdminPermissionGroupPage'
-import { AdminTwoFactorPage } from './pages/admin/AdminTwoFactorPage'
-import { AdminAutoBotPage } from './pages/admin/AdminAutoBotPage'
-import { AdminBannedWordsPage } from './pages/admin/AdminBannedWordsPage'
-import { AdminMessengerPage } from './pages/admin/AdminMessengerPage'
-import { AdminSystemPushPage } from './pages/admin/AdminSystemPushPage'
-import { AdminApiKeysPage } from './pages/admin/AdminApiKeysPage'
-import { AdminMatchupsPage } from './pages/admin/AdminMatchupsPage'
-import { AdminMatchupDetailPage } from './pages/admin/AdminMatchupDetailPage'
-import { AdminUsersPage } from './pages/admin/AdminUsersPage'
-import { AdminUserDetailPage } from './pages/admin/AdminUserDetailPage'
-import { AdminCategoriesPage } from './pages/admin/AdminCategoriesPage'
-import { InquiryAdminListPage } from './pages/admin/InquiryAdminListPage'
-import { InquiryAdminDetailPage } from './pages/admin/InquiryAdminDetailPage'
-import { InquiryAdminCompletePage } from './pages/admin/InquiryAdminCompletePage'
-import { InquiryHotFaqAdminPage } from './pages/admin/InquiryHotFaqAdminPage'
-import { InquiryCategoryFaqAdminPage } from './pages/admin/InquiryCategoryFaqAdminPage'
-import { AdminAppealListPage } from './pages/admin/AdminAppealListPage'
-import { AdminAppealDetailPage } from './pages/admin/AdminAppealDetailPage'
+import * as LazyAdmin from './routes/lazyAdminPages'
+import * as LazyExtra from './routes/lazyDevAndHeavyPages'
+import * as LazyNIR from './routes/lazyNoticeInquiryRanking'
+import * as LazyRMM from './routes/lazyRewardsMatchupMypage'
+import * as LazySP from './routes/lazySecondaryPublicPages'
 import { consumeStoredLoginReturn, getSafeReturnPath } from './lib/loginReturn'
+import { RoutePageSkeleton } from './components/ui/RoutePageSkeleton'
+import { prefetchCommonRoutes } from './lib/routePrefetch'
+import { runWhenIdle } from './lib/runDeferred'
+
+function RouteLoadingFallback() {
+  return <RoutePageSkeleton />
+}
+
+function RouteSuspense({ Page: P }) {
+  return (
+    <Suspense fallback={<RouteLoadingFallback />}>
+      <P />
+    </Suspense>
+  )
+}
 
 /** OAuth 콜백 후 직전 페이지로 복귀 (sessionStorage) */
 function PostOAuthRedirect() {
@@ -131,6 +74,7 @@ function App() {
 
   useEffect(() => {
     initialize()
+    runWhenIdle(() => prefetchCommonRoutes(), { timeoutMs: 2000 })
 
     // OAuth 콜백 후 URL 해시에 에러가 있는 경우 감지
     const hash = window.location.hash
@@ -183,11 +127,10 @@ function App() {
     return () => window.removeEventListener('vics:matchup-tier-milestone-bonus', onTierMilestone)
   }, [showToast])
 
-  // 절전/복귀 후 Realtime 재연결 (노트북 껐다 켜도 탭 연결 유지)
+  // 절전/복귀 후 알림·홈 갱신 (Realtime 미사용 — 폴링은 subscribeRealtime 내부)
   useEffect(() => {
     const reconnect = () => {
       if (!user?.id) return
-      subscribeRealtime(user.id)
       fetchNotifications(user.id)
       homeRefreshRef.current?.()
     }
@@ -215,101 +158,132 @@ function App() {
 
   return (
     <BrowserRouter>
+      <PushNotificationNavBridge />
       <PostOAuthRedirect />
+      <ModerationRestrictionGate />
+      <ServerMaintenanceGate>
       <Layout>
         <Routes>
           <Route path="/"              element={<MainPage />} />
           <Route path="/explore"       element={<Navigate to="/feed/best" replace />} />
           <Route path="/feed/:variant" element={<MainFeedPage />} />
-          <Route path="/matchups" element={<HomePage refreshRef={homeRefreshRef} />} />
-          <Route path="/landing"      element={<LandingPage />} />
-          <Route path="/events"       element={<EventsComingSoonPage />} />
-          <Route path="/matchup/:id"   element={<MatchupDetailPage />} />
-          <Route path="/ranking"       element={<RankingPage />} />
-          <Route path="/search"        element={<SearchPage />} />
-          <Route path="/rewards"       element={<PointRewardsPage />} />
-          <Route path="/rewards/main-spotlight" element={<MainSpotlight1hPage />} />
-          <Route path="/rewards/banner-highlight" element={<BannerHighlightBoostPage />} />
-          <Route path="/rewards/vote-stats" element={<VoteStatsUnlockPage />} />
-          <Route path="/rewards/v-card/cheer" element={<VictoryReportCheerPage />} />
-          <Route path="/rewards/v-card" element={<VictoryReportPage />} />
-          <Route path="/fandom" element={<FandomDashboardPage />} />
-          <Route path="/dev/fandom-milestone" element={<DevFandomMilestonePreviewPage />} />
-          <Route path="/dev/fandom-bronze-badge" element={<DevFandomBronzeBadgePreviewPage />} />
-          <Route path="/dev/diamond-legend" element={<DevDiamondLegendPreviewPage />} />
-          <Route path="/dev/legend-feed-banner" element={<DevLegendFeedBannerPage />} />
-          <Route path="/rewards/profile-public" element={<ProfilePublicRewardPage />} />
-          <Route path="/rewards/neon-profile-theme" element={<NeonProfileThemePage />} />
-          <Route path="/hall-of-fame" element={<EventsComingSoonPage />} />
-          <Route path="/profile/:userId" element={<PublicProfilePage />} />
-          <Route path="/mypage"        element={<MyPage />} />
-          <Route path="/signup"        element={<SignupPage />} />
-          <Route path="/welcome"       element={<WelcomePage />} />
-          <Route path="/login"         element={<LoginPage />} />
-          <Route path="/mypage/edit"   element={<ProfileEditPage />} />
-          <Route path="/mypage/edit/image" element={<ProfileImageEditPage />} />
-          <Route path="/mypage/delete" element={<DeleteAccountPage />} />
-          <Route path="/goodbye"            element={<DeletedPage />} />
-          <Route path="/mypage/ranking-gallery" element={<RankingGalleryPage />} />
-          <Route path="/privacy" element={<PrivacyPage />} />
-          <Route path="/terms" element={<TermsPage />} />
-          <Route path="/community-policy" element={<CommunityPolicyPage />} />
-          <Route path="/restricted" element={<AccessRestrictedPage />} />
-          <Route path="/notice" element={<NoticePage />} />
-          <Route path="/notice/deletion/:id?" element={<ContentDeletionNoticePage />} />
-          <Route path="/notice/:id" element={<NoticeDetailPage />} />
+          <Route path="/matchups" element={
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <LazySP.HomePage refreshRef={homeRefreshRef} />
+            </Suspense>
+          } />
+          <Route path="/landing" element={<RouteSuspense Page={LazySP.LandingPage} />} />
+          <Route path="/events" element={<RouteSuspense Page={LazySP.EventsComingSoonPage} />} />
+          <Route path="/matchup/:id" element={<RouteSuspense Page={LazyRMM.MatchupDetailPage} />} />
+          <Route path="/ranking" element={<RouteSuspense Page={LazySP.RankingPage} />} />
+          <Route path="/search" element={<RouteSuspense Page={LazySP.SearchPage} />} />
+          <Route path="/rewards" element={<RouteSuspense Page={LazyRMM.PointRewardsPage} />} />
+          <Route path="/rewards/main-spotlight" element={<RouteSuspense Page={LazyRMM.MainSpotlight1hPage} />} />
+          <Route path="/rewards/banner-highlight" element={<RouteSuspense Page={LazyRMM.BannerHighlightBoostPage} />} />
+          <Route path="/rewards/vote-stats" element={<RouteSuspense Page={LazyRMM.VoteStatsUnlockPage} />} />
+          <Route path="/rewards/v-card/cheer" element={<RouteSuspense Page={LazyRMM.VictoryReportCheerPage} />} />
+          <Route path="/rewards/v-card" element={
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <LazyExtra.VictoryReportPage />
+            </Suspense>
+          } />
+          <Route path="/fandom" element={<RouteSuspense Page={LazySP.FandomDashboardPage} />} />
+          <Route path="/dev/fandom-milestone" element={
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <LazyExtra.DevFandomMilestonePreviewPage />
+            </Suspense>
+          } />
+          <Route path="/dev/fandom-bronze-badge" element={
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <LazyExtra.DevFandomBronzeBadgePreviewPage />
+            </Suspense>
+          } />
+          <Route path="/dev/diamond-legend" element={
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <LazyExtra.DevDiamondLegendPreviewPage />
+            </Suspense>
+          } />
+          <Route path="/dev/legend-feed-banner" element={
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <LazyExtra.DevLegendFeedBannerPage />
+            </Suspense>
+          } />
+          <Route path="/rewards/profile-public" element={<RouteSuspense Page={LazyRMM.ProfilePublicRewardPage} />} />
+          <Route path="/rewards/neon-profile-theme" element={<RouteSuspense Page={LazyRMM.NeonProfileThemePage} />} />
+          <Route path="/hall-of-fame" element={<RouteSuspense Page={LazySP.EventsComingSoonPage} />} />
+          <Route path="/profile/:userId" element={<RouteSuspense Page={LazyRMM.PublicProfilePage} />} />
+          <Route path="/mypage" element={<RouteSuspense Page={LazyRMM.MyPage} />} />
+          <Route path="/signup" element={<RouteSuspense Page={LazySP.SignupPage} />} />
+          <Route path="/welcome" element={<RouteSuspense Page={LazySP.WelcomePage} />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/mypage/edit" element={<RouteSuspense Page={LazyRMM.ProfileEditPage} />} />
+          <Route path="/mypage/edit/image" element={<RouteSuspense Page={LazyRMM.ProfileImageEditPage} />} />
+          <Route path="/mypage/delete" element={<RouteSuspense Page={LazyRMM.DeleteAccountPage} />} />
+          <Route path="/goodbye" element={<RouteSuspense Page={LazyRMM.DeletedPage} />} />
+          <Route path="/mypage/ranking-gallery" element={<RouteSuspense Page={LazyNIR.RankingGalleryPage} />} />
+          <Route path="/privacy" element={<RouteSuspense Page={LazySP.PrivacyPage} />} />
+          <Route path="/terms" element={<RouteSuspense Page={LazySP.TermsPage} />} />
+          <Route path="/community-policy" element={<RouteSuspense Page={LazySP.CommunityPolicyPage} />} />
+          <Route path="/restricted" element={<RouteSuspense Page={LazySP.AccessRestrictedPage} />} />
+          <Route path="/notice" element={<RouteSuspense Page={LazyNIR.NoticePage} />} />
+          <Route path="/notice/deletion/:id?" element={<RouteSuspense Page={LazyNIR.ContentDeletionNoticePage} />} />
+          <Route path="/notice/:id" element={<RouteSuspense Page={LazyNIR.NoticeDetailPage} />} />
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<Navigate to="dashboard" replace />} />
-            <Route path="dashboard" element={<AdminDashboardPage />} />
-            <Route path="settings" element={<AdminSettingsPage />} />
-            <Route path="settings/permissions" element={<AdminPermissionGroupPage />} />
-            <Route path="settings/2fa" element={<AdminTwoFactorPage />} />
-            <Route path="settings/autobot" element={<AdminAutoBotPage />} />
-            <Route path="settings/banned-words" element={<AdminBannedWordsPage />} />
-            <Route path="settings/messenger" element={<AdminMessengerPage />} />
-            <Route path="settings/system-push" element={<AdminSystemPushPage />} />
-            <Route path="settings/api-keys" element={<AdminApiKeysPage />} />
-            <Route path="settings/operators/security-log" element={<AdminOperatorSecurityLogPage />} />
-            <Route path="settings/operators/new" element={<AdminOperatorNewPage />} />
-            <Route path="settings/operators/:id/delete" element={<AdminOperatorDeletePage />} />
-            <Route path="settings/operators/:id" element={<AdminOperatorEditPage />} />
-            <Route path="settings/operators" element={<AdminOperatorAccountPage />} />
-            <Route path="matchups/:id" element={<AdminMatchupDetailPage />} />
-            <Route path="matchups" element={<AdminMatchupsPage />} />
-            <Route path="users/:id" element={<AdminUserDetailPage />} />
-            <Route path="users" element={<AdminUsersPage />} />
-            <Route path="categories" element={<AdminCategoriesPage />} />
-            <Route path="inquiry/hot-faq" element={<InquiryHotFaqAdminPage />} />
-            <Route path="inquiry/category-faq" element={<InquiryCategoryFaqAdminPage />} />
-            <Route path="inquiry" element={<InquiryAdminListPage />} />
-            <Route path="inquiry/complete" element={<InquiryAdminCompletePage />} />
-            <Route path="inquiry/:id" element={<InquiryAdminDetailPage />} />
-            <Route path="appeals" element={<AdminAppealListPage />} />
-            <Route path="appeals/:id" element={<AdminAppealDetailPage />} />
-            <Route path="notice/new" element={<NoticeAdminPage />} />
-            <Route path="notice/edit/:id" element={<NoticeEditPage />} />
-            <Route path="notice/popup" element={<PopupNoticeAdminPage />} />
-            <Route path="notice/popup/list" element={<PopupNoticeListPage />} />
-            <Route path="notice/popup/complete" element={<PopupNoticeCompletePage />} />
-            <Route path="notice/popup/:id/stats" element={<PopupNoticeStatsPage />} />
-            <Route path="notice/popup/:id" element={<PopupNoticeDetailPage />} />
-            <Route path="notice/complete" element={<NoticePublishCompletePage />} />
+            <Route path="dashboard" element={<LazyAdmin.AdminDashboardPage />} />
+            <Route path="settings" element={<LazyAdmin.AdminSettingsPage />} />
+            <Route path="settings/permissions" element={<LazyAdmin.AdminPermissionGroupPage />} />
+            <Route path="settings/2fa" element={<LazyAdmin.AdminTwoFactorPage />} />
+            <Route path="settings/server-maintenance" element={<LazyAdmin.AdminServerMaintenancePage />} />
+            <Route path="settings/autobot" element={<LazyAdmin.AdminAutoBotPage />} />
+            <Route path="settings/banned-words" element={<LazyAdmin.AdminBannedWordsPage />} />
+            <Route path="settings/messenger" element={<LazyAdmin.AdminMessengerPage />} />
+            <Route path="settings/system-push" element={<LazyAdmin.AdminSystemPushPage />} />
+            <Route path="settings/api-keys" element={<LazyAdmin.AdminApiKeysPage />} />
+            <Route path="settings/operators/security-log" element={<LazyAdmin.AdminOperatorSecurityLogPage />} />
+            <Route path="settings/operators/new" element={<LazyAdmin.AdminOperatorNewPage />} />
+            <Route path="settings/operators/:id/delete" element={<LazyAdmin.AdminOperatorDeletePage />} />
+            <Route path="settings/operators/:id" element={<LazyAdmin.AdminOperatorEditPage />} />
+            <Route path="settings/operators" element={<LazyAdmin.AdminOperatorAccountPage />} />
+            <Route path="matchups/:id" element={<LazyAdmin.AdminMatchupDetailPage />} />
+            <Route path="matchups" element={<LazyAdmin.AdminMatchupsPage />} />
+            <Route path="users/:id" element={<LazyAdmin.AdminUserDetailPage />} />
+            <Route path="users" element={<LazyAdmin.AdminUsersPage />} />
+            <Route path="categories" element={<LazyAdmin.AdminCategoriesPage />} />
+            <Route path="inquiry/hot-faq" element={<LazyAdmin.InquiryHotFaqAdminPage />} />
+            <Route path="inquiry/category-faq" element={<LazyAdmin.InquiryCategoryFaqAdminPage />} />
+            <Route path="inquiry" element={<LazyAdmin.InquiryAdminListPage />} />
+            <Route path="inquiry/complete" element={<LazyAdmin.InquiryAdminCompletePage />} />
+            <Route path="inquiry/:id" element={<LazyAdmin.InquiryAdminDetailPage />} />
+            <Route path="appeals" element={<LazyAdmin.AdminAppealListPage />} />
+            <Route path="appeals/:id" element={<LazyAdmin.AdminAppealDetailPage />} />
+            <Route path="notice/list" element={<LazyAdmin.NoticeAdminListPage />} />
+            <Route path="notice/new" element={<LazyAdmin.NoticeAdminPage />} />
+            <Route path="notice/edit/:id" element={<LazyAdmin.NoticeEditPage />} />
+            <Route path="notice/popup" element={<LazyAdmin.PopupNoticeAdminPage />} />
+            <Route path="notice/popup/list" element={<LazyAdmin.PopupNoticeListPage />} />
+            <Route path="notice/popup/complete" element={<LazyAdmin.PopupNoticeCompletePage />} />
+            <Route path="notice/popup/:id/stats" element={<LazyAdmin.PopupNoticeStatsPage />} />
+            <Route path="notice/popup/:id" element={<LazyAdmin.PopupNoticeDetailPage />} />
+            <Route path="notice/complete" element={<LazyAdmin.NoticePublishCompletePage />} />
           </Route>
-          <Route path="/inquiry" element={<InquiryMainPage />} />
-          <Route path="/inquiry/search" element={<InquirySearchPage />} />
-          <Route path="/inquiry/category/:slug/help/:helpId" element={<InquiryCategoryHelpDetailPage />} />
-          <Route path="/inquiry/category/:slug" element={<InquiryCategoryPage />} />
-          <Route path="/inquiry/form" element={<InquiryFormPage />} />
-          <Route path="/inquiry/appeal/complete" element={<AppealCompletePage />} />
-          <Route path="/inquiry/appeal/result/:receiptId" element={<AppealResultPage />} />
-          <Route path="/inquiry/appeal/result" element={<AppealResultPage />} />
-          <Route path="/appeal-result/:receiptId" element={<AppealResultPage />} />
-          <Route path="/inquiry/appeal/:receiptId" element={<AppealDetailPage />} />
-          <Route path="/inquiry/appeal" element={<AppealFormPage />} />
-          <Route path="/inquiry/faq/:id" element={<InquiryFaqDetailPage />} />
-          <Route path="/inquiry/complete" element={<InquiryCompletePage />} />
-          <Route path="/inquiry/history" element={<InquiryHistoryPage />} />
-          <Route path="/inquiry/history/:receiptId" element={<InquiryHistoryDetailPage />} />
+          <Route path="/inquiry" element={<RouteSuspense Page={LazyNIR.InquiryMainPage} />} />
+          <Route path="/inquiry/search" element={<RouteSuspense Page={LazyNIR.InquirySearchPage} />} />
+          <Route path="/inquiry/category/:slug/help/:helpId" element={<RouteSuspense Page={LazyNIR.InquiryCategoryHelpDetailPage} />} />
+          <Route path="/inquiry/category/:slug" element={<RouteSuspense Page={LazyNIR.InquiryCategoryPage} />} />
+          <Route path="/inquiry/form" element={<RouteSuspense Page={LazyNIR.InquiryFormPage} />} />
+          <Route path="/inquiry/appeal/complete" element={<RouteSuspense Page={LazyNIR.AppealCompletePage} />} />
+          <Route path="/inquiry/appeal/result/:receiptId" element={<RouteSuspense Page={LazyNIR.AppealResultPage} />} />
+          <Route path="/inquiry/appeal/result" element={<RouteSuspense Page={LazyNIR.AppealResultPage} />} />
+          <Route path="/appeal-result/:receiptId" element={<RouteSuspense Page={LazyNIR.AppealResultPage} />} />
+          <Route path="/inquiry/appeal/:receiptId" element={<RouteSuspense Page={LazyNIR.AppealDetailPage} />} />
+          <Route path="/inquiry/appeal" element={<RouteSuspense Page={LazyNIR.AppealFormPage} />} />
+          <Route path="/inquiry/faq/:id" element={<RouteSuspense Page={LazyNIR.InquiryFaqDetailPage} />} />
+          <Route path="/inquiry/complete" element={<RouteSuspense Page={LazyNIR.InquiryCompletePage} />} />
+          <Route path="/inquiry/history" element={<RouteSuspense Page={LazyNIR.InquiryHistoryPage} />} />
+          <Route path="/inquiry/history/:receiptId" element={<RouteSuspense Page={LazyNIR.InquiryHistoryDetailPage} />} />
         </Routes>
       </Layout>
 
@@ -329,6 +303,7 @@ function App() {
       >
         <LoginModal onClose={closeLoginModal} />
       </Modal>
+      </ServerMaintenanceGate>
     </BrowserRouter>
   )
 }

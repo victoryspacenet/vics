@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { resolveSiteUrl } from './siteApiBase'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || ''
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
@@ -19,7 +20,7 @@ function wrapSupabaseFetch(getClient) {
         try {
           const { data: { session } } = await getClient().auth.getSession()
           if (!session?.access_token) return
-          await fetch(`${window.location.origin}/.netlify/functions/system-push-dispatch`, {
+          await fetch(resolveSiteUrl('/api/system-push-dispatch'), {
             method: 'POST',
             headers: {
               Authorization: `Bearer ${session.access_token}`,
@@ -70,6 +71,10 @@ supabaseSingleton = createClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true,
+    /** PKCE 재설정 시 code verifier 때문에 브라우저 불일치가 나기 쉬워 implicit 사용. 재설정 URL은 `#access_token=…` */
+    flowType: 'implicit',
+    /** 브라우저의 navigator.locks 경합 완화(다중 탭·initialize+업데이트 동시 실행 시 steal 메시지). */
+    lockAcquireTimeout: 120000,
   },
   global: {
     fetch: wrapSupabaseFetch(() => supabaseSingleton),

@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate, useLocation, Navigate } from 'react-router-dom'
 import { X, CheckCircle2, FileText, Clock, Bell, FolderOpen, Home, Bot } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { cn } from '../lib/utils'
+import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../lib/layoutShellClasses'
 
 function formatReceiptTime(iso) {
   if (!iso) return '-'
@@ -54,7 +56,7 @@ export function InquiryCompletePage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-screen-lg mx-auto">
+      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto')}>
         {/* 헤더: 로고 + 닫기 */}
         <div className="sticky top-0 z-10 bg-gray-50 border-b border-gray-100 px-4 py-3 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2 shrink-0">

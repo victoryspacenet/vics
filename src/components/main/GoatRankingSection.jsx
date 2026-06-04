@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { UserProfileBlockLink } from '../ui/UserProfileLink'
 import { ChevronDown, Crown } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
@@ -6,7 +6,11 @@ import { formatNumber } from '../../lib/utils'
 import { safeMediaUrl, encodeForUrl } from '../../lib/sanitize'
 import { getCurrentSeason, getRankColumns } from '../../lib/season'
 import { getCachedRanking, setCachedRanking } from '../../lib/rankingCache'
+import { RANKING_ELIGIBLE_CACHE_TAG, getRankingEligibleProfileIds } from '../../lib/rankingEligibleProfiles'
+import { enrichProfileRowsWithTierSnapshot, EMPTY_TIER_RANK_INFO } from '../../lib/creatorRankSnapshot'
+import { attachCompetitionRanksInMemory } from '../../lib/rankingCompetitionRank'
 import { FeaturedBadgeSpan } from '../ui/FeaturedBadge'
+import { TierBadge } from '../ui/TierBadge'
 
 const MODE_TABS = [
   { id: 'all', label: '전체' },
@@ -53,7 +57,8 @@ export function GoatRankingSection() {
   const cols = getRankColumns(mode === 'season')
   const pointsCol = cols.points
 
-  const cacheKey = `goat_${mode}_v3`
+/** v5: 티어 스냅샷(_tierRankInfo) 캐시 포함 */
+const cacheKey = `goat_${mode}_v6_${RANKING_ELIGIBLE_CACHE_TAG}`
 
   useEffect(() => {
     const cached = getCachedRanking(cacheKey)
@@ -95,25 +100,38 @@ export function GoatRankingSection() {
       if (!all.length) all = lb?.overall_top10 || []
       const monthly = mergeChampionOracleRows(lb?.champion_month_top7, lb?.oracle_month_top7)
       const weekly = mergeChampionOracleRows(lb?.champion_week_top3, lb?.oracle_week_top3)
-      setGoatAll(all)
-      setGoatMonthly(monthly)
-      setGoatWeekly(weekly)
-      setCachedRanking(cacheKey, { all, monthly, weekly })
+      const [allE, monthlyE, weeklyE] = await Promise.all([
+        enrichProfileRowsWithTierSnapshot(all),
+        enrichProfileRowsWithTierSnapshot(monthly),
+        enrichProfileRowsWithTierSnapshot(weekly),
+      ])
+      setGoatAll(allE)
+      setGoatMonthly(monthlyE)
+      setGoatWeekly(weeklyE)
+      setCachedRanking(cacheKey, { all: allE, monthly: monthlyE, weekly: weeklyE })
     } catch (err) {
       console.error('[GoatRankingSection]', err)
       try {
         const orderCol = pointsCol === 'season_points' ? 'points' : pointsCol
-        const baseSelect = 'id, nickname, avatar_url, points, total_matchups, featured_badge'
-        const { data: allData, error: allErr } = await supabase
-          .from('profiles')
-          .select(`${baseSelect}, season_points`)
-          .order(orderCol, { ascending: false })
-          .limit(10)
-        if (!allErr && allData?.length) {
-          setGoatAll(allData)
+        const baseSelect =
+          'id, nickname, avatar_url, points, total_matchups, creator_wins, vote_total, vote_hits, hit_rate, featured_badge'
+        const eligibleIds = await getRankingEligibleProfileIds()
+        if (Array.isArray(eligibleIds) && eligibleIds.length === 0) {
+          setGoatAll([])
           setGoatMonthly([])
           setGoatWeekly([])
-          setCachedRanking(cacheKey, { all: allData, monthly: [], weekly: [] })
+          setCachedRanking(cacheKey, { all: [], monthly: [], weekly: [] })
+          return
+        }
+        let q = supabase.from('profiles').select(`${baseSelect}, season_points`).order(orderCol, { ascending: false }).limit(10)
+        if (eligibleIds?.length) q = q.in('id', eligibleIds)
+        const { data: allData, error: allErr } = await q
+        if (!allErr && allData?.length) {
+          const enriched = await enrichProfileRowsWithTierSnapshot(allData)
+          setGoatAll(enriched)
+          setGoatMonthly([])
+          setGoatWeekly([])
+          setCachedRanking(cacheKey, { all: enriched, monthly: [], weekly: [] })
         }
       } catch (_) { /* noop */ }
     } finally {
@@ -122,13 +140,16 @@ export function GoatRankingSection() {
   }
 
   const MEDALS = ['🥇', '🥈', '🥉']
+  const { number: seasonNum } = getCurrentSeason()
+  const pts = (p) => (mode === 'season' ? (p.season_points ?? p.points) : (p.points ?? 0))
+
   const rawRankings =
     activeTab === 'all' ? goatAll : activeTab === 'monthly' ? goatMonthly : goatWeekly
 
-  const displayRankings = rawRankings.filter((p) => p.goatTrack === trackFilter)
-
-  const { number: seasonNum } = getCurrentSeason()
-  const pts = (p) => (mode === 'season' ? (p.season_points ?? p.points) : (p.points ?? 0))
+  const displayRankings = useMemo(() => {
+    const filtered = rawRankings.filter((p) => p.goatTrack === trackFilter)
+    return attachCompetitionRanksInMemory(filtered, 'points', (p) => pts(p))
+  }, [rawRankings, trackFilter, mode])
   const hasAnyTabData = goatAll.length > 0 || goatMonthly.length > 0 || goatWeekly.length > 0
 
   const periodLabel = (p) => {
@@ -165,7 +186,7 @@ export function GoatRankingSection() {
         </div>
       </div>
       <div
-        className={`bg-gradient-to-br from-amber-50/80 via-white to-emerald-50/25 rounded-2xl border border-amber-200/50 shadow-sm shadow-amber-100/40 overflow-visible ${!loading ? 'animate-fade-in-soft' : ''}`}
+        className={`bg-gradient-to-br from-amber-50/80 via-slate-100/95 to-emerald-50/25 rounded-2xl border border-amber-200/50 shadow-sm shadow-amber-100/40 overflow-visible ${!loading ? 'animate-fade-in-soft' : ''}`}
       >
         <div className="p-4 overflow-visible">
           <p className="text-[10px] text-gray-500 mb-2 text-right leading-snug">
@@ -194,7 +215,7 @@ export function GoatRankingSection() {
                     className={`flex h-full min-w-0 max-w-[9.25rem] items-center gap-1 rounded-lg px-2.5 py-1.5 text-left transition-colors sm:max-w-[11rem] ${
                       isActive
                         ? 'bg-amber-200/80 text-amber-950'
-                        : 'bg-white/60 text-gray-500 hover:text-gray-800'
+                        : 'bg-slate-100/70 text-gray-500 hover:text-gray-800'
                     }`}
                   >
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
@@ -216,7 +237,7 @@ export function GoatRankingSection() {
                   {open && (
                     <div
                       role="menu"
-                      className="absolute right-0 top-[calc(100%+4px)] min-w-[11.5rem] rounded-xl border border-amber-200/90 bg-white py-1 shadow-lg shadow-amber-900/10"
+                      className="absolute right-0 top-[calc(100%+4px)] min-w-[11.5rem] rounded-xl border border-amber-200/90 bg-slate-50 py-1 shadow-lg shadow-amber-900/10"
                     >
                       {GOAT_TRACK_MENU_OPTIONS.map((opt) => (
                         <button
@@ -261,10 +282,12 @@ export function GoatRankingSection() {
                 <UserProfileBlockLink
                   key={`${p.id}-${p.goatTrack || 'all'}-${idx}`}
                   userId={p.id}
-                  className="flex items-center gap-2 p-2 rounded-xl bg-white/80 border border-gray-100 hover:border-amber-200/80 hover:shadow-sm transition-colors"
+                  className="flex items-center gap-2 p-2 rounded-xl bg-slate-100/78 border border-gray-100 hover:border-amber-200/80 hover:shadow-sm transition-colors"
                 >
                   <span className="text-sm font-bold shrink-0">
-                    {idx < 3 ? MEDALS[idx] : <span className="text-amber-600/90 text-xs">#{idx + 1}</span>}
+                    {(p._displayRank ?? idx + 1) <= 3
+                      ? MEDALS[(p._displayRank ?? idx + 1) - 1]
+                      : <span className="text-amber-600/90 text-xs">#{p._displayRank ?? idx + 1}</span>}
                   </span>
                   <img
                     src={safeMediaUrl(p.avatar_url) || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeForUrl(p.nickname || '')}`}
@@ -272,10 +295,16 @@ export function GoatRankingSection() {
                     className="w-8 h-8 rounded-full object-cover ring-2 ring-yellow-400/50"
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-bold text-[#22282E] flex items-center gap-1 min-w-0">
+                    <p className="text-xs font-bold text-[#22282E] flex items-center gap-1 min-w-0 flex-wrap">
                       <span className="truncate">{p.nickname}</span>
                       <FeaturedBadgeSpan badgeId={p.featured_badge} className="translate-y-px shrink-0" />
                     </p>
+                    <TierBadge
+                      profile={p}
+                      rankInfo={p._tierRankInfo ?? { ...EMPTY_TIER_RANK_INFO }}
+                      variant="compact"
+                      className="!text-[9px] mt-0.5"
+                    />
                     <p className="text-[10px] text-gray-500">{periodLabel(p)}</p>
                   </div>
                 </UserProfileBlockLink>

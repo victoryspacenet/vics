@@ -56,22 +56,5 @@ create policy "admin_operators_delete" on public.admin_operators
 create index if not exists idx_admin_operators_status on public.admin_operators(status);
 create index if not exists idx_admin_operators_permission on public.admin_operators(permission);
 
--- =============================================
--- 시드 데이터 (기존 mock 운영자 계정)
--- =============================================
-insert into public.admin_operators
-  (id, name, department, email, status, last_access, last_access_ip, otp_enabled, permission, granular, is_seed)
-values
-  ('admin_01',    '김운영', '운영팀',   'kim@vsmatch.com',   'active',    '2026.02.13 14:02', '211.XXX.XXX.5',  true,  'Master',    '{"matchups":{"r":true,"w":true,"d":true,"e":true},"users":{"r":true,"w":true,"d":true,"e":true},"inquiry":{"r":true,"w":true,"d":true,"e":true}}', true),
-  ('contents_2',  '이관리', '콘텐츠팀', 'lee@vsmatch.com',   'active',    '2026.02.12 18:30', '211.XXX.XXX.12', true,  'Editor',    '{"matchups":{"r":true,"w":true,"d":false,"e":false},"users":{"r":true,"w":true,"d":false,"e":false},"inquiry":{"r":true,"w":true,"d":false,"e":false}}', true),
-  ('cs_team_a',   '박상담', 'CS팀',     'park@vsmatch.com',  'active',    '2026.02.10 09:15', '211.XXX.XXX.8',  false, 'CS_Viewer', '{"matchups":{"r":true,"w":false,"d":false,"e":false},"users":{"r":true,"w":false,"d":false,"e":false},"inquiry":{"r":true,"w":true,"d":false,"e":false}}', true),
-  ('dev_test',    '최개발', '개발팀',   'choi@vsmatch.com',  'suspended', '2025.12.30 11:00', '211.XXX.XXX.3',  true,  'Master',    '{"matchups":{"r":true,"w":true,"d":true,"e":true},"users":{"r":true,"w":true,"d":true,"e":true},"inquiry":{"r":true,"w":true,"d":true,"e":true}}', true),
-  ('admin_02',    '강수석', '운영팀',   'kang@vsmatch.com',  'active',    '2026.02.13 09:30', '211.XXX.XXX.5',  true,  'Editor',    '{"matchups":{"r":true,"w":true,"d":false,"e":false},"users":{"r":true,"w":true,"d":false,"e":false},"inquiry":{"r":true,"w":true,"d":false,"e":false}}', true),
-  ('marketing_1', '정홍보', '마케팅팀', 'jung@vsmatch.com',  'active',    '2026.02.13 16:20', '211.XXX.XXX.9',  false, 'Editor',    '{"matchups":{"r":true,"w":true,"d":false,"e":false},"users":{"r":true,"w":true,"d":false,"e":false},"inquiry":{"r":true,"w":true,"d":false,"e":false}}', true),
-  ('ops_team_1',  '한운영', '운영팀',   'han@vsmatch.com',   'active',    '2026.02.11 10:00', '211.XXX.XXX.7',  true,  'Editor',    '{"matchups":{"r":true,"w":true,"d":false,"e":false},"users":{"r":true,"w":true,"d":false,"e":false},"inquiry":{"r":true,"w":true,"d":false,"e":false}}', true),
-  ('cs_team_b',   '조상담', 'CS팀',     'jo@vsmatch.com',    'active',    '2026.02.09 15:45', '211.XXX.XXX.4',  false, 'CS_Viewer', '{"matchups":{"r":true,"w":false,"d":false,"e":false},"users":{"r":true,"w":false,"d":false,"e":false},"inquiry":{"r":true,"w":true,"d":false,"e":false}}', true),
-  ('design_1',    '윤디자인','콘텐츠팀','yoon@vsmatch.com',  'active',    '2026.02.12 14:20', '211.XXX.XXX.6',  false, 'Editor',    '{"matchups":{"r":true,"w":true,"d":false,"e":false},"users":{"r":true,"w":true,"d":false,"e":false},"inquiry":{"r":true,"w":true,"d":false,"e":false}}', true),
-  ('data_1',      '송데이터','개발팀',  'song@vsmatch.com',  'active',    '2026.02.08 11:00', '211.XXX.XXX.2',  true,  'CS_Viewer', '{"matchups":{"r":true,"w":false,"d":false,"e":false},"users":{"r":true,"w":false,"d":false,"e":false},"inquiry":{"r":true,"w":true,"d":false,"e":false}}', true),
-  ('temp_worker', '임계약', 'CS팀',     'lim@vsmatch.com',   'active',    '2025.11.01 09:00', '211.XXX.XXX.1',  false, 'CS_Viewer', '{"matchups":{"r":true,"w":false,"d":false,"e":false},"users":{"r":true,"w":false,"d":false,"e":false},"inquiry":{"r":true,"w":true,"d":false,"e":false}}', true),
-  ('legacy_admin','구관리', '운영팀',   'gu@vsmatch.com',    'suspended', '2025.10.15 16:00', '211.XXX.XXX.0',  false, 'Editor',    '{"matchups":{"r":true,"w":true,"d":false,"e":false},"users":{"r":true,"w":true,"d":false,"e":false},"inquiry":{"r":true,"w":true,"d":false,"e":false}}', true)
-on conflict (id) do nothing;
+-- 시드(목) 운영자 12건은 더 이상 삽입하지 않음.
+-- 기존 DB 정리: supabase_delete_admin_operators_seed.sql 실행

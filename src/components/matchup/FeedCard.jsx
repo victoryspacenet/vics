@@ -19,6 +19,9 @@ import { isFeedBannerHighlightActive } from '../../lib/bannerHighlightBoost'
 import { VIP_MATCHUP_SURFACE_CLASS } from '../../lib/matchupCreatorVipGlow'
 import { fandomTierHasDiamondListNicknameAura } from '../../lib/fandomTiers'
 import { FandomBronzeStarBadge } from '../fandom/FandomBronzeStarBadge'
+import { MatchupMediaOpenButton, MatchupMediaViewer } from './MatchupMediaViewer'
+import { matchupSideToMedia } from '../../lib/matchupMediaView'
+import { useMatchupEngagement } from './MatchupEngagementContext'
 
 // variant별 스타일 맵
 const VARIANT_STYLE = {
@@ -53,10 +56,24 @@ function getRandomBadgeVariant(id) {
 
 const LIST_BADGE_LABELS = { best: '베스트', hot: '추천', new: 'NEW' }
 
-export function FeedCard({ matchup: initialMatchup, variant: variantProp, rank, listBadge, onVoteUpdate }) {
-  const variant = listBadge ? getRandomBadgeVariant(initialMatchup.id) : (variantProp ?? 'new')
+export function FeedCard({
+  matchup: initialMatchup,
+  variant: variantProp,
+  rank,
+  listBadge,
+  /** `listBadge`일 때 우선 적용하는 역할 (`best`/`hot`). 없으면 id 해시 폴백. */
+  listBadgeVariant,
+  onVoteUpdate,
+  eagerMedia = false,
+}) {
+  const variant = listBadge
+    ? listBadgeVariant && ['best', 'hot', 'new'].includes(listBadgeVariant)
+      ? listBadgeVariant
+      : getRandomBadgeVariant(initialMatchup.id)
+    : (variantProp ?? 'new')
   const { user } = useAuthStore()
   const { showToast, openLoginModal, openChallengeDrawer } = useUIStore()
+  const batchEngagement = useMatchupEngagement(initialMatchup?.id)
 
   const [matchup, setMatchup] = useState(initialMatchup)
   const [userVote, setUserVote] = useState(null)
@@ -64,6 +81,7 @@ export function FeedCard({ matchup: initialMatchup, variant: variantProp, rank, 
   const [voteLocked, setVoteLocked] = useState(false)
   const [isVoting, setIsVoting] = useState(false)
   const [barAnimated, setBarAnimated] = useState(false)
+  const [viewerMedia, setViewerMedia] = useState(null)
 
   const isComplete = !!matchup.right_type
   const { left, right } = calcPercent(matchup.left_votes, matchup.right_votes)
@@ -74,8 +92,23 @@ export function FeedCard({ matchup: initialMatchup, variant: variantProp, rank, 
   useEffect(() => { setMatchup(initialMatchup) }, [initialMatchup])
 
   useEffect(() => {
-    if (user && matchup.id) { fetchUserVote(); fetchUserLike() }
-  }, [user, matchup.id])
+    if (!user || !matchup.id) return
+    if (batchEngagement?.ready) {
+      const side = batchEngagement.userVote
+      if (side) {
+        setUserVote(side)
+        setVoteLocked(true)
+        setBarAnimated(true)
+      } else {
+        setUserVote(null)
+        setVoteLocked(false)
+      }
+      setLiked(batchEngagement.liked)
+      return
+    }
+    void fetchUserVote()
+    void fetchUserLike()
+  }, [user, matchup.id, batchEngagement?.ready, batchEngagement?.userVote, batchEngagement?.liked])
 
   // 바 애니메이션: userVote 확정 후 실행
   useEffect(() => {
@@ -238,6 +271,9 @@ export function FeedCard({ matchup: initialMatchup, variant: variantProp, rank, 
             label={matchup.left_label || 'A'}
             voted={userVote === 'left'}
             side="left"
+            eagerMedia={eagerMedia}
+            onOpenMedia={setViewerMedia}
+            media={matchupSideToMedia(matchup, 'left')}
           />
 
           {/* B 썸네일 or 도전자 슬롯 */}
@@ -250,6 +286,9 @@ export function FeedCard({ matchup: initialMatchup, variant: variantProp, rank, 
               label={matchup.right_label || 'B'}
               voted={userVote === 'right'}
               side="right"
+              eagerMedia={eagerMedia}
+              onOpenMedia={setViewerMedia}
+              media={matchupSideToMedia(matchup, 'right')}
             />
           ) : (
             <div className="aspect-square bg-gray-50 rounded-xl lg:rounded-2xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center gap-1 lg:gap-2">
@@ -335,12 +374,29 @@ export function FeedCard({ matchup: initialMatchup, variant: variantProp, rank, 
           </Link>
         )}
       </div>
+
+      <MatchupMediaViewer
+        open={Boolean(viewerMedia)}
+        media={viewerMedia}
+        onClose={() => setViewerMedia(null)}
+      />
     </div>
   )
 }
 
-// ── 썸네일 셀 (목록 페이지: 클릭 투표 비활성화) ─────────────────────
-function ThumbnailCell({ type, url, thumbnail, text, label, voted, side = 'left' }) {
+// ── 썸네일 셀 (탭 시 크게 보기) ─────────────────────────────────────
+function ThumbnailCell({
+  type,
+  url,
+  thumbnail,
+  text,
+  label,
+  voted,
+  side = 'left',
+  eagerMedia = false,
+  media,
+  onOpenMedia,
+}) {
   const ring =
     side === 'left'
       ? 'ring-[2.5px] ring-fuchsia-500 shadow-[0_0_18px_rgba(217,70,239,0.35)]'
@@ -352,20 +408,31 @@ function ThumbnailCell({ type, url, thumbnail, text, label, voted, side = 'left'
       }`}
     >
       <MatchupThumbFrame side={side} className="h-full w-full rounded-xl lg:rounded-2xl">
+        <MatchupMediaOpenButton media={media} onOpen={onOpenMedia} className="h-full min-h-0">
         {/* 콘텐츠 */}
         {type === 'image' && (url || thumbnail) && (
           <img
             src={safeMediaUrl(thumbnail || url)}
             alt={label}
             className="h-full w-full object-cover"
+            loading={eagerMedia ? 'eager' : 'lazy'}
+            decoding="async"
+            fetchPriority={eagerMedia ? 'high' : 'low'}
           />
         )}
         {type === 'video' && (
           <>
             {(thumbnail || url) && (
-              <img src={safeMediaUrl(thumbnail || url)} alt={label ?? ''} className="h-full w-full object-cover" />
+              <img
+                src={safeMediaUrl(thumbnail || url)}
+                alt={label ?? ''}
+                className="h-full w-full object-cover"
+                loading={eagerMedia ? 'eager' : 'lazy'}
+                decoding="async"
+                fetchPriority={eagerMedia ? 'high' : 'low'}
+              />
             )}
-            <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/30">
+            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/30">
               <div className="flex h-8 w-8 lg:h-11 lg:w-11 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">
                 <Play className="ml-0.5 w-3.5 h-3.5 lg:w-5 lg:h-5 fill-white text-white" />
               </div>
@@ -407,6 +474,7 @@ function ThumbnailCell({ type, url, thumbnail, text, label, voted, side = 'left'
           </span>
         )}
       </div>
+        </MatchupMediaOpenButton>
       </MatchupThumbFrame>
     </div>
   )

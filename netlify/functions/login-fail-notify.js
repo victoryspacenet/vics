@@ -8,13 +8,14 @@
  */
 const { createClient } = require('@supabase/supabase-js')
 const { deliverSystemPush } = require('../lib/systemPushCore.cjs')
+const { withIpRateLimit } = require('../lib/rateLimitMiddleware.cjs')
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || ''
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
 const THROTTLE_MS = 30 * 60 * 1000 // 30분
 
-exports.handler = async (event) => {
+exports.handler = withIpRateLimit(async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) }
   }
@@ -84,4 +85,4 @@ exports.handler = async (event) => {
     console.error('[login-fail-notify]', e)
     return { statusCode: 500, body: JSON.stringify({ error: e?.message || 'failed' }) }
   }
-}
+})

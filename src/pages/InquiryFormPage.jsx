@@ -1,15 +1,23 @@
 import { useState, useRef, useEffect } from 'react'
-import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, ChevronDown, Plus, X, ImageIcon } from 'lucide-react'
 import { Modal } from '../components/ui/Modal'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
 import { supabase } from '../lib/supabase'
+import { uploadMatchupMediaValidated } from '../lib/matchupMediaBucketUpload'
 import { compressAndCropImage } from '../lib/mediaCrop'
 import { generateReceiptId } from '../lib/inquiryStorage'
 import { ensureInquiryAutoReplyAfterInsert } from '../lib/inquiryBotAutoReply'
 import { cn } from '../lib/utils'
 import { parseBannedWordError, reportSuspiciousInputIfNeeded } from '../lib/sanitize'
+import { getClipboardMediaFiles } from '../lib/clipboardPasteFiles'
+import {
+  MATCHUP_IMAGE_INPUT_ACCEPT,
+  validateSelectableRasterImageUpload,
+  validatePipelineJpegOutput,
+} from '../lib/uploadMediaValidation'
+import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../lib/layoutShellClasses'
 
 /** MZ 파스텔 — 문의 내역·상세와 동일 계열 */
 const PAGE_BG =
@@ -23,7 +31,6 @@ const CATEGORIES = [
   { id: 'matchup', label: '매치업' },
   { id: 'report', label: '신고' },
   { id: 'account', label: '계정' },
-  { id: 'appeal', label: '이의 신청' },
   { id: 'suggestion', label: '건의' },
   { id: 'etc', label: '기타' },
 ]
@@ -43,50 +50,85 @@ export function InquiryFormPage() {
   const [categoryOpen, setCategoryOpen] = useState(false)
 
   useEffect(() => {
-    if (location.state?.presetCategory === 'appeal') {
-      setCategory('appeal')
+    const q = searchParams.get('category')
+    if (q === 'appeal' || location.state?.presetCategory === 'appeal') {
+      const sw = searchParams.get('sanctionWarningId')?.trim()
+      const appealPath = sw
+        ? `/inquiry/appeal?sanctionWarningId=${encodeURIComponent(sw)}`
+        : '/inquiry/appeal'
+      navigate(appealPath, { replace: true })
       return
     }
-    const q = searchParams.get('category')
     if (q && CATEGORIES.some((c) => c.id === q)) {
       setCategory(q)
     }
-  }, [location.state?.presetCategory, searchParams])
+  }, [location.state?.presetCategory, searchParams, navigate])
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [images, setImages] = useState([])
   const [submitting, setSubmitting] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
 
+  const imagesRef = useRef([])
+  useEffect(() => {
+    imagesRef.current = images
+  }, [images])
+
   const selectedCategory = CATEGORIES.find((c) => c.id === category)
   const isReportCategory = category === 'report'
 
-  const handleAddImage = async (e) => {
-    const files = Array.from(e.target.files || [])
-    if (images.length + files.length > MAX_IMAGES) {
+  const addImageFilesFromList = async (files) => {
+    const list = Array.from(files || []).filter((f) => f?.type?.startsWith?.('image/'))
+    if (!list.length) return
+    const prev = imagesRef.current
+    if (prev.length >= MAX_IMAGES) {
+      showToast(`최대 ${MAX_IMAGES}장까지 첨부할 수 있어요.`, 'error')
+      return
+    }
+    if (prev.length + list.length > MAX_IMAGES) {
       showToast(`최대 ${MAX_IMAGES}장까지 첨부할 수 있어요.`, 'error')
       return
     }
     const newImages = []
-    for (const file of files) {
-      if (newImages.length + images.length >= MAX_IMAGES) break
+    for (const file of list) {
+      if (newImages.length + prev.length >= MAX_IMAGES) break
       if (file.size > MAX_IMAGE_BYTES) {
         showToast('이미지는 5MB 이하로 올려 주세요.', 'error')
         continue
       }
-      if (!file.type.startsWith('image/')) {
-        showToast('이미지 파일만 첨부할 수 있어요.', 'error')
+      const sniff = await validateSelectableRasterImageUpload(file)
+      if (!sniff.ok) {
+        showToast(sniff.message, 'error')
         continue
       }
       try {
         const compressed = await compressAndCropImage(file)
+        const pj = await validatePipelineJpegOutput(compressed)
+        if (!pj.ok) {
+          showToast(pj.message, 'error')
+          continue
+        }
         newImages.push({ file: compressed, preview: URL.createObjectURL(compressed) })
       } catch {
         newImages.push({ file, preview: URL.createObjectURL(file) })
       }
     }
-    setImages((prev) => [...prev, ...newImages].slice(0, MAX_IMAGES))
+    if (!newImages.length) return
+    setImages((p) => [...p, ...newImages].slice(0, MAX_IMAGES))
+  }
+
+  const handleAddImage = async (e) => {
+    const files = Array.from(e.target.files || [])
     e.target.value = ''
+    await addImageFilesFromList(files)
+  }
+
+  const handleFormPaste = async (e) => {
+    const fileArr = getClipboardMediaFiles(e, { images: true })
+    if (!fileArr.length) return
+    if (e.target?.closest?.('textarea, input[type="text"]')) return
+    e.preventDefault()
+    await addImageFilesFromList(fileArr)
   }
 
   const removeImage = (index) => {
@@ -100,18 +142,24 @@ export function InquiryFormPage() {
 
   const uploadImages = async () => {
     if (images.length === 0) return []
-    const urls = []
-    for (let i = 0; i < images.length; i++) {
-      const { file } = images[i]
-      const path = `inquiries/${user.id}/${Date.now()}-${i}.jpg`
-      const { error } = await supabase.storage.from('matchup-media').upload(path, file, { cacheControl: '3600' })
-      if (error) {
-        console.warn('[Inquiry] 이미지 업로드 실패:', error)
-        continue
-      }
-      const { data: { publicUrl } } = supabase.storage.from('matchup-media').getPublicUrl(path)
-      urls.push(publicUrl)
-    }
+    const base = Date.now()
+    const tasks = images.map(({ file }, i) => {
+      const path = `inquiries/${user.id}/${base}-${i}.jpg`
+      return uploadMatchupMediaValidated(supabase, {
+        objectPath: path,
+        body: file,
+        fileKind: 'image',
+        cacheControl: '3600',
+        contentType: file.type || 'image/jpeg',
+      }).then(({ error, publicUrl }) => {
+        if (error || !publicUrl) {
+          console.warn('[Inquiry] 이미지 업로드 실패:', error)
+          return null
+        }
+        return publicUrl
+      })
+    })
+    const urls = (await Promise.all(tasks)).filter(Boolean)
     return urls
   }
 
@@ -119,6 +167,11 @@ export function InquiryFormPage() {
     e?.preventDefault()
     if (!user) {
       openLoginModal()
+      return
+    }
+    if (category === 'appeal') {
+      showToast('제재·결과 이의는 전용 이의 신청 페이지에서 접수해 주세요.', 'error')
+      navigate('/inquiry/appeal')
       return
     }
     if (!category) {
@@ -176,7 +229,9 @@ export function InquiryFormPage() {
         }
         if (!dbError && dbInquiry) {
           inquiryId = dbInquiry.id
-          await ensureInquiryAutoReplyAfterInsert(dbInquiry.id, category)
+          void ensureInquiryAutoReplyAfterInsert(dbInquiry.id, category).catch((e) =>
+            console.warn('[Inquiry] auto-reply 보강:', e?.message || e),
+          )
         }
       }
 
@@ -203,7 +258,7 @@ export function InquiryFormPage() {
 
   return (
     <div className={cn('min-h-screen', PAGE_BG)}>
-      <div className="max-w-screen-lg mx-auto">
+      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto')}>
         {/* 헤더: 뒤로 + 전송 */}
         <div className={cn('sticky top-0 z-20 px-4 py-3 flex items-center gap-3', HEADER_GLASS)}>
           <button
@@ -225,7 +280,7 @@ export function InquiryFormPage() {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="px-4 py-6 space-y-6">
+        <form onSubmit={handleSubmit} onPaste={handleFormPaste} className="px-4 py-6 space-y-6">
           {/* 문의 카테고리 선택 — 열릴 때 아래 섹션보다 위에 보이도록 z-index */}
           <section
             className={cn(
@@ -271,6 +326,19 @@ export function InquiryFormPage() {
                   </div>
                 </>
               )}
+            </div>
+            <div className="mt-4 rounded-2xl border border-violet-200/70 bg-gradient-to-br from-violet-50/90 to-fuchsia-50/60 px-4 py-3.5">
+              <p className="text-sm font-black text-violet-950">제재·결과에 대한 이의 신청</p>
+              <p className="mt-1 text-xs leading-relaxed text-violet-800/75">
+                1:1 문의가 아니라 전용 양식으로 접수되며, 운영자는{' '}
+                <span className="font-bold">이의 신청 검토</span> 메뉴에서 처리합니다.
+              </p>
+              <Link
+                to="/inquiry/appeal"
+                className="mt-3 inline-flex items-center text-sm font-black text-violet-700 hover:text-violet-950 underline-offset-2 hover:underline"
+              >
+                이의 신청 페이지로 이동 →
+              </Link>
             </div>
           </section>
 
@@ -335,7 +403,7 @@ export function InquiryFormPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept={MATCHUP_IMAGE_INPUT_ACCEPT}
               multiple
               onChange={handleAddImage}
               className="hidden"

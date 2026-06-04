@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Upload, X, Image, Video, Type, AlertCircle, AlertTriangle, CheckCircle, Hash, Info,
+import { Upload, X, Image, Video, Type, Camera, AlertCircle, AlertTriangle, CheckCircle, Hash, Info,
          ChevronDown, Clock } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/authStore'
@@ -27,6 +27,19 @@ import {
   VIDEO_RECOMMENDED,
   validateVideo,
 } from '../../lib/mediaSpec'
+import {
+  MATCHUP_IMAGE_INPUT_ACCEPT,
+  MATCHUP_VIDEO_INPUT_ACCEPT,
+  validateSelectableRasterImageUpload,
+  validatePipelineJpegOutput,
+  validateMatchupVideoUpload,
+} from '../../lib/uploadMediaValidation'
+import { captureVideoPosterJpegFile } from '../../lib/videoPoster'
+import { cameraPhotoToFile } from '../../lib/cameraPhotoToFile'
+import { getClipboardMediaFiles } from '../../lib/clipboardPasteFiles'
+import { uploadMatchupMediaValidated } from '../../lib/matchupMediaBucketUpload'
+import { mediaFileMatchesMatchupSideType } from '../../lib/matchupSideType'
+import { SmartphoneCameraCapture } from '../mobile/SmartphoneCameraCapture'
 import { getMatchupCategories } from '../../lib/categoryAdminStorage'
 const MAX_TAGS = 3
 const TITLE_MAX = 60
@@ -400,29 +413,87 @@ export function CreateMatchupDrawer({ onCreated }) {
   }
 
   // 파일 업로드
-  const uploadFile = async (file, side) => {
+  const uploadFile = async (file, side, { imageAlreadyCropped = false } = {}) => {
     const isImage = file.type.startsWith('image/')
     const isVideo = file.type.startsWith('video/')
     if (!isImage && !isVideo) throw new Error('이미지 또는 영상 파일만 업로드 가능해요')
     if (isImage && file.size > MAX_IMAGE_BYTES) throw new Error(`이미지는 ${MAX_IMAGE_MB}MB 이하`)
     if (isVideo && file.size > MAX_VIDEO_BYTES) throw new Error(`영상은 ${MAX_VIDEO_MB}MB 이하`)
+
+    let toUpload = file
     if (isVideo) {
+      const sniff = await validateMatchupVideoUpload(file)
+      if (!sniff.ok) throw new Error(sniff.message)
       const v = await validateVideo(file)
       if (!v.valid) throw new Error(v.error)
     }
-    let toUpload = file
-    if (isImage) { setUploadStep('이미지 1:1 크롭 중...'); toUpload = await compressAndCropImage(file) }
-    setUploadStep(`${side === 'left' ? 'A' : 'B'}측 파일 업로드 중...`)
-    const ext = isImage ? 'jpg' : file.name.split('.').pop()
-    const path = `matchups/${user.id}/${Date.now()}-${side}.${ext}`
-    const { error } = await supabase.storage.from('matchup-media').upload(path, toUpload, { cacheControl: '3600' })
-    if (error) {
-      if (error.message?.toLowerCase().includes('policy') || String(error.statusCode) === '403')
-        throw new Error('Storage 권한 오류. supabase_storage_policy.sql을 실행해주세요.')
-      throw new Error(error.message)
+
+    if (isImage) {
+      if (!imageAlreadyCropped) {
+        const sniffSel = await validateSelectableRasterImageUpload(file)
+        if (!sniffSel.ok) throw new Error(sniffSel.message)
+        setUploadStep('이미지 1:1 크롭 중...')
+        toUpload = await compressAndCropImage(file)
+      }
+      const outChk = await validatePipelineJpegOutput(toUpload)
+      if (!outChk.ok) throw new Error(outChk.message)
     }
-    const { data: { publicUrl } } = supabase.storage.from('matchup-media').getPublicUrl(path)
-    return { url: publicUrl, thumbnail: isImage ? publicUrl : null }
+    const ts = Date.now()
+    const ext = isImage ? 'jpg' : file.name.split('.').pop()?.toLowerCase() || 'mp4'
+    const basePath = `matchups/${user.id}/${ts}-${side}`
+
+    if (isVideo) {
+      setUploadStep('영상 썸네일 만드는 중...')
+      const posterFile = await captureVideoPosterJpegFile(file)
+      setUploadStep(`${side === 'left' ? 'A' : 'B'}측 영상 업로드 중...`)
+      const videoPath = `${basePath}.${ext}`
+      const { error: vErr, publicUrl: videoUrl } = await uploadMatchupMediaValidated(supabase, {
+        objectPath: videoPath,
+        body: toUpload,
+        fileKind: 'video',
+        cacheControl: '3600',
+        contentType: toUpload.type || undefined,
+      })
+      if (vErr) {
+        const m = vErr.message || ''
+        if (m.toLowerCase().includes('policy') || String(vErr.statusCode) === '403')
+          throw new Error('Storage 권한 오류. supabase_storage_policy.sql을 실행해주세요.')
+        throw new Error(m || '업로드 실패')
+      }
+      if (!videoUrl) throw new Error('영상 업로드 주소를 확인하지 못했어요. 다시 시도해 주세요.')
+      const posterPath = `${basePath}-poster.jpg`
+      const { error: pErr, publicUrl: thumbUrl } = await uploadMatchupMediaValidated(supabase, {
+        objectPath: posterPath,
+        body: posterFile,
+        fileKind: 'image',
+        upsert: true,
+        cacheControl: '3600',
+        contentType: posterFile.type || 'image/jpeg',
+      })
+      if (pErr) {
+        console.warn('[CreateMatchup] poster upload failed', pErr)
+        return { url: videoUrl, thumbnail: null }
+      }
+      return { url: videoUrl, thumbnail: thumbUrl }
+    }
+
+    setUploadStep(`${side === 'left' ? 'A' : 'B'}측 파일 업로드 중...`)
+    const path = `${basePath}.${ext}`
+    const { error, publicUrl } = await uploadMatchupMediaValidated(supabase, {
+      objectPath: path,
+      body: toUpload,
+      fileKind: 'image',
+      cacheControl: '3600',
+      contentType: toUpload.type || 'image/jpeg',
+    })
+    if (error) {
+      const m = error.message || ''
+      if (m.toLowerCase().includes('policy') || String(error.statusCode) === '403')
+        throw new Error('Storage 권한 오류. supabase_storage_policy.sql을 실행해주세요.')
+      throw new Error(m || '업로드 실패')
+    }
+    if (!publicUrl) throw new Error('업로드 주소를 확인하지 못했어요. 다시 시도해 주세요.')
+    return { url: publicUrl, thumbnail: publicUrl }
   }
 
   const handleSubmitClick = () => {
@@ -444,7 +515,9 @@ export function CreateMatchupDrawer({ onCreated }) {
       let leftThumb = null
 
       if (leftContent?.file) {
-        const r = await uploadFile(leftContent.file, 'left')
+        const r = await uploadFile(leftContent.file, 'left', {
+          imageAlreadyCropped: leftContent.type === 'image' && leftContent.imagePrepared === true,
+        })
         leftUrl = r.url
         leftThumb = r.thumbnail
       } else if (leftContent?.fromExisting && (leftContent.type === 'image' || leftContent.type === 'video')) {
@@ -467,6 +540,10 @@ export function CreateMatchupDrawer({ onCreated }) {
         : null
 
       if (editRow?.id) {
+        if (editRow.right_type != null || (editRow.total_votes || 0) > 0) {
+          showToast('매치업이 완료된 뒤에는 수정할 수 없어요.', 'info')
+          return
+        }
         setUploadStep('매치업 수정 중...')
         const patch = {
           title: title.trim(),
@@ -793,6 +870,13 @@ export function CreateMatchupDrawer({ onCreated }) {
                     <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gradient-to-br from-fuchsia-400 to-pink-500" />
                     <span>모든 콘텐츠는 1:1 비율로 저장되어 레이아웃이 일관되게 표시됩니다.</span>
                   </li>
+                  <li className="flex gap-2">
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500" />
+                    <span>
+                      <strong className="text-violet-700">형식 일치:</strong> A가 이미지면 도전자(B)도 이미지,
+                      영상↔영상, 텍스트↔텍스트만 가능해요.
+                    </span>
+                  </li>
                   <li className="flex gap-2 rounded-lg bg-rose-50/90 border border-rose-200/50 px-2.5 py-2 text-rose-900/90">
                     <span className="mt-0.5 shrink-0 text-rose-500">⚠</span>
                     <span>저작권 침해, 폭력적·선정적·비방 콘텐츠는 금지됩니다.</span>
@@ -948,7 +1032,10 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
   const [dragging, setDragging] = useState(false)
   const [textInput, setTextInput] = useState('')
   const [sizeError, setSizeError] = useState('')
-  const [validating, setValidating] = useState(false)
+  /** 영상 검사·이미지 1:1 준비 중 라벨 (빈 문자열이면 대기 아님) */
+  const [processingLabel, setProcessingLabel] = useState('')
+  const [showCamera, setShowCamera] = useState(false)
+  const mediaBusy = Boolean(processingLabel)
 
   useEffect(() => {
     if (!content) return
@@ -974,30 +1061,77 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
     const isImage = file.type.startsWith('image/')
     const isVideo = file.type.startsWith('video/')
     if (!isImage && !isVideo) { setSizeError('이미지 또는 영상만 가능해요'); return }
-    if (effectiveType === 'image' && !isImage) { setSizeError('A가 이미지를 올렸어요. 이미지만 올려주세요'); return }
-    if (effectiveType === 'video' && !isVideo) { setSizeError('A가 영상을 올렸어요. 영상만 올려주세요'); return }
+    const typeFileCheck = mediaFileMatchesMatchupSideType(effectiveType, file)
+    if (!typeFileCheck.ok) { setSizeError(typeFileCheck.message); return }
     if (isImage && file.size > MAX_IMAGE_BYTES) { setSizeError(`이미지 최대 ${MAX_IMAGE_MB}MB`); return }
     if (isVideo && file.size > MAX_VIDEO_BYTES) { setSizeError(`영상 최대 ${MAX_VIDEO_MB}MB`); return }
     if (isVideo) {
-      setValidating(true)
+      setProcessingLabel('영상 검사 중...')
+      const sniff = await validateMatchupVideoUpload(file)
+      if (!sniff.ok) {
+        setProcessingLabel('')
+        setSizeError(sniff.message)
+        return
+      }
       const v = await validateVideo(file)
-      setValidating(false)
+      setProcessingLabel('')
       if (!v.valid) { setSizeError(v.error); return }
+      if (content?.preview?.startsWith?.('blob:')) URL.revokeObjectURL(content.preview)
+      const preview = URL.createObjectURL(file)
+      const base = { type: 'video', file, preview }
+      onChange(requiredCategory ? { ...base, category: requiredCategory } : base)
+      return
     }
-    const preview = URL.createObjectURL(file)
-    const base = { type: isVideo ? 'video' : 'image', file, preview }
-    onChange(requiredCategory ? { ...base, category: requiredCategory } : base)
+    if (isImage) {
+      setProcessingLabel('이미지 1:1 준비 중...')
+      try {
+        const sniff = await validateSelectableRasterImageUpload(file)
+        if (!sniff.ok) {
+          setSizeError(sniff.message)
+          return
+        }
+        const compressed = await compressAndCropImage(file)
+        const pj = await validatePipelineJpegOutput(compressed)
+        if (!pj.ok) {
+          setSizeError(pj.message)
+          return
+        }
+        if (content?.preview?.startsWith?.('blob:')) URL.revokeObjectURL(content.preview)
+        const preview = URL.createObjectURL(compressed)
+        const base = { type: 'image', file: compressed, preview, imagePrepared: true }
+        onChange(requiredCategory ? { ...base, category: requiredCategory } : base)
+      } catch {
+        setSizeError('이미지를 처리하지 못했어요. 다른 파일로 시도해 주세요.')
+      } finally {
+        setProcessingLabel('')
+      }
+      return
+    }
   }
 
   const handleRemove = (e) => {
-    e?.stopPropagation(); onChange(null); setSizeError('')
+    e?.stopPropagation()
+    if (content?.preview?.startsWith?.('blob:')) URL.revokeObjectURL(content.preview)
+    onChange(null); setSizeError(''); setShowCamera(false); setProcessingLabel('')
     if (fileRef.current) fileRef.current.value = ''
   }
 
   const switchType = (t) => {
     if (requiredType) return
     setContentType(t); setSizeError('')
+    setShowCamera(false)
     onChange(null); setTextInput('')
+  }
+
+  const handleCameraCapture = async (photo) => {
+    setSizeError('')
+    try {
+      const file = await cameraPhotoToFile(photo, 'matchup-a.jpg')
+      await validateAndSet(file)
+      setShowCamera(false)
+    } catch (err) {
+      setSizeError(err?.message ? String(err.message) : '카메라 사진을 불러오지 못했어요')
+    }
   }
 
   return (
@@ -1051,19 +1185,35 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
           </span>
         </div>
       ) : (
-        /* 드롭박스 */
+        /* 드롭박스 — 클립보드 이미지·영상 붙여넣기(Ctrl+V)는 박스 포커스 후 */
         <div
-          onDrop={(e) => { e.preventDefault(); setDragging(false); if (!disabled && !validating) validateAndSet(e.dataTransfer.files?.[0]) }}
+          tabIndex={effectiveType === 'text' ? undefined : 0}
+          onDrop={(e) => { e.preventDefault(); setDragging(false); if (!disabled && !mediaBusy) validateAndSet(e.dataTransfer.files?.[0]) }}
           onDragOver={(e) => { e.preventDefault(); if (!disabled) setDragging(true) }}
           onDragLeave={() => setDragging(false)}
-          onClick={() => { if (!content && !disabled && !validating) fileRef.current?.click() }}
+          onClick={(e) => {
+            if (content || disabled || mediaBusy) return
+            if (e.target.closest('[data-file-pick]')) return
+            e.currentTarget.focus()
+          }}
+          onPaste={async (e) => {
+            if (disabled || mediaBusy || effectiveType === 'text' || content) return
+            const acceptImage = effectiveType === 'image'
+            const acceptVideo = effectiveType === 'video'
+            const files = getClipboardMediaFiles(e, { images: acceptImage, videos: acceptVideo })
+            const file = files[0]
+            if (!file) return
+            e.preventDefault()
+            e.stopPropagation()
+            await validateAndSet(file)
+          }}
           className={cn(
             FEED_CARD_FRAME,
-            'border-2 border-dashed transition-all',
-            disabled || validating ? 'opacity-60 cursor-not-allowed' :
+            'border-2 border-dashed transition-all outline-none focus-visible:ring-2 focus-visible:ring-[#22282E]/25',
+            disabled || mediaBusy ? 'opacity-60 cursor-not-allowed' :
             dragging ? 'border-[#22282E] bg-gray-100 scale-[1.02] cursor-copy' :
             content ? 'border-[#22282E] cursor-default' :
-            'border-gray-200 bg-gray-50 hover:border-gray-400 hover:bg-gray-100 cursor-pointer active:scale-[0.98]'
+            'border-gray-200 bg-gray-50 hover:border-gray-400 hover:bg-gray-100 cursor-default active:scale-[0.98]'
           )}
         >
           {content ? (
@@ -1087,11 +1237,11 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
               </div>
             </>
           ) : (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-gray-400">
-              {validating ? (
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-3 pb-10 text-gray-400">
+              {mediaBusy ? (
                 <>
                   <span className="w-6 h-6 border-2 border-gray-300 border-t-[#22282E] rounded-full animate-spin" />
-                  <p className="text-[10px] font-medium text-gray-500">영상 검사 중...</p>
+                  <p className="text-[10px] font-medium text-gray-500">{processingLabel}</p>
                 </>
               ) : (
                 <>
@@ -1099,12 +1249,31 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
                     <Upload size={16} className="text-gray-400" />
                   </div>
                   <div className="text-center">
-                    <p className="text-xs font-medium text-gray-500">클릭 또는 드롭</p>
+                    <p className="text-xs font-medium text-gray-500">드롭 또는 붙여넣기</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5 leading-snug">
+                      {effectiveType === 'video'
+                        ? '파일 탐색기에서 영상을 복사한 뒤 이 박스를 한 번 눌러 포커스한 다음 '
+                        : '이미지를 복사한 뒤 이 박스를 한 번 눌러 포커스한 다음 '}
+                      <span className="font-bold text-gray-500">Ctrl+V</span>
+                    </p>
                     {optional && <p className="text-[10px] text-gray-300 mt-0.5">선택 사항</p>}
                   </div>
                 </>
               )}
             </div>
+          )}
+          {!content && !mediaBusy && !disabled && (
+            <button
+              type="button"
+              data-file-pick
+              onClick={(e) => {
+                e.stopPropagation()
+                fileRef.current?.click()
+              }}
+              className="pointer-events-auto absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-[11px] font-bold text-gray-700 shadow-sm transition hover:bg-gray-50"
+            >
+              파일에서 선택
+            </button>
           )}
           {/* 사이드 레이블 */}
           <span className="absolute top-2 left-2 z-10 text-[10px] font-black bg-[#22282E]/70 text-white px-1.5 py-0.5 rounded-md">
@@ -1126,12 +1295,49 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
         </div>
       )}
 
+      {!requiredType && effectiveType === 'image' && (
+        <div className="space-y-2">
+          {!showCamera ? (
+            <button
+              type="button"
+              disabled={disabled || mediaBusy || Boolean(content)}
+              onClick={() => setShowCamera(true)}
+              className={cn(
+                'flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200/70 bg-gradient-to-r from-emerald-50/95 to-teal-50/80 py-2.5 text-[11px] font-bold text-emerald-900 transition-colors',
+                'hover:border-emerald-300 hover:from-emerald-50 hover:to-teal-50',
+                (disabled || mediaBusy || content) && 'cursor-not-allowed opacity-45'
+              )}
+            >
+              <Camera size={14} className="shrink-0" aria-hidden />
+              카메라로 촬영
+            </button>
+          ) : (
+            <div className="space-y-2 rounded-xl border border-emerald-100 bg-white/95 p-2 shadow-sm">
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => { setShowCamera(false); setSizeError('') }}
+                className="text-[10px] font-bold text-emerald-800 hover:text-emerald-950"
+              >
+                ← 파일 선택으로 돌아가기
+              </button>
+              <SmartphoneCameraCapture
+                quality={88}
+                className="border-0 p-2 shadow-none"
+                onCapture={handleCameraCapture}
+                onError={(m) => setSizeError(m)}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       <input
         ref={fileRef}
         type="file"
-        accept={effectiveType === 'image' ? 'image/*' : 'video/*'}
+        accept={effectiveType === 'image' ? MATCHUP_IMAGE_INPUT_ACCEPT : MATCHUP_VIDEO_INPUT_ACCEPT}
         className="hidden"
-        onChange={(e) => { validateAndSet(e.target.files?.[0]); e.target.value = '' }}
+        onChange={(e) => { if (!mediaBusy) validateAndSet(e.target.files?.[0]); e.target.value = '' }}
       />
     </div>
   )

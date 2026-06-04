@@ -5,6 +5,7 @@ import { useUIStore } from '../../store/uiStore'
 import { cn } from '../../lib/utils'
 import {
   getMatchupDetail,
+  getMatchupStatusLabel,
   updateMatchupStatus,
   recordMatchupAdminWarningSent,
   recordMatchupAdminSuspensionSent,
@@ -13,13 +14,6 @@ import {
 import { applyMatchupAdminUserSuspension, sendWarning } from '../../lib/warnSanctionStorage'
 import { Modal } from '../../components/ui/Modal'
 import { VsBadge } from '../../components/ui/VsBadge'
-
-const STATUS_LABEL = {
-  active: '진행 중',
-  review: '검토 대기',
-  ended: '종료',
-  blocked: '차단',
-}
 
 const ADMIN_ACTION_MODAL = {
   approve: {
@@ -115,8 +109,8 @@ export function AdminMatchupDetailPage() {
     )
   }
 
-  const statusLabel = STATUS_LABEL[matchup.status] ?? matchup.status
-  const isReported = matchup.reports > 0 && matchup.status === 'review'
+  const statusLabel = getMatchupStatusLabel(matchup.status)
+  const isReported = matchup.reports > 0
   const isBlocked = matchup.status === 'blocked'
 
   const closeModal = () => setConfirmAction(null)
@@ -220,12 +214,13 @@ export function AdminMatchupDetailPage() {
             <ChevronLeft size={24} className="sm:w-[22px] sm:h-[22px]" />
           </Link>
           <h1 className="text-base sm:text-xl font-black text-[#22282E] truncate">
-            매치업 상세 검토 (ID: #{matchup.id})
+            매치업 상세 (ID: #{matchup.id})
           </h1>
         </div>
         <span
           className={`shrink-0 px-3 py-1.5 rounded-lg text-sm font-bold ${
             isReported ? 'bg-amber-100 text-amber-700' :
+            matchup.status === 'waiting' ? 'bg-violet-100 text-violet-700' :
             matchup.status === 'active' ? 'bg-blue-100 text-blue-700' :
             matchup.status === 'ended' ? 'bg-gray-100 text-gray-700' :
             'bg-red-100 text-red-700'
@@ -242,11 +237,15 @@ export function AdminMatchupDetailPage() {
             <p className="text-xs font-bold text-gray-500 mb-2">USER A</p>
             <p className="text-base font-black text-[#22282E] mb-3 truncate max-w-full">{matchup.userA?.name ?? '-'}</p>
             <div className="w-full aspect-square max-w-[120px] sm:max-w-[140px] rounded-xl overflow-hidden bg-gray-200 mb-3">
-              <img
-                src={matchup.userA?.imageUrl ?? '/logo.png'}
-                alt={matchup.userA?.name}
-                className="w-full h-full object-cover"
-              />
+              {matchup.userA?.imageUrl ? (
+                <img
+                  src={matchup.userA.imageUrl}
+                  alt={matchup.userA?.name}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">미디어 없음</div>
+              )}
             </div>
             <p className="text-sm font-medium text-gray-600 text-center break-words max-w-full">"{matchup.userA?.title ?? '-'}"</p>
           </div>
@@ -255,15 +254,38 @@ export function AdminMatchupDetailPage() {
           </div>
           <div className="flex flex-col items-center p-4 rounded-xl bg-gray-50 border border-gray-100">
             <p className="text-xs font-bold text-gray-500 mb-2">USER B</p>
-            <p className="text-base font-black text-[#22282E] mb-3 truncate max-w-full">{matchup.userB?.name ?? '-'}</p>
-            <div className="w-full aspect-square max-w-[120px] sm:max-w-[140px] rounded-xl overflow-hidden bg-gray-200 mb-3">
-              <img
-                src={matchup.userB?.imageUrl ?? '/logo.png'}
-                alt={matchup.userB?.name}
-                className="w-full h-full object-cover"
-              />
-            </div>
-            <p className="text-sm font-medium text-gray-600 text-center break-words max-w-full">"{matchup.userB?.title ?? '-'}"</p>
+            {matchup.hasChallenger ? (
+              <>
+                <p className="text-base font-black text-[#22282E] mb-3 truncate max-w-full">
+                  {matchup.userB?.name ?? '-'}
+                </p>
+                <div className="w-full aspect-square max-w-[120px] sm:max-w-[140px] rounded-xl overflow-hidden bg-gray-200 mb-3">
+                  {matchup.userB?.imageUrl ? (
+                    <img
+                      src={matchup.userB.imageUrl}
+                      alt={matchup.userB?.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
+                      미디어 없음
+                    </div>
+                  )}
+                </div>
+                <p className="text-sm font-medium text-gray-600 text-center break-words max-w-full">
+                  "{matchup.userB?.title ?? '-'}"
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-base font-black text-violet-700/90 mb-3">도전자 대기</p>
+                <div className="w-full aspect-square max-w-[120px] sm:max-w-[140px] rounded-xl border-2 border-dashed border-violet-200 bg-gradient-to-br from-violet-50/80 to-fuchsia-50/50 mb-3 flex flex-col items-center justify-center gap-1 px-2">
+                  <span className="text-[10px] font-bold text-gray-400">콘텐츠 없음</span>
+                  <span className="text-[9px] text-gray-300 text-center">도전자 참여 후 표시</span>
+                </div>
+                <p className="text-sm font-medium text-gray-400 text-center">—</p>
+              </>
+            )}
           </div>
         </div>
       </div>

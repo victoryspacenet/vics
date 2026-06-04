@@ -1,6 +1,8 @@
 import { useState, useMemo, useEffect } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Search } from 'lucide-react'
+import { cn } from '../lib/utils'
+import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../lib/layoutShellClasses'
 
 const ALL_FAQ = [
   { id: '1', question: '승리 포인트는 언제 들어오나요?', category: 'matchup', keywords: ['포인트', '승리', '적중'] },
@@ -9,7 +11,8 @@ const ALL_FAQ = [
   { id: '4', question: '투표는 어떻게 하나요?', category: 'matchup', keywords: ['투표', '매치업'] },
   { id: '5', question: '계정 삭제는 어떻게 하나요?', category: 'account', keywords: ['계정', '삭제', '탈퇴'] },
   { id: '6', question: 'ㅎㅎㅎ', category: 'matchup', keywords: ['매치업', '투표'] },
-  { id: '7', question: '시즌제 랭킹이 무엇인가요?', category: 'matchup', keywords: ['랭킹', '시즌', '순위'] },
+  { id: '7', question: '시즌제 랭킹이 무엇인가요?', category: 'ranking', keywords: ['랭킹', '시즌', '순위'] },
+  { id: '8', question: '랭킹 축하 보너스 금액 기준은?', category: 'ranking', keywords: ['랭킹', '축하', '보너스', 'TOP10', '포인트'] },
 ]
 
 export function InquirySearchPage() {
@@ -34,7 +37,7 @@ export function InquirySearchPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-screen-lg mx-auto">
+      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto')}>
         <div className="sticky top-0 z-10 bg-gray-50 border-b border-gray-100 px-4 py-3 flex items-center gap-3">
           <button
             onClick={() => navigate(-1)}

@@ -11,7 +11,9 @@
 -- =============================================
 
 -- ─────────────────────────────────────────────
--- 1. point_transactions.source 에 tier_milestone 허용
+-- 1. point_transactions.source CHECK (tier_milestone 추가)
+--    supabase_ranking_celebration_bonus.sql 과 동일 목록 유지 — ranking_celebration 누락 시 23514
+--    오류 시: SELECT DISTINCT source FROM public.point_transactions;
 -- ─────────────────────────────────────────────
 DO $$
 BEGIN
@@ -24,7 +26,8 @@ BEGIN
       'attendance', 'vote', 'matchup_create',
       'creator_win', 'creator_lose', 'creator_draw',
       'voter_win', 'voter_lose', 'voter_draw',
-      'tier_milestone'
+      'tier_milestone',
+      'ranking_celebration'
     )
   );
 END $$;
@@ -95,6 +98,16 @@ BEGIN
 
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false, 'error', 'profile_not_found', 'total_granted', 0);
+  END IF;
+
+  -- Star~Goat 마일스톤(비트 1~4) 모두 지급됨 → 무거운 랭킹 스냅샷 생략
+  IF (v_mask & 15) = 15 THEN
+    RETURN jsonb_build_object('ok', true, 'total_granted', 0, 'grants', '[]'::jsonb);
+  END IF;
+
+  -- Player 구간: 활동·보유 P 미달 시 스냅샷 RPC 생략
+  IF v_new_pts < 500 AND v_tm < 10 AND v_vt < 20 THEN
+    RETURN jsonb_build_object('ok', true, 'total_granted', 0, 'grants', '[]'::jsonb);
   END IF;
 
   IF v_vt > 0 THEN

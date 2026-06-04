@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
@@ -25,13 +26,20 @@ export function Modal({
 
   if (!isOpen) return null
 
-  return (
-    <div className={cn('fixed inset-0 z-50 flex items-center justify-center p-4', rootClassName)}>
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+  const node = (
+    <div
+      className={cn(
+        'fixed inset-0 z-[300] flex items-center justify-center overflow-y-auto p-4',
+        rootClassName,
+      )}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="absolute inset-0 min-h-full bg-black/40 backdrop-blur-sm" aria-hidden />
       <div
         className={cn(
-          'relative bg-gradient-to-b from-white via-white to-slate-50/40 rounded-2xl shadow-xl w-full max-w-[min(28rem,calc(100vw-2rem))] z-10 overflow-hidden flex flex-col max-h-[90vh]',
-          className
+          'relative my-auto bg-gradient-to-b from-white via-white to-slate-50/40 rounded-2xl shadow-xl w-full max-w-[min(28rem,calc(100vw-2rem))] z-10 overflow-hidden flex flex-col max-h-[min(90vh,calc(100dvh-2rem))]',
+          className,
         )}
       >
         {title && (
@@ -55,4 +63,6 @@ export function Modal({
       </div>
     </div>
   )
+
+  return createPortal(node, document.body)
 }

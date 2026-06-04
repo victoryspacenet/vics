@@ -31,10 +31,10 @@ const FILTER_SELECT_STYLES = {
 
 function statusBadgeClass(status) {
   switch (status) {
+    case 'waiting':
+      return 'bg-violet-100 text-violet-700'
     case 'active':
       return 'bg-blue-100 text-blue-700'
-    case 'review':
-      return 'bg-amber-100 text-amber-700'
     case 'ended':
       return 'bg-gray-100 text-gray-700'
     case 'blocked':
@@ -81,6 +81,10 @@ export function AdminMatchupsPage() {
   }, [categoryFilterOptions, categoryFilter])
 
   useEffect(() => {
+    if (statusFilter === 'review') setStatusFilter('all')
+  }, [statusFilter])
+
+  useEffect(() => {
     let cancelled = false
     setListLoading(true)
     void getMatchups().then((list) => {
@@ -96,8 +100,8 @@ export function AdminMatchupsPage() {
 
   const stats = useMemo(
     () => ({
+      waiting: matchups.filter((m) => m.status === 'waiting').length,
       active: matchups.filter((m) => m.status === 'active').length,
-      review: matchups.filter((m) => m.status === 'review').length,
       ended: matchups.filter((m) => m.status === 'ended').length,
       blocked: matchups.filter((m) => m.status === 'blocked').length,
     }),
@@ -106,7 +110,12 @@ export function AdminMatchupsPage() {
 
   const parseCreatedAt = (createdAt) => {
     if (!createdAt) return null
-    const match = String(createdAt).match(/^(\d{1,2})\.(\d{1,2})/)
+    const s = String(createdAt)
+    const isoMs = Date.parse(s)
+    if (!Number.isNaN(isoMs) && (s.includes('T') || /^\d{4}-\d{2}-\d{2}/.test(s))) {
+      return new Date(isoMs)
+    }
+    const match = s.match(/^(\d{1,2})\.(\d{1,2})/)
     if (!match) return null
     const [, month, day] = match
     const year = new Date().getFullYear()
@@ -155,7 +164,7 @@ export function AdminMatchupsPage() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
 
   const refresh = async () => {
-    const list = await getMatchups()
+    const list = await getMatchups({ force: true })
     setMatchups(list)
   }
 
@@ -239,16 +248,13 @@ export function AdminMatchupsPage() {
 
       {/* 상태별 퀵 스탯 */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+        <div className="p-4 rounded-xl border border-violet-200 bg-violet-50">
+          <p className="text-xs font-medium text-gray-600 mb-1">도전자 대기 (NEW)</p>
+          <p className="text-2xl font-black text-violet-700">{stats.waiting}</p>
+        </div>
         <div className="p-4 rounded-xl border border-blue-200 bg-blue-50">
           <p className="text-xs font-medium text-gray-600 mb-1">진행 중</p>
           <p className="text-2xl font-black text-[#22282E]">{stats.active}</p>
-        </div>
-        <div className="p-4 rounded-xl border border-red-200 bg-red-50">
-          <p className="text-xs font-medium text-gray-600 mb-1">검토 대기</p>
-          <p className="text-2xl font-black text-red-600 flex items-center gap-1">
-            {stats.review}
-            <span className="text-base">🔥</span>
-          </p>
         </div>
         <div className="p-4 rounded-xl border border-gray-200 bg-gray-50">
           <p className="text-xs font-medium text-gray-600 mb-1">종료</p>
@@ -390,9 +396,13 @@ export function AdminMatchupsPage() {
                       )}
                     </button>
                   </td>
-                  <td className="px-4 py-3 font-medium">
-                    <Link to={`/admin/matchups/${m.id}`} className="hover:underline text-emerald-600">
-                      {m.id}
+                  <td className="px-4 py-3 font-medium max-w-[7rem]">
+                    <Link
+                      to={`/admin/matchups/${m.id}`}
+                      className="hover:underline text-emerald-600 font-mono text-xs block truncate"
+                      title={String(m.id)}
+                    >
+                      {String(m.id).slice(0, 8)}…
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-gray-600">{m.categoryLabel}</td>
@@ -412,7 +422,6 @@ export function AdminMatchupsPage() {
                   </td>
                   <td className="px-4 py-3">
                     <span
-                      title="매치업 상세 검토의 관리자 조치에서 설정된 상태입니다."
                       className={`inline-flex min-w-[4.25rem] items-center justify-center rounded px-2 py-1 text-xs font-bold tabular-nums ${statusBadgeClass(m.status)}`}
                     >
                       {getMatchupStatusLabel(m.status)}
@@ -425,7 +434,9 @@ export function AdminMatchupsPage() {
           </table>
         </div>
         {paginated.length === 0 && (
-          <div className="py-12 text-center text-gray-500 text-sm">검색 결과가 없습니다.</div>
+          <div className="py-12 text-center text-gray-500 text-sm">
+            {matchups.length === 0 ? '등록된 매치업이 없습니다.' : '검색 결과가 없습니다.'}
+          </div>
         )}
       </div>
 

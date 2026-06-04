@@ -1,5 +1,11 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
 import { Bold, Italic, Underline, Image, Link2 } from 'lucide-react'
+import { getClipboardMediaFiles } from '../../lib/clipboardPasteFiles'
+import {
+  refreshMatchupMediaImagesInHtmlRoot,
+  uploadNoticeInlineImage,
+} from '../../lib/noticeInlineImageUpload'
+import { MATCHUP_IMAGE_INPUT_ACCEPT } from '../../lib/uploadMediaValidation'
 
 const FONT_SIZES = [
   { value: '1', label: '작게' },
@@ -54,6 +60,21 @@ function placeCaretAtEnd(editor) {
   sel.addRange(range)
 }
 
+function placeCaretAfterNode(editor, node) {
+  if (!editor || !node || !editor.contains(node)) return
+  const sel = window.getSelection()
+  if (!sel) return
+  try {
+    const r = document.createRange()
+    r.setStartAfter(node)
+    r.collapse(true)
+    sel.removeAllRanges()
+    sel.addRange(r)
+  } catch {
+    placeCaretAtEnd(editor)
+  }
+}
+
 const UNSAFE_HREF = /^\s*(javascript:|data:|vbscript:)/i
 
 /** contentEditable 안에서 링크가 클릭·탐색 가능하도록 보강 */
@@ -80,7 +101,12 @@ function openHrefFromEditorAnchor(a) {
   }
 }
 
-export function RichTextEditor({ value, onChange, placeholder = '내용을 입력하세요...' }) {
+export function RichTextEditor({
+  value,
+  onChange,
+  placeholder = '내용을 입력하세요...',
+  onImageUploadError,
+}) {
   const editorRef = useRef(null)
   const fileInputRef = useRef(null)
   const savedRangeRef = useRef(null)
@@ -118,15 +144,79 @@ export function RichTextEditor({ value, onChange, placeholder = '내용을 입�
     fileInputRef.current?.click()
   }
 
-  const handleImageUpload = (e) => {
+  const insertImageFromFile = useCallback(
+    async (file) => {
+      const editor = editorRef.current
+      if (!editor || !file?.type?.startsWith?.('image/')) return
+
+      const { url, error } = await uploadNoticeInlineImage(file, {
+        maxEdge: 1200,
+        maxBytes: 700 * 1024,
+      })
+      if (error) {
+        onImageUploadError?.(error)
+        return
+      }
+      if (!url) return
+
+      editor.focus()
+      const img = document.createElement('img')
+      img.src = url
+      img.alt = ''
+      img.loading = 'lazy'
+      img.style.maxWidth = '100%'
+      img.style.height = 'auto'
+      img.onerror = () => {
+        onImageUploadError?.('이미지를 불러오지 못했어요. Supabase Storage 버킷·정책을 확인해 주세요.')
+        try {
+          img.remove()
+        } catch {
+          /* ignore */
+        }
+        onChange?.(editorRef.current?.innerHTML || '')
+      }
+
+      const sel = window.getSelection()
+      if (sel?.rangeCount) {
+        const range = sel.getRangeAt(0)
+        const anchor = range.commonAncestorContainer
+        const inside =
+          anchor.nodeType === Node.TEXT_NODE
+            ? editor.contains(anchor.parentNode)
+            : editor.contains(anchor)
+        if (inside) {
+          range.deleteContents()
+          range.insertNode(img)
+          placeCaretAfterNode(editor, img)
+        } else {
+          editor.appendChild(img)
+          placeCaretAfterNode(editor, img)
+        }
+      } else {
+        editor.appendChild(img)
+        placeCaretAfterNode(editor, img)
+      }
+      normalizeAnchorsInEditor(editor)
+      await refreshMatchupMediaImagesInHtmlRoot(editor)
+      onChange?.(editor.innerHTML || '')
+    },
+    [onChange, onImageUploadError],
+  )
+
+  const handleImageUpload = async (e) => {
     const file = e.target.files?.[0]
-    if (!file || !file.type.startsWith('image/')) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      execCmd('insertImage', reader.result)
-    }
-    reader.readAsDataURL(file)
     e.target.value = ''
+    if (!file || !file.type.startsWith('image/')) return
+    await insertImageFromFile(file)
+  }
+
+  const handleEditorPaste = async (e) => {
+    const files = getClipboardMediaFiles(e, { images: true, videos: false })
+    if (!files.length) return
+    e.preventDefault()
+    for (const file of files) {
+      await insertImageFromFile(file)
+    }
   }
 
   const handleLink = () => {
@@ -215,14 +305,10 @@ export function RichTextEditor({ value, onChange, placeholder = '내용을 입�
     editor.focus()
   }
 
-  const handleDrop = (e) => {
+  const handleDrop = async (e) => {
     e.preventDefault()
     const file = e.dataTransfer?.files?.[0]
-    if (file?.type.startsWith('image/')) {
-      const reader = new FileReader()
-      reader.onload = () => execCmd('insertImage', reader.result)
-      reader.readAsDataURL(file)
-    }
+    if (file?.type.startsWith('image/')) await insertImageFromFile(file)
   }
 
   const handleDragOver = (e) => e.preventDefault()
@@ -278,7 +364,7 @@ export function RichTextEditor({ value, onChange, placeholder = '내용을 입�
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
+          accept={MATCHUP_IMAGE_INPUT_ACCEPT}
           className="hidden"
           onChange={handleImageUpload}
         />
@@ -346,10 +432,11 @@ export function RichTextEditor({ value, onChange, placeholder = '내용을 입�
         contentEditable
         onMouseDown={handleEditorMouseDown}
         onInput={handleInput}
+        onPaste={handleEditorPaste}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         data-placeholder={placeholder}
-        className="min-h-[200px] max-h-[400px] overflow-y-auto px-4 py-3 text-[15px] leading-[1.8] text-gray-700 focus:outline-none [&:empty::before]:content-[attr(data-placeholder)] [&:empty::before]:text-gray-400 [&_a[href]]:cursor-pointer [&_a[href]]:text-fuchsia-700 [&_a[href]]:underline"
+        className="min-h-[200px] max-h-[400px] overflow-y-auto px-4 py-3 text-[15px] leading-[1.8] text-gray-700 focus:outline-none [&:empty::before]:content-[attr(data-placeholder)] [&:empty::before]:text-gray-400 [&_a[href]]:cursor-pointer [&_a[href]]:text-fuchsia-700 [&_a[href]]:underline [&_img]:max-w-full [&_img]:h-auto"
       />
     </div>
   )

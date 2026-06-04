@@ -1,5 +1,6 @@
-﻿import { useEffect } from 'react'
+import { useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import { PrefetchLink } from '../navigation/PrefetchLink'
 import { Bell, Home, List, Plus, Trophy, User, Compass, Megaphone, Gift } from 'lucide-react'
 import { Header } from './Header'
 import { Footer } from './Footer'
@@ -8,11 +9,13 @@ import { PopupNoticeDisplay } from '../notice/PopupNoticeDisplay'
 import { NotificationPanel } from '../ui/NotificationPanel'
 import { WelcomeBackOverlay } from '../ui/WelcomeBackOverlay'
 import { FandomMilestoneGate } from '../fandom/FandomMilestoneGate'
+import { OfflineConnectivityBanner } from '../system/OfflineConnectivityBanner'
 import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
 import { setLastPathBeforeLogin } from '../../lib/loginReturn'
 import { useNotificationStore } from '../../store/notificationStore'
 import { cn } from '../../lib/utils'
+import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../../lib/layoutShellClasses'
 import { isLegendDiamondShellActive } from '../../lib/legendDiamondUiTheme'
 
 export function Layout({ children }) {
@@ -23,12 +26,15 @@ export function Layout({ children }) {
   useEffect(() => {
     if (user) return
     const p = location.pathname
-    if (p === '/login' || p === '/signup') return
+    if (p === '/login' || p === '/signup' || p === '/reset-password' || p === '/forgot-password') return
     setLastPathBeforeLogin(`${location.pathname}${location.search}${location.hash}`)
   }, [user, location.pathname, location.search, location.hash])
 
   const isAdmin = location.pathname.startsWith('/admin')
   const isRestricted = location.pathname === '/restricted' || location.pathname.startsWith('/restricted')
+  /** 회원가입(미로그인)만 메인 헤더·푸터·탭 없이 단순 셸 */
+  const path = location.pathname
+  const isStandaloneAuthShell = path === '/signup' && !user
   const isMainPage = location.pathname === '/' || location.pathname.startsWith('/feed/')
   const isMatchupsPage = location.pathname === '/matchups'
   const isRankingPage = location.pathname === '/ranking'
@@ -36,7 +42,8 @@ export function Layout({ children }) {
   const isFandomPage = location.pathname === '/fandom'
   if (isAdmin) {
     return (
-      <div className="min-h-screen overflow-x-hidden bg-gray-100">
+      <div className="min-h-screen min-w-0 overflow-x-clip bg-gray-100">
+        <OfflineConnectivityBanner />
         {children}
         <Toast />
         <NotificationPanelOverlay />
@@ -46,8 +53,26 @@ export function Layout({ children }) {
 
   if (isRestricted) {
     return (
-      <div className="min-h-screen overflow-x-hidden bg-gradient-to-b from-gray-50 via-white to-slate-100/50">
+      <div className="min-h-screen min-w-0 overflow-x-clip bg-gradient-to-b from-gray-50 via-white to-slate-100/50">
+        <OfflineConnectivityBanner />
         {children}
+        <Toast />
+      </div>
+    )
+  }
+
+  if (isStandaloneAuthShell) {
+    return (
+      <div className="min-h-screen min-w-0 overflow-x-clip bg-gradient-to-b from-gray-50/90 via-white to-slate-100/40">
+        <OfflineConnectivityBanner />
+        <main
+          className={cn(
+            'mx-auto w-full min-w-0 px-4 pt-10 pb-[calc(2rem+env(safe-area-inset-bottom,0px))]',
+            LAYOUT_CONTENT_MAX_WIDTH_CLASS,
+          )}
+        >
+          {children}
+        </main>
         <Toast />
       </div>
     )
@@ -57,12 +82,12 @@ export function Layout({ children }) {
     <div
       data-vics-shell={legendDiamondShell ? 'legend-diamond' : undefined}
       className={cn(
-        'min-h-screen overflow-x-hidden',
+        'min-h-screen min-w-0 overflow-x-clip',
         legendDiamondShell
           ? 'vics-shell-legend-diamond-root'
           : cn(
               isMainPage &&
-                'bg-gradient-to-br from-slate-50 via-white/90 to-emerald-50/45',
+                'bg-gradient-to-br from-slate-200/40 via-slate-100/95 to-emerald-100/25',
               !isMainPage &&
                 (isMatchupsPage || isRankingPage || isRewardsPage || isFandomPage) &&
                 'bg-gradient-to-br from-violet-100/95 via-fuchsia-50/80 to-teal-50/70',
@@ -75,8 +100,14 @@ export function Layout({ children }) {
             ),
       )}
     >
+      <OfflineConnectivityBanner />
       <Header />
-      <main className="w-full min-w-0 max-w-screen-lg mx-auto px-4 pt-6 pb-24 lg:pb-6">
+      <main
+        className={cn(
+          'mx-auto w-full min-w-0 px-4 pt-6 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] lg:pb-6',
+          LAYOUT_CONTENT_MAX_WIDTH_CLASS,
+        )}
+      >
         {children}
       </main>
       <Footer />
@@ -300,7 +331,12 @@ function BottomNav({ legendDiamondShell = false }) {
         )}
       />
 
-      <div className="relative flex items-end justify-between gap-0.5 h-16 px-1 w-full max-w-screen-lg mx-auto min-w-0">
+      <div
+        className={cn(
+          'relative mx-auto flex min-h-[4.5rem] w-full min-w-0 items-end justify-between gap-1 px-0.5 pb-0.5 pt-0.5',
+          LAYOUT_CONTENT_MAX_WIDTH_CLASS,
+        )}
+      >
         <NavItem
           to="/"
           icon={Home}
@@ -336,17 +372,17 @@ function BottomNav({ legendDiamondShell = false }) {
         <button
           type="button"
           onClick={handleCreate}
-          className="flex flex-1 min-w-0 flex-col items-center justify-end gap-0.5 -mt-4"
+          className="-mt-4 flex min-h-[3.25rem] min-w-0 flex-1 touch-manipulation flex-col items-center justify-end gap-1"
         >
           <div
             className={cn(
-              'w-10 h-10 sm:w-14 sm:h-14 rounded-full flex items-center justify-center hover:scale-110 active:scale-95 transition-transform shrink-0',
+              'flex h-12 w-12 shrink-0 items-center justify-center rounded-full transition-transform hover:scale-110 active:scale-95 lg:h-14 lg:w-14',
               navAcc.create.fab
             )}
           >
-            <Plus size={24} className="text-white stroke-[2.5] drop-shadow-sm" />
+            <Plus className="h-[26px] w-[26px] text-white drop-shadow-sm sm:h-6 sm:w-6" strokeWidth={2.5} />
           </div>
-          <span className={cn('text-[8px] sm:text-[9px] font-black pb-1', navAcc.create.label)}>만들기</span>
+          <span className={cn('pb-0.5 text-[9px] font-black sm:text-[9px]', navAcc.create.label)}>만들기</span>
         </button>
 
         <NavItem
@@ -360,15 +396,15 @@ function BottomNav({ legendDiamondShell = false }) {
         <button
           type="button"
           onClick={() => !user ? openLoginModal() : openNotificationPanel()}
-          className="flex flex-1 min-w-0 flex-col items-center justify-end gap-0.5 py-2 px-1 relative group"
+          className="group relative flex min-h-[3.25rem] min-w-0 flex-1 touch-manipulation flex-col items-center justify-center gap-1 px-0.5 py-1"
         >
           <div
             className={cn(
-              'w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl transition-all duration-200 relative shrink-0 group-hover:scale-105 group-active:scale-95',
+              'relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-all duration-200 group-hover:scale-105 group-active:scale-95 lg:h-10 lg:w-10',
               bellOn ? navAcc.bell.active : navAcc.bell.inactive
             )}
           >
-            <Bell size={18} className={bellOn ? 'text-white drop-shadow-sm' : navAcc.bell.iconInactive} />
+            <Bell size={20} className={bellOn ? 'text-white drop-shadow-sm' : navAcc.bell.iconInactive} />
             {user && totalUnread > 0 && (
               <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-3.5 px-1 flex items-center justify-center bg-red-500 text-white text-[9px] font-black rounded-full leading-none ring-2 ring-white">
                 {totalUnread > 99 ? '99+' : totalUnread}
@@ -388,17 +424,17 @@ function BottomNav({ legendDiamondShell = false }) {
         <button
           type="button"
           onClick={() => !user ? openLoginModal() : null}
-          className="flex flex-1 min-w-0 flex-col items-center justify-end gap-0.5 py-2 px-1 relative group"
+          className="group relative flex min-h-[3.25rem] min-w-0 flex-1 touch-manipulation flex-col items-center justify-center gap-1 px-0.5 py-1"
         >
           {user ? (
-            <Link to="/mypage" className="flex flex-1 min-w-0 flex-col items-center justify-end gap-0.5">
+            <PrefetchLink to="/mypage" className="flex min-h-[3.25rem] min-w-0 flex-1 flex-col items-center justify-center gap-1 touch-manipulation">
               <div
                 className={cn(
-                  'w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl transition-all duration-200 shrink-0 group-hover:scale-105 group-active:scale-95',
+                  'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-all duration-200 group-hover:scale-105 group-active:scale-95 lg:h-10 lg:w-10',
                   isActive('/mypage') ? navAcc.my.active : navAcc.my.inactive
                 )}
               >
-                <User size={18} className={isActive('/mypage') ? 'text-white drop-shadow-sm' : navAcc.my.iconInactive} />
+                <User size={20} className={isActive('/mypage') ? 'text-white drop-shadow-sm' : navAcc.my.iconInactive} />
               </div>
               <span
                 className={cn(
@@ -408,16 +444,16 @@ function BottomNav({ legendDiamondShell = false }) {
               >
                 마이
               </span>
-            </Link>
+            </PrefetchLink>
           ) : (
             <>
               <div
                 className={cn(
-                  'w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl transition-all duration-200 group-hover:scale-105 group-active:scale-95 shrink-0',
+                  'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-all duration-200 group-hover:scale-105 group-active:scale-95 lg:h-10 lg:w-10',
                   navAcc.my.inactive
                 )}
               >
-                <User size={18} className={navAcc.my.iconInactive} />
+                <User size={20} className={navAcc.my.iconInactive} />
               </div>
               <span className={cn('text-[9px] font-bold', navAcc.my.labelInactive)}>마이</span>
             </>
@@ -440,30 +476,30 @@ function BottomNav({ legendDiamondShell = false }) {
 
 function NavItem({ to, icon: Icon, label, active, accent }) {
   return (
-    <Link
+    <PrefetchLink
       to={to}
-      className="flex flex-1 min-w-0 flex-col items-center justify-end gap-0.5 py-2 px-1 group"
+      className="group flex min-h-[3.25rem] min-w-0 flex-1 touch-manipulation flex-col items-center justify-center gap-1 px-0.5 py-1"
     >
       <div
         className={cn(
-          'w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl transition-all duration-200 shrink-0 group-hover:scale-105 group-active:scale-95',
+          'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-all duration-200 group-hover:scale-105 group-active:scale-95 lg:h-10 lg:w-10',
           active ? accent.active : accent.inactive
         )}
       >
         <Icon
-          size={18}
+          size={20}
           className={cn('transition-colors', active ? 'text-white drop-shadow-sm' : accent.iconInactive)}
         />
       </div>
       <span
         className={cn(
-          'text-[8px] sm:text-[9px] font-bold transition-colors',
+          'text-[9px] font-bold transition-colors sm:text-[9px]',
           active ? accent.label : accent.labelInactive
         )}
       >
         {label}
       </span>
-    </Link>
+    </PrefetchLink>
   )
 }
 

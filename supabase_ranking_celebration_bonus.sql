@@ -98,6 +98,23 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'error', 'invalid_sort_for_creator');
   END IF;
 
+  IF NOT EXISTS (
+    SELECT 1 FROM public.matchups m WHERE coalesce(m.total_votes, 0) > 0 LIMIT 1
+  ) THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'no_platform_activity');
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.profiles p
+    WHERE p.id = v_uid
+      AND (
+        coalesce(p.total_votes_received, 0) > 0
+        OR coalesce(p.vote_total, 0) > 0
+      )
+  ) THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'no_ranking_activity');
+  END IF;
+
   v_now_local := (timezone('Asia/Seoul', now()))::date;
 
   IF coalesce(p_period, 'weekly') = 'weekly' THEN

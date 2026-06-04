@@ -6,6 +6,50 @@ import { supabase } from './supabase'
 
 export const DEPARTMENTS = ['운영팀', '콘텐츠팀', 'CS팀', '개발팀', '마케팅팀']
 
+/** supabase_admin_operators.sql 시드(목) 계정 ID — is_seed 미설정 행 대비 */
+export const SEED_OPERATOR_IDS = [
+  'admin_01', 'contents_2', 'cs_team_a', 'dev_test', 'admin_02', 'marketing_1',
+  'ops_team_1', 'cs_team_b', 'design_1', 'data_1', 'temp_worker', 'legacy_admin',
+]
+
+/** 시드(목) 운영자 표시 이름 */
+export const SEED_OPERATOR_NAMES = [
+  '김운영', '이관리', '박상담', '최개발', '강수석', '정홍보', '한운영',
+  '조상담', '윤디자인', '송데이터', '임계약', '구관리',
+]
+
+const SEED_EMAIL_SUFFIX = '@vsmatch.com'
+
+/** 최근 이 시간 안에 last_access_at 이 갱신되면 「접속 중」 */
+export const OPERATOR_ONLINE_WINDOW_MS = 30 * 60 * 1000
+
+export function isDemoOperatorRow(row) {
+  if (!row) return false
+  if (row.is_seed === true) return true
+  const id = String(row.id || '').trim()
+  if (SEED_OPERATOR_IDS.includes(id)) return true
+  const email = String(row.email || '').trim().toLowerCase()
+  if (email.endsWith(SEED_EMAIL_SUFFIX)) return true
+  const name = String(row.name || '').trim()
+  if (SEED_OPERATOR_NAMES.includes(name)) return true
+  return false
+}
+
+function filterRealOperators(rows) {
+  return (rows || []).filter((r) => !isDemoOperatorRow(r))
+}
+
+/** supabase_admin_operators.sql 시드(목) 계정 — 목록·상세·접속 갱신에서 제외 */
+function nonSeedOperatorQuery(q) {
+  return q.eq('is_seed', false).not('id', 'in', `(${SEED_OPERATOR_IDS.join(',')})`)
+}
+
+export function isOperatorOnlineNow(op) {
+  if (!op || op.status !== 'active' || !op.lastAccessAt) return false
+  const ts = new Date(op.lastAccessAt).getTime()
+  return Number.isFinite(ts) && Date.now() - ts < OPERATOR_ONLINE_WINDOW_MS
+}
+
 const PERMISSION_PRESETS = {
   Master:    { dashboard: { r: true,  w: true,  d: true,  e: true  }, matchups: { r: true,  w: true,  d: true,  e: true  }, users: { r: true,  w: true,  d: true,  e: true  }, settings: { r: true,  w: true,  d: true,  e: true  } },
   Editor:    { dashboard: { r: true,  w: false, d: false, e: false }, matchups: { r: true,  w: true,  d: true,  e: true  }, users: { r: true,  w: true,  d: false, e: false }, settings: { r: false, w: false, d: false, e: false } },
@@ -74,10 +118,9 @@ export async function touchOperatorLastAccessByEmail(email, ipHint = '-') {
   const t = lastTouchByEmail.get(key) || 0
   if (Date.now() - t < touchThrottleMs) return
 
-  const { data: rows, error: selErr } = await supabase
-    .from('admin_operators')
-    .select('id')
-    .eq('email', key)
+  const { data: rows, error: selErr } = await nonSeedOperatorQuery(
+    supabase.from('admin_operators').select('id').eq('email', key),
+  )
   if (selErr || !rows?.length) return
 
   const now = new Date()
@@ -128,15 +171,16 @@ export async function getOperatorsList() {
   await runIdle90dSuspend()
   const { data, error } = await supabase
     .from('admin_operators')
-    .select('id, name, permission, last_access, status')
+    .select('id, name, email, permission, last_access, last_access_at, status, is_seed')
     .order('created_at', { ascending: true })
   if (error) { console.error(error); return [] }
-  return (data || []).map((row) => ({
-    id:         row.id,
-    name:       row.name,
-    permission: row.permission,
-    lastAccess: row.last_access,
-    status:     row.status,
+  return filterRealOperators(data).map((row) => ({
+    id:           row.id,
+    name:         row.name,
+    permission:   row.permission,
+    lastAccess:   row.last_access,
+    lastAccessAt: row.last_access_at,
+    status:       row.status,
   }))
 }
 
@@ -147,8 +191,8 @@ export async function getOperatorDetail(id) {
     .from('admin_operators')
     .select('*')
     .eq('id', id)
-    .single()
-  if (error || !data) return null
+    .maybeSingle()
+  if (error || !data || isDemoOperatorRow(data)) return null
   return normalize(data)
 }
 
@@ -177,6 +221,7 @@ export async function addOperator(form) {
     otp_enabled: otpEnabled,
     permission,
     granular,
+    is_seed: false,
     last_access: '미접속',
     last_access_ip: '-',
   })

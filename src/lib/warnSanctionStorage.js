@@ -17,6 +17,14 @@ export const RESTRICTION_TYPES = [
   { id: 'matchup_create', label: '매치업 생성 금지' },
 ]
 
+function restrictionTypeLabel(id) {
+  const row = RESTRICTION_TYPES.find((t) => t.id === id)
+  if (row) return row.label
+  if (id === 'chat') return '댓글 금지'
+  if (id === 'ranking') return '매치업 생성 금지'
+  return id
+}
+
 export const RESTRICTION_PERIODS = [
   { id: '24h', label: '24시간', hours: 24 },
   { id: '3d', label: '3일', hours: 72 },
@@ -57,7 +65,7 @@ export async function getWarningCount(userId) {
     const { count, error } = await supabase
       .from('user_moderation_warnings')
       .select('*', { count: 'exact', head: true })
-      .eq('subject_user_id', userId)
+      .eq('subject_user_id', String(userId))
     if (error) throw error
     return count ?? 0
   } catch (e) {
@@ -73,7 +81,7 @@ export async function getWarningHistory(userId) {
     const { data, error } = await supabase
       .from('user_moderation_warnings')
       .select('payload, created_at')
-      .eq('subject_user_id', userId)
+      .eq('subject_user_id', String(userId))
       .order('created_at', { ascending: false })
     if (error) throw error
     return (data || []).map((row) => {
@@ -153,11 +161,18 @@ export async function sendWarning(userId, payload) {
     periodHours: periodHours ?? (customDays ? customDays * 24 : 0),
   }
 
+  let warningId = null
   try {
-    await supabase.from('user_moderation_warnings').insert({
-      subject_user_id: userId,
-      payload: warnPayload,
-    })
+    const { data: wRow, error: wErr } = await supabase
+      .from('user_moderation_warnings')
+      .insert({
+        subject_user_id: userId,
+        payload: warnPayload,
+      })
+      .select('id')
+      .single()
+    if (wErr) throw wErr
+    warningId = wRow?.id ?? null
   } catch (e) {
     console.warn('[warnSanctionStorage] 경고 insert 실패:', e)
   }
@@ -171,14 +186,99 @@ export async function sendWarning(userId, payload) {
         types: restrictions,
         ends_at_ms: endsAt,
         date_label: date,
+        source_warning_id: warningId,
       })
     } catch (e) {
       console.warn('[warnSanctionStorage] 제한 insert 실패:', e)
     }
     await setCautionForPeriod(userId, endsAt)
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('vics:restriction:updated'))
+    }
   }
 
-  return {}
+  return { warningId }
+}
+
+/**
+ * 활성 이용 제한 요약 (접속 제한 화면·가드용)
+ * — `user_moderation_restrictions` 중 ends_at_ms > now 인 행을 합산
+ */
+export async function getActiveRestrictionSummary(userId) {
+  if (!userId) return null
+  const uid = String(userId)
+  const now = Date.now()
+  try {
+    const { data: rows, error } = await supabase
+      .from('user_moderation_restrictions')
+      .select('types, ends_at_ms, date_label, created_at, source_warning_id')
+      .eq('subject_user_id', uid)
+      .gt('ends_at_ms', now)
+    if (error) throw error
+    if (!rows?.length) return null
+
+    const endsAtMs = Math.max(...rows.map((r) => Number(r.ends_at_ms) || 0))
+    const startedAtMs = Math.min(
+      ...rows.map((r) => {
+        const t = r.created_at ? new Date(r.created_at).getTime() : now
+        return Number.isFinite(t) ? t : now
+      }),
+    )
+
+    const sortedByCreated = [...rows].sort(
+      (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime(),
+    )
+    const sanctionWarningId =
+      sortedByCreated.find((r) => r.source_warning_id)?.source_warning_id ?? null
+
+    const typeSet = new Set()
+    rows.forEach((r) => {
+      (Array.isArray(r.types) ? r.types : []).forEach((t) => typeSet.add(t))
+    })
+    const typeLabels = [...typeSet].map(restrictionTypeLabel).filter(Boolean)
+    const targetText =
+      typeLabels.length > 0 ? typeLabels.join(' · ') : '일부 서비스 이용'
+
+    const { data: warnRow, error: warnErr } = await supabase
+      .from('user_moderation_warnings')
+      .select('payload')
+      .eq('subject_user_id', uid)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (warnErr) console.warn('[warnSanctionStorage] 경고 payload 조회:', warnErr.message)
+
+    const p = warnRow?.payload && typeof warnRow.payload === 'object' ? warnRow.payload : {}
+    let reasonText = ''
+    if (p.reasonLabel && p.message) reasonText = `${p.reasonLabel} — ${p.message}`
+    else if (p.reasonLabel) reasonText = String(p.reasonLabel)
+    else if (p.message) reasonText = String(p.message)
+    else reasonText = '커뮤니티 가이드라인 위반'
+
+    const fmt = (ts) => {
+      const d = new Date(ts)
+      return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`
+    }
+
+    return {
+      endsAtMs,
+      reasonText,
+      targetText,
+      startDateFmt: fmt(startedAtMs),
+      endDateFmt: fmt(endsAtMs),
+      typeLabels,
+      sanctionWarningId,
+    }
+  } catch (e) {
+    console.warn('[warnSanctionStorage] 활성 제한 요약 조회 실패:', e)
+    return null
+  }
+}
+
+/** 활성 이용 제한이 하나라도 있으면 true */
+export async function hasActiveModerationRestriction(userId) {
+  const s = await getActiveRestrictionSummary(userId)
+  return s != null
 }
 
 /** 현재 적용 중인 제한 */
@@ -191,7 +291,7 @@ export async function getActiveRestrictions(userId) {
     const { data, error } = await supabase
       .from('user_moderation_restrictions')
       .select('types')
-      .eq('subject_user_id', userId)
+      .eq('subject_user_id', String(userId))
       .gt('ends_at_ms', now)
     if (error) throw error
     const list = data || []
@@ -226,7 +326,7 @@ export async function getRecentlyEndedRestriction(userId) {
     const { data, error } = await supabase
       .from('user_moderation_restrictions')
       .select('types, ends_at_ms, date_label')
-      .eq('subject_user_id', userId)
+      .eq('subject_user_id', String(userId))
       .lte('ends_at_ms', now)
       .order('ends_at_ms', { ascending: false })
       .limit(1)

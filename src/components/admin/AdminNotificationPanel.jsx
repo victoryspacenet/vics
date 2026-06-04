@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bell, CheckCheck, Clock, Info, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { startVisibilityPolling } from '../../lib/visibilityPolling'
 
 async function fetchAdminNotifications() {
   const { data, error } = await supabase
@@ -191,27 +192,23 @@ export function AdminNotificationPanel({ onClose }) {
   )
 }
 
-/** 어드민 알림 미읽음 수 조회 훅 */
+/** 어드민 알림 미읽음 수 — Realtime 대신 90초 폴링 (관리자 레이아웃 마운트 시만) */
 export function useAdminUnreadCount() {
   const [count, setCount] = useState(0)
 
   useEffect(() => {
-    const fetch = () => {
-      supabase
+    const fetchCount = () => {
+      void supabase
         .from('admin_notifications')
         .select('id', { count: 'exact', head: true })
         .eq('is_read', false)
         .then(({ count: c }) => setCount(c || 0))
     }
-    fetch()
 
-    // Supabase Realtime 구독
-    const channel = supabase
-      .channel('admin_notif_count')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'admin_notifications' }, fetch)
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
+    return startVisibilityPolling({
+      intervalMs: 90_000,
+      onTick: fetchCount,
+    })
   }, [])
 
   return count

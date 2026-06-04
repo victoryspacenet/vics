@@ -3,6 +3,7 @@
  * /matchup/:id 요청 시 "누가 누구와 대결 중!" 문구와 썸네일을 OG 메타에 주입
  */
 const { createClient } = require('@supabase/supabase-js')
+const { withIpRateLimit } = require('../lib/rateLimitMiddleware.cjs')
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || ''
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || ''
@@ -102,7 +103,7 @@ function buildFallbackOgHtml(meta, baseUrl) {
 </html>`
 }
 
-exports.handler = async (event) => {
+const ogHandler = async (event) => {
   const path = event.path || ''
   const match = path.match(/^\/matchup\/([^/]+)/)
   const id = match ? match[1] : event.queryStringParameters?.id
@@ -165,3 +166,5 @@ exports.handler = async (event) => {
     }
   }
 }
+
+exports.handler = withIpRateLimit(ogHandler, { scope: 'matchup-og', maxRequests: 40 })

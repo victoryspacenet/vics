@@ -2,6 +2,10 @@ import { useState } from 'react'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { CheckCircle, AlertCircle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { checkNicknameTaken } from '../lib/nicknameTakenApi'
+import { resolveSiteUrl } from '../lib/siteApiBase'
+import { SIGNUP_BONUS_POINTS, grantSignupBonusIfNeeded } from '../lib/signupRewards'
+import { messageForSignUpError } from '../lib/signInPasswordErrors'
 import { isRejoinCooldownDbError, REJOIN_COOLDOWN_USER_MESSAGE } from '../lib/rejoinCooldown'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
@@ -47,18 +51,23 @@ export function SignupPage() {
   const checkNickname = async () => {
     if (!form.nickname.trim()) return
     setNicknameStatus('checking')
-    const { data } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('nickname', form.nickname.trim())
-      .maybeSingle()
-    setNicknameStatus(data ? 'taken' : 'available')
+    const { taken, error } = await checkNicknameTaken(form.nickname.trim())
+    if (error) {
+      setNicknameStatus(null)
+      showToast('닉네임 확인에 실패했어요. 잠시 후 다시 시도해 주세요.', 'error')
+      return
+    }
+    setNicknameStatus(taken ? 'taken' : 'available')
   }
 
   const validate = () => {
     const errs = {}
     if (!form.nickname.trim()) errs.nickname = '닉네임을 입력해주세요'
-    if (nicknameStatus === 'taken') errs.nickname = '이미 사용 중인 닉네임이에요'
+    else if (nicknameStatus === 'checking') errs.nickname = '닉네임 중복 확인 중이에요. 잠시만 기다려 주세요'
+    else if (nicknameStatus === 'taken') errs.nickname = '이미 사용 중인 닉네임이에요'
+    else if (nicknameStatus !== 'available') {
+      errs.nickname = '「중복확인」으로 사용 가능한 닉네임인지 확인해 주세요'
+    }
     if (!form.email.trim()) errs.email = '이메일을 입력해주세요'
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errs.email = '올바른 이메일 형식이 아니에요'
     {
@@ -76,7 +85,7 @@ export function SignupPage() {
     if (!validate() || loading) return
     setLoading(true)
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data: authData, error } = await supabase.auth.signUp({
         email: form.email.trim(),
         password: form.password,
         options: {
@@ -89,16 +98,56 @@ export function SignupPage() {
       })
       if (error) throw error
 
-      // 프로필에 추가 정보 업데이트
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
+      const session = authData?.session
+      const newUser = authData?.user
+
+      // Supabase에서 이메일 확인(Confirm)이 켜져 있으면 세션 없이 user만 오는 경우가 많음 → 이 상태로는 비밀번호 로그인 불가
+      if (newUser && !session) {
+        // 이메일 확인 대기 시 세션이 없어 클라이언트에서 profiles upsert 불가 → 서버에서 보강
+        try {
+          const res = await fetch(resolveSiteUrl('/api/profiles-bootstrap-signup'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: newUser.id,
+              email: form.email.trim(),
+              nickname: form.nickname.trim(),
+              birthdate: form.birthdate,
+              gender: form.gender,
+            }),
+          })
+          if (!res.ok) {
+            const j = await res.json().catch(() => ({}))
+            console.warn('[Signup] profiles-bootstrap-signup', res.status, j)
+          } else {
+            await grantSignupBonusIfNeeded(newUser.id)
+            try {
+              window.dispatchEvent(new CustomEvent('vics:adminUsers:updated'))
+            } catch {
+              /* ignore */
+            }
+          }
+        } catch (e) {
+          console.warn('[Signup] profiles-bootstrap-signup fetch', e?.message || e)
+        }
+        showToast(
+          '가입 확인 메일을 보냈어요. 메일함(스팸함 포함)에서 링크를 눌러 인증한 뒤 로그인해 주세요.',
+          'success',
+        )
+        const q = new URLSearchParams({ registered: '1', email: form.email.trim() })
+        navigate(`/login?${q.toString()}`, { replace: true })
+        return
+      }
+
+      const authedUser = session?.user ?? newUser
+      if (authedUser) {
         const { error: upErr } = await supabase.from('profiles').upsert({
-          id: user.id,
+          id: authedUser.id,
           nickname: form.nickname.trim(),
           email: form.email.trim(),
           birthdate: form.birthdate,
           gender: form.gender,
-          points: 1000,
+          points: SIGNUP_BONUS_POINTS,
         })
         if (upErr) {
           if (isRejoinCooldownDbError(upErr)) {
@@ -107,6 +156,23 @@ export function SignupPage() {
             return
           }
           throw upErr
+        }
+        await grantSignupBonusIfNeeded(authedUser.id)
+        try {
+          await supabase.auth.updateUser({
+            data: {
+              nickname: form.nickname.trim(),
+              birthdate: form.birthdate,
+              gender: form.gender,
+            },
+          })
+        } catch (e) {
+          console.warn('[Signup] auth.updateUser', e?.message || e)
+        }
+        try {
+          window.dispatchEvent(new CustomEvent('vics:adminUsers:updated'))
+        } catch {
+          /* ignore */
         }
       }
 
@@ -119,15 +185,19 @@ export function SignupPage() {
         await supabase.auth.signOut()
         showToast(REJOIN_COOLDOWN_USER_MESSAGE, 'error')
       } else {
-        showToast(err.message || '회원가입에 실패했어요', 'error')
+        showToast(messageForSignUpError(err), 'error')
       }
     } finally {
       setLoading(false)
     }
   }
 
-  const isValid = form.nickname && form.email && form.birthdate && form.gender
-    && nicknameStatus !== 'taken'
+  const isValid =
+    form.nickname.trim() &&
+    form.email.trim() &&
+    form.birthdate &&
+    form.gender &&
+    nicknameStatus === 'available'
 
   if (authLoading) {
     return (

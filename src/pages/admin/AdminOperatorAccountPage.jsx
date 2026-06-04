@@ -4,7 +4,7 @@ import { ChevronRight, Plus, Search, Pencil, Trash2 } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { useUIStore } from '../../store/uiStore'
 import { useAuthStore } from '../../store/authStore'
-import { getOperatorsList, deleteOperator } from '../../lib/operatorAdminStorage'
+import { getOperatorsList, deleteOperator, isOperatorOnlineNow } from '../../lib/operatorAdminStorage'
 
 const PERMISSION_STYLES = {
   Master:    'font-black text-violet-700 bg-violet-100',
@@ -25,7 +25,7 @@ export function AdminOperatorAccountPage() {
   const [operators, setOperators] = useState([])
   const [loading, setLoading] = useState(true)
   const [permissionFilter, setPermissionFilter] = useState(initialPerm)
-  const [statusFilter, setStatusFilter] = useState('active')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [page, setPage] = useState(1)
   const [deleteTarget, setDeleteTarget] = useState(null)
@@ -64,10 +64,12 @@ export function AdminOperatorAccountPage() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
 
   const stats = useMemo(() => {
-    const total = operators.length
-    const online = 3
-    const suspended = operators.filter((o) => o.status === 'suspended').length
-    return { total, online, suspended }
+    const active = operators.filter((o) => o.status === 'active')
+    return {
+      total: operators.length,
+      online: active.filter(isOperatorOnlineNow).length,
+      suspended: operators.filter((o) => o.status === 'suspended').length,
+    }
   }, [operators])
 
   const handleDeleteConfirm = async () => {

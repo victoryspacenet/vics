@@ -3,6 +3,7 @@
  * DOMPurify, URL 허용 목록, encodeURIComponent 적용
  */
 import DOMPurify from 'dompurify'
+import { resolveSiteUrl } from './siteApiBase'
 
 // ── 1. HTML Sanitizing (DOMPurify) ────────────────────────────────────────
 
@@ -43,6 +44,9 @@ const ALLOWED_DOMAINS = [
   'platform-lookaside.fbsbx.com',
   'pimg.kakao.net',
   'dn-img.kakao.com',
+  /** 카카오·네이버 계열 CDN (프로필 사진 등) */
+  'pstatic.net',
+  'daumcdn.net',
 ]
 
 function parseUrl(url) {
@@ -79,7 +83,7 @@ function isAllowedDomain(urlObj) {
  */
 export function safeMediaUrl(url, fallback = '') {
   if (!url || typeof url !== 'string') return fallback
-  const trimmed = url.trim()
+  let trimmed = url.trim()
   if (!trimmed) return fallback
 
   // 동일 출처 정적 자산 (Vite public/ → /images/...). 프로토콜 상대 URL(//evil.com)은 제외
@@ -87,30 +91,40 @@ export function safeMediaUrl(url, fallback = '') {
     return trimmed
   }
 
-  const hasAllowedPrefix = ALLOWED_URL_PREFIXES.some((p) => trimmed.startsWith(p))
-  if (!hasAllowedPrefix) return fallback
-
   // blob: URL (앱 내 createObjectURL) 허용
   if (trimmed.toLowerCase().startsWith('blob:')) return trimmed
 
+  // 프로토콜 상대 //host/... (일부 OAuth·카카오 메타데이터) → https 로 고정
+  if (trimmed.startsWith('//')) {
+    trimmed = `https:${trimmed}`
+  }
+
+  // data: / javascript: 는 아래에서 프로토콜 검사로 차단
   const urlObj = parseUrl(trimmed)
   if (!urlObj) return fallback
 
-  // localhost는 개발용 허용
+  // localhost는 개발용 허용 (http 포함)
   if (urlObj.hostname === 'localhost' || urlObj.hostname === '127.0.0.1') {
-    return trimmed
+    const okLocal = ALLOWED_URL_PREFIXES.some((p) => trimmed.startsWith(p))
+    return okLocal ? trimmed : fallback
   }
 
-  // 프로덕션: https만 허용
-  if (urlObj.protocol !== 'https:') return fallback
+  // 카카오 등이 http 로 주는 프로필 이미지 → 허용 도메인이면 https 로 승격
+  if (urlObj.protocol === 'http:' && isAllowedDomain(urlObj)) {
+    const u = new URL(trimmed)
+    u.protocol = 'https:'
+    trimmed = u.href
+  }
 
-  // data: URL 차단 (SVG 등에 스크립트 삽입 가능)
+  const urlObjHttps = parseUrl(trimmed)
+  if (!urlObjHttps) return fallback
+
+  if (urlObjHttps.protocol !== 'https:') return fallback
+
   if (trimmed.toLowerCase().startsWith('data:')) return fallback
-
-  // javascript: 차단
   if (trimmed.toLowerCase().startsWith('javascript:')) return fallback
 
-  if (!isAllowedDomain(urlObj)) return fallback
+  if (!isAllowedDomain(urlObjHttps)) return fallback
 
   return trimmed
 }
@@ -154,7 +168,7 @@ export function parseNicknameSeasonLimitError(error) {
 const SQLI_PATTERNS = [
   /(\bselect\b.+\bfrom\b|\binsert\s+into\b|\bdelete\s+from\b|\bdrop\s+table\b|\btruncate\s+table\b)/i,
   /(\bunion\s+(all\s+)?select\b)/i,
-  /('|\"|`)\s*(or|and)\s*['"` ]?\d+\s*[=<>]/i,  // ' OR 1=1
+  /('|"|`)\s*(or|and)\s*['"` ]?\d+\s*[=<>]/i,  // ' OR 1=1
   /(;\s*(drop|delete|update|insert|select|exec|execute|alter|create)\b)/i,
   /(\bexec\s*\(|\bexecute\s*\(|\bxp_\w+\s*\()/i,  // MSSQL exec/xp_
   /(--\s*$|#\s*$)/m,  // 주석 시도
@@ -197,7 +211,7 @@ export async function reportSuspiciousInputIfNeeded(fields, ctx = {}) {
       joined.slice(0, 1000),
     ].filter(Boolean).join('\n')
 
-    fetch(`${window.location.origin}/.netlify/functions/system-push-dispatch`, {
+    fetch(resolveSiteUrl('/api/system-push-dispatch'), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${session.access_token}`,

@@ -1,10 +1,10 @@
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { ChevronDown, ChevronLeft, ChevronRight, Search } from 'lucide-react'
 import { useUIStore } from '../../store/uiStore'
 import {
-  getAdminAppeals,
-  getAppealStats,
+  getAdminAppealsPaged,
+  getAdminAppealTotals,
   APPEAL_STATUS,
   SANCTION_TYPES,
 } from '../../lib/appealAdminStorage'
@@ -33,6 +33,7 @@ function formatDate(iso) {
 }
 
 const PAGE_SIZE = 10
+const SEARCH_DEBOUNCE_MS = 400
 
 export function AdminAppealListPage() {
   const location = useLocation()
@@ -41,9 +42,20 @@ export function AdminAppealListPage() {
   const [sanctionFilter, setSanctionFilter] = useState('')
   const [dateFilter, setDateFilter] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [sanctionOpen, setSanctionOpen] = useState(false)
   const [dateOpen, setDateOpen] = useState(false)
   const [page, setPage] = useState(1)
+
+  const [stats, setStats] = useState({ pending: 0, completed: 0 })
+  const [rows, setRows] = useState([])
+  const [totalCount, setTotalCount] = useState(0)
+  const [listLoading, setListLoading] = useState(true)
+
+  const [listTick, setListTick] = useState(0)
+
+  const filterSig = `${sanctionFilter}|${dateFilter}|${debouncedSearch}`
+  const prevFilterSigRef = useRef(filterSig)
 
   // 통보 완료 후 상세에서 리다이렉트 시 토스트 표시
   useEffect(() => {
@@ -54,51 +66,77 @@ export function AdminAppealListPage() {
     }
   }, [location.state?.appealCompleteToast, showToast, navigate])
 
-  const [stats, setStats] = useState({ pending: 0, completed: 0 })
-  const [allAppeals, setAllAppeals] = useState([])
+  const loadTotals = useCallback(async () => {
+    const t = await getAdminAppealTotals()
+    setStats(t)
+  }, [])
+
+  useEffect(() => {
+    void loadTotals()
+  }, [loadTotals])
+
+  useEffect(() => {
+    const onUpd = () => {
+      void loadTotals()
+      setListTick((t) => t + 1)
+    }
+    window.addEventListener('vics:adminAppeals:updated', onUpd)
+    return () => window.removeEventListener('vics:adminAppeals:updated', onUpd)
+  }, [loadTotals])
+
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearch(searchQuery.trim()), SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(id)
+  }, [searchQuery])
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([getAdminAppeals(), getAppealStats()]).then(([list, s]) => {
+    const sigChanged = prevFilterSigRef.current !== filterSig
+    if (sigChanged) prevFilterSigRef.current = filterSig
+
+    const effectivePage = sigChanged ? 1 : page
+    if (sigChanged && page !== 1) setPage(1)
+
+    setListLoading(true)
+    ;(async () => {
+      const { appeals, totalCount: tc } = await getAdminAppealsPaged({
+        page: effectivePage,
+        pageSize: PAGE_SIZE,
+        sanctionType: sanctionFilter,
+        dateRange: dateFilter,
+        search: debouncedSearch,
+      })
       if (cancelled) return
-      setAllAppeals(list)
-      setStats(s)
-    })
-    return () => { cancelled = true }
-  }, [])
+      setRows(appeals)
+      setTotalCount(tc)
+      setListLoading(false)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [page, filterSig, listTick])
 
-  const filtered = useMemo(() => {
-    const now = Date.now()
-    const rangeMs = {
-      all: Infinity,
-      '1w': 7 * 24 * 60 * 60 * 1000,
-      '2w': 14 * 24 * 60 * 60 * 1000,
-      '1m': 30 * 24 * 60 * 60 * 1000,
-    }[dateFilter] || Infinity
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
 
-    return allAppeals.filter((a) => {
-      if (sanctionFilter && a.sanctionType !== sanctionFilter) return false
-      if (rangeMs < Infinity) {
-        const created = new Date(a.createdAt).getTime()
-        if (now - created > rangeMs) return false
-      }
-      if (searchQuery.trim()) {
-        const q = searchQuery.trim().toLowerCase()
-        const matchReceipt = (a.receiptId || '').toLowerCase().includes(q)
-        const matchNick = (a.nickname || '').toLowerCase().includes(q)
-        if (!matchReceipt && !matchNick) return false
-      }
-      return true
-    })
-  }, [allAppeals, sanctionFilter, dateFilter, searchQuery])
-
-  // 필터 변경 시 첫 페이지로 리셋
-  useEffect(() => { setPage(1) }, [sanctionFilter, dateFilter, searchQuery])
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages)
+  }, [page, totalPages])
 
   const goPage = useCallback((p) => setPage(Math.min(Math.max(1, p), totalPages)), [totalPages])
+
+  const applySearchNow = useCallback(() => {
+    setDebouncedSearch(searchQuery.trim())
+  }, [searchQuery])
+
+  const pageNumbers = useMemo(() => {
+    return Array.from({ length: totalPages }, (_, i) => i + 1)
+      .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 2)
+      .reduce((acc, p, idx, arr) => {
+        if (idx > 0 && p - arr[idx - 1] > 1) acc.push(`ellipsis-${p}`)
+        acc.push(p)
+        return acc
+      }, [])
+  }, [totalPages, page])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -131,6 +169,7 @@ export function AdminAppealListPage() {
           <div className="flex flex-wrap gap-2 items-center">
             <div className="relative">
               <button
+                type="button"
                 onClick={() => { setSanctionOpen(!sanctionOpen); setDateOpen(false) }}
                 className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1"
               >
@@ -139,11 +178,11 @@ export function AdminAppealListPage() {
               </button>
               {sanctionOpen && (
                 <>
-                  <div className="fixed inset-0 z-10" onClick={() => setSanctionOpen(false)} />
+                  <div className="fixed inset-0 z-10" onClick={() => setSanctionOpen(false)} aria-hidden />
                   <div className="absolute top-full left-0 mt-1 py-1 bg-white rounded-lg border shadow-lg z-20 min-w-[140px]">
-                    <button onClick={() => { setSanctionFilter(''); setSanctionOpen(false) }} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50">전체</button>
+                    <button type="button" onClick={() => { setSanctionFilter(''); setSanctionOpen(false) }} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50">전체</button>
                     {SANCTION_TYPES.map((s) => (
-                      <button key={s.id} onClick={() => { setSanctionFilter(s.id); setSanctionOpen(false) }} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50">{s.label}</button>
+                      <button key={s.id} type="button" onClick={() => { setSanctionFilter(s.id); setSanctionOpen(false) }} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50">{s.label}</button>
                     ))}
                   </div>
                 </>
@@ -151,6 +190,7 @@ export function AdminAppealListPage() {
             </div>
             <div className="relative">
               <button
+                type="button"
                 onClick={() => { setDateOpen(!dateOpen); setSanctionOpen(false) }}
                 className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1"
               >
@@ -159,10 +199,10 @@ export function AdminAppealListPage() {
               </button>
               {dateOpen && (
                 <>
-                  <div className="fixed inset-0 z-10" onClick={() => setDateOpen(false)} />
+                  <div className="fixed inset-0 z-10" onClick={() => setDateOpen(false)} aria-hidden />
                   <div className="absolute top-full left-0 mt-1 py-1 bg-white rounded-lg border shadow-lg z-20 min-w-[120px]">
                     {DATE_RANGES.map((d) => (
-                      <button key={d.id} onClick={() => { setDateFilter(d.id); setDateOpen(false) }} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50">{d.label}</button>
+                      <button key={d.id} type="button" onClick={() => { setDateFilter(d.id); setDateOpen(false) }} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50">{d.label}</button>
                     ))}
                   </div>
                 </>
@@ -176,10 +216,17 @@ export function AdminAppealListPage() {
                   placeholder="접수번호/닉네임 검색..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') applySearchNow()
+                  }}
                   className="w-full pl-9 pr-4 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                 />
               </div>
-              <button className="px-4 py-2 rounded-lg bg-[#22282E] text-white text-sm font-bold hover:bg-[#333]">
+              <button
+                type="button"
+                onClick={applySearchNow}
+                className="px-4 py-2 rounded-lg bg-[#22282E] text-white text-sm font-bold hover:bg-[#333]"
+              >
                 검색
               </button>
             </div>
@@ -201,31 +248,39 @@ export function AdminAppealListPage() {
                 </tr>
               </thead>
               <tbody>
-                {paginated.map((row) => (
-                  <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50/50">
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded-md text-xs font-bold ${STATUS_COLORS[row.status] || 'bg-gray-100 text-gray-700'}`}>
-                        {STATUS_LABELS[row.status] || row.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-[#22282E]">#{row.receiptId}</td>
-                    <td className="px-4 py-3 text-gray-700">{row.nickname} ({row.userId})</td>
-                    <td className="px-4 py-3 text-gray-600">{row.sanctionTypeLabel || row.sanctionType}</td>
-                    <td className="px-4 py-3 text-gray-600">{formatDate(row.createdAt)}</td>
-                    <td className="px-4 py-3 text-center">
-                      <Link
-                        to={`/admin/appeals/${row.id}`}
-                        className="inline-block px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-700 text-xs font-bold hover:bg-emerald-200"
-                      >
-                        상세
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
+                {listLoading
+                  ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-12 text-center text-gray-500 text-sm">
+                        불러오는 중…
+                      </td>
+                    </tr>
+                    )
+                  : rows.map((row) => (
+                    <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50/50">
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 rounded-md text-xs font-bold ${STATUS_COLORS[row.status] || 'bg-gray-100 text-gray-700'}`}>
+                          {STATUS_LABELS[row.status] || row.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-[#22282E]">#{row.receiptId}</td>
+                      <td className="px-4 py-3 text-gray-700">{row.nickname} ({row.userId})</td>
+                      <td className="px-4 py-3 text-gray-600">{row.sanctionTypeLabel || row.sanctionType}</td>
+                      <td className="px-4 py-3 text-gray-600">{formatDate(row.createdAt)}</td>
+                      <td className="px-4 py-3 text-center">
+                        <Link
+                          to={`/admin/appeals/${row.id}`}
+                          className="inline-block px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-700 text-xs font-bold hover:bg-emerald-200"
+                        >
+                          상세
+                        </Link>
+                      </td>
+                    </tr>
+                    ))}
               </tbody>
             </table>
           </div>
-          {filtered.length === 0 && (
+          {!listLoading && totalCount === 0 && (
             <div className="py-12 text-center text-gray-500">
               검색 결과가 없습니다.
             </div>
@@ -236,6 +291,7 @@ export function AdminAppealListPage() {
         {totalPages > 1 && (
           <div className="flex items-center justify-center gap-1 mt-6">
             <button
+              type="button"
               onClick={() => goPage(page - 1)}
               disabled={page === 1}
               className="p-2 rounded-lg border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed"
@@ -243,31 +299,26 @@ export function AdminAppealListPage() {
               <ChevronLeft size={16} />
             </button>
 
-            {Array.from({ length: totalPages }, (_, i) => i + 1)
-              .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 2)
-              .reduce((acc, p, idx, arr) => {
-                if (idx > 0 && p - arr[idx - 1] > 1) acc.push('ellipsis-' + p)
-                acc.push(p)
-                return acc
-              }, [])
-              .map((p) =>
-                typeof p === 'string' ? (
-                  <span key={p} className="px-1 text-gray-400 text-sm select-none">…</span>
-                ) : (
-                  <button
-                    key={p}
-                    onClick={() => goPage(p)}
-                    className={`min-w-[36px] h-9 rounded-lg border text-sm font-bold transition
-                      ${p === page
-                        ? 'bg-[#22282E] border-[#22282E] text-white'
-                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'}`}
-                  >
-                    {p}
-                  </button>
-                )
-              )}
+            {pageNumbers.map((p) =>
+              typeof p === 'string' ? (
+                <span key={p} className="px-1 text-gray-400 text-sm select-none">…</span>
+              ) : (
+                <button
+                  type="button"
+                  key={p}
+                  onClick={() => goPage(p)}
+                  className={`min-w-[36px] h-9 rounded-lg border text-sm font-bold transition
+                    ${p === page
+                      ? 'bg-[#22282E] border-[#22282E] text-white'
+                      : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'}`}
+                >
+                  {p}
+                </button>
+              ),
+            )}
 
             <button
+              type="button"
               onClick={() => goPage(page + 1)}
               disabled={page === totalPages}
               className="p-2 rounded-lg border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed"
@@ -277,9 +328,9 @@ export function AdminAppealListPage() {
           </div>
         )}
 
-        {filtered.length > 0 && (
+        {!listLoading && totalCount > 0 && (
           <p className="mt-3 text-center text-xs text-gray-400">
-            총 {filtered.length}건 · {page} / {totalPages} 페이지
+            총 {totalCount}건 · {page} / {totalPages} 페이지
           </p>
         )}
       </div>

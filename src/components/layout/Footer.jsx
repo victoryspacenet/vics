@@ -1,7 +1,9 @@
 import { Link } from 'react-router-dom'
 import { Logo } from '../ui/Logo'
 import { useAuthStore } from '../../store/authStore'
-import { canAccessAdmin } from '../../lib/adminAuth'
+import { useCanAccessAdmin } from '../../lib/adminAuth'
+import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../../lib/layoutShellClasses'
+import { cn } from '../../lib/utils'
 
 const SITEMAP = {
   SERVICE: [
@@ -27,15 +29,15 @@ const SOCIAL = [
 ]
 
 export function Footer() {
-  const { user } = useAuthStore()
+  const showAdminNav = useCanAccessAdmin()
   const supportLinks = [
     ...SITEMAP.SUPPORT,
-    ...(canAccessAdmin(user) ? [{ label: '관리자', to: '/admin/dashboard' }] : []),
+    ...(showAdminNav ? [{ label: '관리자', to: '/admin/dashboard' }] : []),
   ]
 
   return (
-    <footer className="bg-gradient-to-b from-[#1e1e1e] via-[#1A1A1A] to-[#111111] text-[#999999] max-lg:pb-[calc(4.25rem+env(safe-area-inset-bottom,0px)+0.75rem)]">
-      <div className="max-w-screen-lg mx-auto px-4 py-8 sm:py-10">
+    <footer className="bg-gradient-to-b from-[#1e1e1e] via-[#1A1A1A] to-[#111111] text-[#999999] max-lg:pb-[calc(5.25rem+env(safe-area-inset-bottom,0px)+0.75rem)]">
+      <div className={cn('mx-auto w-full min-w-0 px-4 py-8 sm:py-10', LAYOUT_CONTENT_MAX_WIDTH_CLASS)}>
         {/* ① 브랜드 슬로건 (가로형) */}
         <div className="flex flex-row items-center gap-3 sm:gap-4 mb-6 pb-4 border-b border-white/10">
           <Link to="/" className="flex items-center gap-2 shrink-0 group">

@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { useMemo, useState, useEffect } from 'react'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Sparkles, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { messageForSignInWithPasswordError } from '../lib/signInPasswordErrors'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
 import {
@@ -13,6 +14,13 @@ import {
 } from '../lib/loginReturn'
 import { Button } from '../components/ui/Button'
 import { Logo } from '../components/ui/Logo'
+import { resolveSiteUrl, getOAuthRedirectToUrl } from '../lib/siteApiBase'
+import {
+  PasswordRecoveryShell,
+  RecoveryHeading,
+  RecoveryGlassCard,
+  recoveryInputClass,
+} from '../components/auth/passwordRecoveryUi'
 
 // ── 로그인 실패 반복 추적 ─────────────────────────────────────────────────────
 const LOGIN_FAIL_KEY = 'vics_login_fail_v1'
@@ -29,7 +37,7 @@ function trackLoginFail(email) {
 
     if (timestamps.length >= FAIL_THRESHOLD) {
       sessionStorage.removeItem(LOGIN_FAIL_KEY)
-      fetch('/.netlify/functions/login-fail-notify', {
+      fetch(resolveSiteUrl('/api/login-fail-notify'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -85,7 +93,7 @@ function SocialButtons({ oauthReturnPath = '/', tone = 'default' }) {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider,
         options: {
-          redirectTo: `${window.location.origin}/`,
+          redirectTo: getOAuthRedirectToUrl(),
           // Kakao에는 provider-specific queryParams 불필요
         },
       })
@@ -121,6 +129,15 @@ function SocialButtons({ oauthReturnPath = '/', tone = 'default' }) {
           {p.label}
         </button>
       ))}
+      <p
+        className={`text-center text-[11px] leading-snug text-gray-500 ${
+          isMz ? 'mt-1 px-0.5 text-fuchsia-900/55' : 'mt-2.5 px-0.5'
+        }`}
+      >
+        소셜 로그인은 보안 인증을 위해 주소창이 잠시 바뀔 수 있어요(예:{' '}
+        <span className="whitespace-nowrap font-medium text-gray-600">…supabase.co</span>
+        ). 이어서 Google·카카오 또는 VICS로 돌아오는 정상 단계입니다.
+      </p>
     </div>
   )
 }
@@ -129,12 +146,40 @@ function SocialButtons({ oauthReturnPath = '/', tone = 'default' }) {
 export function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { fetchProfile } = useAuthStore()
   const { showToast } = useUIStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
+  const [emailVerifyHint, setEmailVerifyHint] = useState(false)
+
+  useEffect(() => {
+    if (searchParams.get('reset') === 'success') {
+      showToast('비밀번호가 변경됐어요. 새 비밀번호로 로그인해 주세요.', 'success')
+      const next = new URLSearchParams(searchParams)
+      next.delete('reset')
+      setSearchParams(next, { replace: true })
+    }
+  }, [searchParams, setSearchParams, showToast])
+
+  useEffect(() => {
+    if (searchParams.get('registered') !== '1') return
+    setEmailVerifyHint(true)
+    const em = searchParams.get('email')
+    if (em) {
+      try {
+        const decoded = decodeURIComponent(em)
+        setEmail((prev) => (prev.trim() ? prev : decoded))
+      } catch {
+        setEmail((prev) => (prev.trim() ? prev : em))
+      }
+    }
+    const next = new URLSearchParams(searchParams)
+    next.delete('registered')
+    next.delete('email')
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams])
 
   const returnAfterLogin = useMemo(() => {
     const fromState = pathFromRouterState(location.state?.from)
@@ -146,71 +191,120 @@ export function LoginPage() {
 
   const handleEmailLogin = async (e) => {
     e.preventDefault()
-    if (!email || !password || loading) return
+    const trimmedEmail = email.trim()
+    if (!trimmedEmail || !password || loading) return
     setLoading(true)
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password,
+      })
       if (error) throw error
       await fetchProfile(data.user.id)
       clearStoredLoginReturn()
       showToast('로그인 됐어요!', 'success')
       navigate(returnAfterLogin, { replace: true })
-    } catch {
-      trackLoginFail(email)
-      showToast('이메일 또는 비밀번호가 올바르지 않아요', 'error')
+    } catch (err) {
+      trackLoginFail(trimmedEmail)
+      if (import.meta.env.DEV) {
+        console.error('[EmailLogin] signInWithPassword error:', err)
+      }
+      const human = messageForSignInWithPasswordError(err)
+      if (human.includes('이메일 인증')) setEmailVerifyHint(true)
+      showToast(messageForSignInWithPasswordError(err), 'error')
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="max-w-sm mx-auto py-8">
-      <div className="text-center mb-8">
-        <div className="flex justify-center mb-4">
-          <Logo size={48} dark={false} link={false} />
+    <PasswordRecoveryShell>
+      <RecoveryHeading
+        eyebrow="VICS Login"
+        title="돌아온 거 환영해요"
+        subtitle="오늘도 취향 경쟁 한 판, 같이 즐겨요 💜"
+      />
+
+      {emailVerifyHint ? (
+        <div
+          className="rounded-[1.25rem] border border-sky-300/45 bg-gradient-to-br from-sky-50/95 to-indigo-50/50 px-4 py-3.5 text-left shadow-[inset_0_1px_0_0_rgba(255,255,255,0.65)] backdrop-blur-sm"
+          role="status"
+        >
+          <div className="mb-2 flex items-center gap-2">
+            <Sparkles className="h-4 w-4 shrink-0 text-sky-600" strokeWidth={2.2} />
+            <p className="text-sm font-black text-sky-950">이메일 인증이 필요해요</p>
+          </div>
+          <p className="text-sm font-medium leading-relaxed text-sky-900/88">
+            가입하신 주소로 인증 메일이 갔을 수 있어요. <strong>받은 편지함·스팸함</strong>을 확인한 뒤, 메일 속 링크로 인증을 마친 다음 여기서 로그인해 주세요.
+          </p>
         </div>
-        <h1 className="text-xl font-black text-[#22282E]">VICS 로그인</h1>
-        <p className="text-sm text-gray-400 mt-1">경쟁의 세계로 돌아오세요</p>
-      </div>
+      ) : null}
 
-      <SocialButtons oauthReturnPath={returnAfterLogin} />
+      <RecoveryGlassCard>
+        <SocialButtons oauthReturnPath={returnAfterLogin} tone="mz" />
 
-      <div className="flex items-center gap-3 my-5">
-        <div className="flex-1 h-px bg-gray-100" />
-        <span className="text-xs text-gray-400">또는 이메일로 로그인</span>
-        <div className="flex-1 h-px bg-gray-100" />
-      </div>
+        <div className="my-6 flex items-center gap-3">
+          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-fuchsia-300/55 to-transparent" />
+          <span className="shrink-0 text-[11px] font-black uppercase tracking-[0.12em] text-fuchsia-600/75">
+            or 이메일
+          </span>
+          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-fuchsia-300/55 to-transparent" />
+        </div>
 
-      <form onSubmit={handleEmailLogin} className="space-y-3">
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="이메일"
-          className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl outline-none focus:border-[#22282E] transition-colors"
-        />
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="비밀번호"
-          className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl outline-none focus:border-[#22282E] transition-colors"
-        />
-        <Button size="full" disabled={!email || !password || loading}>
-          {loading
-            ? <span className="flex items-center gap-2">
-                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                로그인 중...
+        <form onSubmit={handleEmailLogin} className="space-y-4">
+          <div>
+            <label htmlFor="login-email" className="mb-1.5 block text-xs font-bold text-violet-900/70">
+              이메일
+            </label>
+            <input
+              id="login-email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              autoComplete="email"
+              className={recoveryInputClass()}
+            />
+          </div>
+          <div>
+            <label htmlFor="login-password" className="mb-1.5 block text-xs font-bold text-violet-900/70">
+              비밀번호
+            </label>
+            <input
+              id="login-password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              autoComplete="current-password"
+              className={recoveryInputClass()}
+            />
+          </div>
+          <div className="text-right">
+            <button
+              type="button"
+              onClick={() => navigate('/forgot-password')}
+              className="cursor-pointer border-0 bg-transparent p-0 text-[11px] font-bold text-fuchsia-700/85 underline decoration-fuchsia-300/80 decoration-2 underline-offset-[3px] transition hover:text-violet-700"
+            >
+              비밀번호를 잊으셨나요?
+            </button>
+          </div>
+          <Button size="full" variant="mz" disabled={!email.trim() || !password || loading}>
+            {loading ? (
+              <span className="flex items-center justify-center gap-2">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/35 border-t-white" />
+                로그인 중…
               </span>
-            : '로그인'}
-        </Button>
-      </form>
+            ) : (
+              '로그인하고 입장하기 🚀'
+            )}
+          </Button>
+        </form>
+      </RecoveryGlassCard>
 
-      <p className="text-center text-sm text-gray-400 mt-6">
-        아직 계정이 없으신가요?{' '}
-        <Link to="/signup" className="text-[#22282E] font-semibold hover:underline">회원가입</Link>
-      </p>
-    </div>
+
+
+    </PasswordRecoveryShell>
   )
 }
 
@@ -240,18 +334,27 @@ export function LoginModal({ onClose }) {
 
   const handleEmailLogin = async (e) => {
     e.preventDefault()
-    if (!email || !password || loading) return
+    const trimmedEmail = email.trim()
+    if (!trimmedEmail || !password || loading) return
     setLoading(true)
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password,
+      })
       if (error) throw error
       await fetchProfile(data.user.id)
       clearStoredLoginReturn()
       showToast('로그인 됐어요!', 'success')
       onClose()
-    } catch {
-      trackLoginFail(email)
-      showToast('이메일 또는 비밀번호가 올바르지 않아요', 'error')
+    } catch (err) {
+      trackLoginFail(trimmedEmail)
+      if (import.meta.env.DEV) {
+        console.error('[EmailLoginModal] signInWithPassword error:', err)
+      }
+      const human = messageForSignInWithPasswordError(err)
+      // 모달에서는 힌트 UI가 없으니 메시지로만 안내
+      showToast(messageForSignInWithPasswordError(err), 'error')
     } finally {
       setLoading(false)
     }
@@ -322,9 +425,21 @@ export function LoginModal({ onClose }) {
             autoComplete="current-password"
             className={MZ_INPUT}
           />
+          <div className="flex justify-end -mt-0.5">
+            <button
+              type="button"
+              onClick={() => {
+                onClose()
+                navigate('/forgot-password')
+              }}
+              className="border-none bg-transparent p-0 text-[11px] font-bold text-fuchsia-600/75 underline underline-offset-2 hover:text-fuchsia-800"
+            >
+              비밀번호 찾기
+            </button>
+          </div>
           <button
             type="submit"
-            disabled={!email || !password || loading}
+            disabled={!email.trim() || !password || loading}
             className="flex min-h-[3.25rem] w-full items-center justify-center rounded-2xl bg-gradient-to-r from-violet-600 via-fuchsia-500 to-pink-500 px-3 py-3.5 text-center text-sm font-black leading-snug text-white shadow-lg shadow-fuchsia-400/35 transition-all hover:brightness-105 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
           >
             {loading ? (

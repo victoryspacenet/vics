@@ -7,6 +7,14 @@ export const MATCHUP_CREATOR_PROFILE_FIELDS =
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
+const TIER_SNAPSHOT_TTL_MS = 5 * 60 * 1000
+/** @type {Map<string, { info: object; fetchedAt: number }>} */
+const tierSnapshotCache = new Map()
+
+export function invalidateCreatorRankSnapshotCache() {
+  tierSnapshotCache.clear()
+}
+
 /** getTier(rankInfo) 기본값 — RPC 미배포 시 */
 export const EMPTY_TIER_RANK_INFO = {
   overallRank: null,
@@ -53,20 +61,91 @@ export async function fetchCreatorRankMapForIds(userIds) {
   const ids = [...new Set((userIds || []).filter((id) => id && UUID_RE.test(String(id))))]
   if (ids.length === 0) return {}
 
+  const now = Date.now()
+  const out = {}
+  const missing = []
+
+  for (const id of ids) {
+    const key = String(id)
+    const cached = tierSnapshotCache.get(key)
+    if (cached && now - cached.fetchedAt < TIER_SNAPSHOT_TTL_MS) {
+      out[key] = cached.info
+    } else {
+      missing.push(key)
+    }
+  }
+
+  if (missing.length === 0) return out
+
   const { data, error } = await supabase.rpc('profiles_tier_rank_snapshot_for_ids', {
-    p_ids: ids,
+    p_ids: missing,
   })
   if (error) {
     console.warn('[fetchCreatorRankMapForIds]', error.message)
-    return {}
+    return out
   }
-  const out = {}
   for (const row of data || []) {
     const pid = row.profile_id
     if (!pid) continue
-    out[pid] = mapTierSnapshotRow(row)
+    const info = mapTierSnapshotRow(row)
+    tierSnapshotCache.set(String(pid), { info, fetchedAt: now })
+    out[String(pid)] = info
   }
   return out
+}
+
+/** `getTier`용 활동 필드 보강 (스냅샷 행처럼 일부 필드만 올 때) */
+const TIER_PROFILE_STATS_SELECT =
+  'id, total_matchups, creator_wins, vote_total, vote_hits, hit_rate, points'
+
+/**
+ * 프로필 행 목록에 `profiles_tier_rank_snapshot_for_ids` 기반 `_tierRankInfo`를 붙입니다.
+ * Star/Master 판정에 필요한 필드가 빠져 있으면 `profiles`에서 한 번 더 조회합니다.
+ * @param {Array<Object>} rows
+ */
+export async function enrichProfileRowsWithTierSnapshot(rows) {
+  const list = Array.isArray(rows) ? rows.filter(Boolean) : []
+  if (list.length === 0) return list
+
+  const ids = [
+    ...new Set(
+      list
+        .map((r) => r?.id)
+        .filter(Boolean)
+        .map((id) => String(id))
+        .filter((id) => UUID_RE.test(id))
+    ),
+  ]
+
+  const emptyTier = () => ({ ...EMPTY_TIER_RANK_INFO })
+  if (ids.length === 0) {
+    return list.map((r) => ({ ...r, _tierRankInfo: emptyTier() }))
+  }
+
+  const rawTier = await fetchCreatorRankMapForIds(ids)
+  const tierByLower = {}
+  for (const [k, v] of Object.entries(rawTier)) {
+    tierByLower[String(k).toLowerCase()] = v
+  }
+
+  const needsStats = list.some(
+    (r) => r.creator_wins == null || r.vote_total == null || r.vote_hits == null
+  )
+  const extraByLower = {}
+  if (needsStats) {
+    const { data } = await supabase.from('profiles').select(TIER_PROFILE_STATS_SELECT).in('id', ids)
+    for (const p of data || []) {
+      extraByLower[String(p.id).toLowerCase()] = p
+    }
+  }
+
+  return list.map((r) => {
+    const idKey = String(r.id).toLowerCase()
+    const ex = extraByLower[idKey]
+    const merged = ex ? { ...r, ...ex } : r
+    const tierInfo = tierByLower[idKey] ? { ...tierByLower[idKey] } : emptyTier()
+    return { ...merged, _tierRankInfo: tierInfo }
+  })
 }
 
 /** 각 매치업에 `_creatorRankInfo` 부착 (작성자 user_id 기준) */

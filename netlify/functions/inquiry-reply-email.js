@@ -4,6 +4,7 @@
  *   RESEND_API_KEY, RESEND_FROM, ADMIN_EMAILS(쉼표, VITE와 동일 권장), OPERATOR_EMAILS(선택)
  */
 const { createClient } = require('@supabase/supabase-js')
+const { withIpRateLimit } = require('../lib/rateLimitMiddleware.cjs')
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || ''
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || ''
@@ -25,7 +26,7 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;')
 }
 
-exports.handler = async (event) => {
+exports.handler = withIpRateLimit(async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) }
   }
@@ -139,4 +140,4 @@ exports.handler = async (event) => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ emailSent: true }),
   }
-}
+})

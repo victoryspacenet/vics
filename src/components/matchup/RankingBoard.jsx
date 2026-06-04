@@ -1,13 +1,18 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { UserProfileBlockLink } from '../ui/UserProfileLink'
-import { Trophy, ChevronDown } from 'lucide-react'
+import { ChevronDown } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { Avatar } from '../ui/Avatar'
-import { LevelBadge } from '../ui/LevelBadge'
 import { FeaturedBadgeSpan } from '../ui/FeaturedBadge'
+import { TierBadge } from '../ui/TierBadge'
 import { formatNumber } from '../../lib/utils'
 import { getCachedRanking, setCachedRanking } from '../../lib/rankingCache'
+import { getRankingEligibleProfileIds, RANKING_ELIGIBLE_CACHE_TAG } from '../../lib/rankingEligibleProfiles'
+import { enrichProfileRowsWithTierSnapshot, EMPTY_TIER_RANK_INFO } from '../../lib/creatorRankSnapshot'
+import { attachCompetitionRanksInMemory } from '../../lib/rankingCompetitionRank'
+
+const HOME_SIDEBAR_RANK_TIER_VER = 't2'
 
 const TABS = [
   { id: 'all', label: '전체' },
@@ -23,7 +28,7 @@ export function RankingBoard() {
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState(false)
 
-  const CACHE_KEY = 'home_sidebar_points'
+  const CACHE_KEY = `home_sidebar_points_${RANKING_ELIGIBLE_CACHE_TAG}_${HOME_SIDEBAR_RANK_TIER_VER}`
 
   useEffect(() => {
     const cached = getCachedRanking(CACHE_KEY)
@@ -38,12 +43,25 @@ export function RankingBoard() {
   const fetchRankings = async () => {
     setLoading(true)
     try {
-      const { data } = await supabase
+      const eligibleIds = await getRankingEligibleProfileIds()
+      if (Array.isArray(eligibleIds) && eligibleIds.length === 0) {
+        setRankings([])
+        setCachedRanking(CACHE_KEY, [])
+        return
+      }
+
+      let qb = supabase
         .from('profiles')
-        .select('id, nickname, avatar_url, points, total_matchups, featured_badge')
+        .select(
+          'id, nickname, avatar_url, points, total_matchups, creator_wins, vote_total, vote_hits, hit_rate, featured_badge'
+        )
         .order('points', { ascending: false })
         .limit(10)
-      const list = data || []
+      if (eligibleIds?.length) qb = qb.in('id', eligibleIds)
+
+      const { data } = await qb
+      const enriched = await enrichProfileRowsWithTierSnapshot(data || [])
+      const list = attachCompetitionRanksInMemory(enriched, 'points')
       setRankings(list)
       setCachedRanking(CACHE_KEY, list)
     } catch (err) {
@@ -99,7 +117,9 @@ export function RankingBoard() {
                 className="grid grid-cols-12 px-4 py-3 items-center hover:bg-white/35 transition-colors"
               >
                 <span className="col-span-1 text-sm font-bold">
-                  {idx < 3 ? MEDALS[idx] : <span className="text-gray-400 text-xs">{idx + 1}</span>}
+                  {(profile._displayRank ?? idx + 1) <= 3
+                    ? MEDALS[(profile._displayRank ?? idx + 1) - 1]
+                    : <span className="text-gray-400 text-xs">{profile._displayRank ?? idx + 1}</span>}
                 </span>
                 <div className="col-span-7 flex items-center gap-2 min-w-0">
                   <Avatar src={profile.avatar_url} alt={profile.nickname} size="xs" />
@@ -110,7 +130,12 @@ export function RankingBoard() {
                       </span>
                       <FeaturedBadgeSpan badgeId={profile.featured_badge} className="translate-y-px shrink-0" />
                     </div>
-                    <LevelBadge points={profile.points || 0} variant="badge" className="text-[10px] px-1.5 py-0" />
+                    <TierBadge
+                      profile={profile}
+                      rankInfo={profile._tierRankInfo ?? { ...EMPTY_TIER_RANK_INFO }}
+                      variant="compact"
+                      className="text-[10px] px-1.5 py-0"
+                    />
                   </div>
                 </div>
                 <span className="col-span-2 text-right text-xs font-bold text-[#22282E]">

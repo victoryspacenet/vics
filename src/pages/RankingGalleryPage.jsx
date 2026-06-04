@@ -316,7 +316,7 @@ function CardDetailModal({ card, onClose, onDelete }) {
 // ── 메인 페이지 ──────────────────────────────────────────────────────
 export function RankingGalleryPage() {
   const navigate = useNavigate()
-  const { user, profile } = useAuthStore()
+  const { user } = useAuthStore()
 
   const [cards,    setCards]    = useState([])
   const [sortBy,   setSortBy]   = useState('date')   // 'date' | 'tier'
@@ -464,22 +464,17 @@ export function RankingGalleryPage() {
 
         {/* 빈 상태 */}
         {cards.length === 0 && (
-          <div style={{
-            padding:'48px 24px', textAlign:'center',
-            background:'#f9fafb', borderRadius:20,
-            border:'2px dashed #e5e7eb',
-          }}>
-            <p style={{ fontSize:40, margin:'0 0 12px' }}>🏆</p>
-            <p style={{ color:'#374151', fontWeight:900, fontSize:15, margin:'0 0 6px' }}>
-              아직 저장된 카드가 없어요
+          <div className="flex flex-col items-center rounded-[20px] border-2 border-dashed border-slate-200 bg-slate-50/80 px-6 py-12 text-center">
+            <p className="mb-3 text-[40px] leading-none">🏆</p>
+            <p className="text-[15px] font-black text-slate-700">아직 저장된 카드가 없어요</p>
+            <p className="mt-1.5 text-[13px] font-medium text-slate-400">
+              랭킹 TOP 10에 들면 카드 에디터에서 저장할 수 있어요.
             </p>
-            <p style={{ color:'#9ca3af', fontSize:13, margin:'0 0 20px' }}>
-              랭킹 TOP 10에 들면 카드를 저장해보세요!
-            </p>
-            <button onClick={() => navigate('/ranking')} style={{
-              padding:'10px 24px', borderRadius:12, border:'none',
-              background:'#22282E', color:'#fff', fontWeight:900, fontSize:13, cursor:'pointer',
-            }}>
+            <button
+              type="button"
+              onClick={() => navigate('/ranking')}
+              className="mt-5 inline-flex items-center justify-center whitespace-nowrap rounded-xl bg-[#22282E] px-6 py-2.5 text-[13px] font-black text-white transition hover:brightness-110"
+            >
               랭킹 확인하러 가기 →
             </button>
           </div>

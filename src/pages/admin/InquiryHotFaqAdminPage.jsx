@@ -2,12 +2,11 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, ChevronDown, ChevronUp, Flame, Loader2, Plus, Save, Trash2 } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
-import { FAQ_ITEMS, FAQ_ALL_IDS } from '../../lib/faqData'
 import {
   getHotFaqIds,
+  getHotFaqAddablePool,
+  resolveHotFaqRefs,
   saveHotFaqIds,
-  filterHotFaqIdsByListedCategoryHelp,
-  fetchCategoryHelpRowsForHotFilter,
 } from '../../lib/inquiryHotFaq'
 import { useUIStore } from '../../store/uiStore'
 
@@ -16,25 +15,35 @@ export function InquiryHotFaqAdminPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [orderedIds, setOrderedIds] = useState([])
-  const [helpRows, setHelpRows] = useState(null)
-  /** 노출 목록에서 제거 확인 — FAQ id */
+  const [resolvedOrdered, setResolvedOrdered] = useState([])
+  const [pool, setPool] = useState([])
+  /** 노출 목록에서 제거 확인 — ref (faq id 또는 help:uuid) */
   const [removeConfirmId, setRemoveConfirmId] = useState(null)
   /** 저장 전 확인 */
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false)
   /** 풀 → 나머지 전부 추가 확인 */
   const [addAllConfirmOpen, setAddAllConfirmOpen] = useState(false)
-  /** 풀 → 개별 추가 확인 — FAQ id */
+  /** 풀 → 개별 추가 확인 — ref */
   const [addOneConfirmId, setAddOneConfirmId] = useState(null)
+
+  const refreshPool = useCallback((ids) => {
+    void getHotFaqAddablePool(ids).then(setPool)
+  }, [])
+
+  const refreshResolved = useCallback((ids) => {
+    void resolveHotFaqRefs(ids).then(setResolvedOrdered)
+  }, [])
 
   const reloadLists = useCallback(() => {
     setLoading(true)
-    Promise.all([getHotFaqIds(), fetchCategoryHelpRowsForHotFilter()])
-      .then(([ids, rows]) => {
+    void getHotFaqIds()
+      .then((ids) => {
         setOrderedIds(ids)
-        setHelpRows(rows)
+        refreshResolved(ids)
+        refreshPool(ids)
       })
       .finally(() => setLoading(false))
-  }, [])
+  }, [refreshPool, refreshResolved])
 
   useEffect(() => {
     reloadLists()
@@ -50,28 +59,40 @@ export function InquiryHotFaqAdminPage() {
     }
   }, [reloadLists])
 
-  const poolIds = useMemo(() => {
-    const unordered = FAQ_ALL_IDS.filter((id) => !orderedIds.includes(id))
-    if (helpRows === null) return []
-    return filterHotFaqIdsByListedCategoryHelp(unordered, helpRows)
-  }, [orderedIds, helpRows])
+  useEffect(() => {
+    if (loading) return
+    refreshPool(orderedIds)
+    refreshResolved(orderedIds)
+  }, [orderedIds, loading, refreshPool, refreshResolved])
 
-  const addId = (id) => {
-    setOrderedIds((prev) => (prev.includes(id) ? prev : [...prev, id]))
+  const resolvedById = useMemo(
+    () => new Map(resolvedOrdered.map((r) => [r.id, r])),
+    [resolvedOrdered],
+  )
+
+  const poolLabel = useCallback(
+    (ref) =>
+      pool.find((p) => p.ref === ref)?.question ||
+      resolvedById.get(ref)?.question ||
+      ref,
+    [pool, resolvedById],
+  )
+
+  const addId = (ref) => {
+    setOrderedIds((prev) => (prev.includes(ref) ? prev : [...prev, ref]))
   }
 
-  /** poolIds에 있으면서 아직 노출 목록에 없는 id를 id 순서대로 한 번에 추가 */
   const addAllFromPool = () => {
     setOrderedIds((prev) => {
       const inList = new Set(prev)
-      const toAdd = poolIds.filter((id) => !inList.has(id))
+      const toAdd = pool.map((p) => p.ref).filter((ref) => !inList.has(ref))
       if (toAdd.length === 0) return prev
       return [...prev, ...toAdd]
     })
   }
 
-  const removeById = (id) => {
-    setOrderedIds((prev) => prev.filter((x) => x !== id))
+  const removeById = (ref) => {
+    setOrderedIds((prev) => prev.filter((x) => x !== ref))
   }
 
   const move = (index, dir) => {
@@ -135,18 +156,23 @@ export function InquiryHotFaqAdminPage() {
                 <p className="py-6 text-center text-sm text-gray-500">아래 풀에서 항목을 추가해 주세요.</p>
               ) : (
                 <ul className="space-y-2">
-                  {orderedIds.map((id, index) => {
-                    const item = FAQ_ITEMS[id]
+                  {orderedIds.map((ref, index) => {
+                    const item = resolvedById.get(ref)
                     if (!item) return null
                     return (
                       <li
-                        key={id}
-                        className="flex items-start gap-2 rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-2.5"
+                        key={item.id}
+                        className="flex items-center gap-2 rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-2.5"
                       >
-                        <span className="mt-0.5 text-xs font-black tabular-nums text-gray-400">{index + 1}</span>
+                        <span className="shrink-0 text-xs font-black tabular-nums text-gray-400">{index + 1}</span>
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-bold text-[#22282E]">{item.question}</p>
-                          <p className="mt-0.5 line-clamp-2 text-xs text-gray-500">{item.answer}</p>
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <p className="min-w-0 text-sm font-bold text-[#22282E]">{item.question}</p>
+                            <span className="shrink-0 whitespace-nowrap rounded-md bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-800">
+                              {item.kind === 'help' ? `카테고리 · ${item.categoryLabel}` : '기본 FAQ'}
+                            </span>
+                          </div>
+                          <p className="mt-1 line-clamp-2 text-xs text-gray-500">{item.answer}</p>
                         </div>
                         <div className="flex shrink-0 flex-col gap-0.5">
                           <button
@@ -169,7 +195,7 @@ export function InquiryHotFaqAdminPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => setRemoveConfirmId(id)}
+                            onClick={() => setRemoveConfirmId(item.id)}
                             className="rounded p-1 text-red-500 hover:bg-red-50"
                             aria-label="목록에서 제거"
                           >
@@ -186,7 +212,7 @@ export function InquiryHotFaqAdminPage() {
             <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-sm font-black text-[#22282E]">추가 가능한 FAQ</h2>
-                {poolIds.length > 0 && (
+                {pool.length > 0 && (
                   <button
                     type="button"
                     onClick={() => setAddAllConfirmOpen(true)}
@@ -198,36 +224,41 @@ export function InquiryHotFaqAdminPage() {
                 )}
               </div>
               <p className="mb-3 text-xs text-gray-500">
-                <strong className="text-gray-700">src/lib/faqData.js</strong>의 FAQ_ITEMS(id·질문·본문)에만 등록된 항목이 여기 풀에 나옵니다.
-                카테고리별 도움말(관리자 &gt; 카테고리 FAQ)에서 만든 글은 문의 메인 풀과 별도예요. 새 질문을 메인 FAQ에 넣으려면 먼저 faqData에 항목을 추가한 뒤 이 화면에서 노출 순서를 정해 주세요.
-                <span className="mt-1 block text-[11px] text-gray-400">
-                  카테고리 도움말 DB에 동일 카테고리·동일 제목이 있으면, 그 항목을 노출 목록에서 빼면 문의 메인 자주 묻는 질문에서도 자동으로 빠지며, 아래 「추가 가능한 FAQ」에도 나오지 않습니다.
-                </span>
+                <strong className="text-gray-700">카테고리 FAQ</strong>에 저장된 도움말이 자동으로 여기에 나타납니다.
+                위 <strong className="text-gray-700">노출 중</strong>에 이미 있는 질문(같은 제목의 기본 FAQ·카테고리 도움말 포함)은 풀에 나오지 않습니다.
+                빼려면 노출 목록에서 삭제한 뒤 <strong>저장하기</strong>를 누르세요.
               </p>
-              {poolIds.length === 0 ? (
-                <p className="py-4 text-center text-sm text-gray-500">모든 FAQ가 목록에 포함됐어요.</p>
+              {orderedIds.length > 0 && pool.length === 0 && (
+                <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  지금은 노출 중인 항목만 있어 추가 가능한 FAQ가 비어 있어요. 「계정 삭제…」「랭킹 축하…」 등이
+                  이미 위 노출 목록에 있으면 정상입니다.
+                </p>
+              )}
+              {pool.length === 0 ? (
+                <p className="py-4 text-center text-sm text-gray-500">추가할 항목이 없어요. 카테고리 FAQ에서 도움말을 등록해 주세요.</p>
               ) : (
                 <ul className="space-y-2">
-                  {poolIds.map((id) => {
-                    const item = FAQ_ITEMS[id]
-                    const title = item?.question || `FAQ ${id}`
-                    return (
+                  {pool.map((entry) => (
                       <li
-                        key={id}
+                        key={entry.ref}
                         className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-gray-200 px-3 py-2"
                       >
-                        <span className="text-sm font-semibold text-gray-800">{title}</span>
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="text-sm font-semibold text-gray-800">{entry.question}</span>
+                          <span className="shrink-0 whitespace-nowrap text-[10px] font-bold text-violet-700">
+                            {entry.kind === 'help' ? `카테고리 · ${entry.categoryLabel}` : '기본 FAQ'}
+                          </span>
+                        </div>
                         <button
                           type="button"
-                          onClick={() => setAddOneConfirmId(id)}
+                          onClick={() => setAddOneConfirmId(entry.ref)}
                           className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-[#22282E] px-2.5 py-1.5 text-xs font-bold text-white hover:bg-[#363d46]"
                         >
                           <Plus size={14} />
                           추가
                         </button>
                       </li>
-                    )
-                  })}
+                  ))}
                 </ul>
               )}
             </div>
@@ -255,12 +286,12 @@ export function InquiryHotFaqAdminPage() {
                   </p>
                 </div>
                 <p className="text-sm text-gray-600">
-                  총 <strong className="text-[#22282E]">{poolIds.length}</strong>개 항목을 한 번에 추가할까요?
+                  총 <strong className="text-[#22282E]">{pool.length}</strong>개 항목을 한 번에 추가할까요?
                 </p>
                 <ul className="max-h-40 space-y-1.5 overflow-y-auto rounded-lg border border-gray-100 bg-gray-50/80 px-3 py-2 text-xs text-gray-700">
-                  {poolIds.map((pid) => (
-                    <li key={pid} className="leading-snug">
-                      · {FAQ_ITEMS[pid]?.question || `FAQ ${pid}`}
+                  {pool.map((entry) => (
+                    <li key={entry.ref} className="leading-snug">
+                      · {entry.question}
                     </li>
                   ))}
                 </ul>
@@ -306,7 +337,7 @@ export function InquiryHotFaqAdminPage() {
                   </div>
                   <p className="text-sm text-gray-600">
                     <span className="font-bold text-[#22282E]">
-                      「{FAQ_ITEMS[addOneConfirmId]?.question || `FAQ ${addOneConfirmId}`}」
+                      「{poolLabel(addOneConfirmId)}」
                     </span>{' '}
                     항목을 노출 목록에 추가할까요?
                   </p>
@@ -391,7 +422,7 @@ export function InquiryHotFaqAdminPage() {
                   </div>
                   <p className="text-sm text-gray-600">
                     <span className="font-bold text-[#22282E]">
-                      「{FAQ_ITEMS[removeConfirmId]?.question || `FAQ ${removeConfirmId}`}」
+                      「{poolLabel(removeConfirmId)}」
                     </span>{' '}
                     항목을 노출 목록에서 제거할까요?
                   </p>

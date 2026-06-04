@@ -4,6 +4,7 @@
  * 로컬 개발 시 API 미사용 시 직접 Supabase insert로 폴백
  */
 import { supabase } from './supabase'
+import { resolveSiteUrl } from './siteApiBase'
 
 /**
  * @param {string} matchupId
@@ -17,7 +18,7 @@ export async function voteViaApi(matchupId, side) {
   }
 
   try {
-    const res = await fetch('/api/vote', {
+    const res = await fetch(resolveSiteUrl('/api/vote'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

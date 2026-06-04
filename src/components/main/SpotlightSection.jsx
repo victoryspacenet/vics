@@ -709,7 +709,7 @@ export function SpotlightSection({ primaryMatchup = null }) {
           disabled={!canGoPrev}
           aria-label="이전 스포트라이트"
           className={cn(
-            'flex w-9 shrink-0 items-center justify-center self-center rounded-xl border border-slate-200/80 bg-white/90 text-slate-700 shadow-sm transition sm:w-10',
+            'flex w-9 shrink-0 items-center justify-center self-center rounded-xl border border-slate-200/80 bg-slate-100/92 text-slate-700 shadow-sm transition sm:w-10',
             canGoPrev ? 'hover:bg-violet-50 hover:text-violet-800' : 'cursor-not-allowed opacity-35',
           )}
         >
@@ -740,7 +740,7 @@ export function SpotlightSection({ primaryMatchup = null }) {
           disabled={!canGoNext}
           aria-label="다음 스포트라이트"
           className={cn(
-            'flex w-9 shrink-0 items-center justify-center self-center rounded-xl border border-slate-200/80 bg-white/90 text-slate-700 shadow-sm transition sm:w-10',
+            'flex w-9 shrink-0 items-center justify-center self-center rounded-xl border border-slate-200/80 bg-slate-100/92 text-slate-700 shadow-sm transition sm:w-10',
             canGoNext ? 'hover:bg-violet-50 hover:text-violet-800' : 'cursor-not-allowed opacity-35',
           )}
         >

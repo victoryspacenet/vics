@@ -16,6 +16,32 @@ export const SANCTION_TYPES = [
   { id: 'etc',          label: '기타' },
 ]
 
+/** supabase_seed_appeals.sql 가상 데이터 — 관리자 목록·집계에서 제외 */
+export const DEMO_APPEAL_RECEIPT_IDS = Object.freeze([
+  'VS-2026-001',
+  'VS-2026-002',
+  'VS-2026-003',
+  'VS-2026-004',
+  'VS-2026-005',
+  'VS-2025-998',
+  'VS-2025-997',
+  'VS-2025-996',
+])
+
+const DEMO_APPEAL_RECEIPT_IN_FILTER = `(${DEMO_APPEAL_RECEIPT_IDS.map((id) => `"${id}"`).join(',')})`
+
+function applyDemoAppealExclusion(q) {
+  return q.not('receipt_id', 'in', DEMO_APPEAL_RECEIPT_IN_FILTER)
+}
+
+export function isDemoAppealRow(row) {
+  if (!row) return false
+  if (DEMO_APPEAL_RECEIPT_IDS.includes(String(row.receipt_id || row.receiptId || '').trim())) {
+    return true
+  }
+  return /^user_\d+$/i.test(String(row.user_id || row.userId || '').trim())
+}
+
 const DEFAULT_TEMPLATES = [
   {
     id: 'approve',
@@ -51,6 +77,7 @@ function normalizeAppeal(row) {
     appealTitle:      row.appeal_title,
     appealContent:    row.appeal_content,
     attachments:      row.attachments ?? [],
+    sanctionWarningId: row.sanction_warning_id ?? null,
     decision:         row.decision ?? null,
     replyToUser:      row.reply_to_user ?? '',
     reducedDays:      row.reduced_days ?? null,
@@ -61,19 +88,119 @@ function normalizeAppeal(row) {
   }
 }
 
-/** 이의 신청 목록 조회 */
-export async function getAdminAppeals() {
+/** 목록/통계용 컬럼만 (select * 대역폭·파싱 부담 감소) */
+const APPEAL_LIST_FIELDS =
+  'id, receipt_id, status, nickname, user_id, sanction_type, sanction_type_label, sanction_date, violation_reason, original_content, original_type, appeal_title, appeal_content, attachments, sanction_warning_id, decision, reply_to_user, reduced_days, sanction_end_at, notified_at, created_at, updated_at'
+
+function escapeIlikePattern(s) {
+  return String(s || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/%/g, '\\%')
+    .replace(/_/g, '\\_')
+}
+
+/** PostgREST `or()` 안에 넣을 ilike 패턴 (따옴표 이스케이프) */
+function ilikePatternQuotedForOr(trimmed) {
+  const inner = `%${escapeIlikePattern(trimmed)}%`.replace(/"/g, '""')
+  return `"${inner}"`
+}
+
+/** 접수일 필터 — `created_at >=` 기준 ISO 시각 */
+function createdAtLowerBound(dateRange) {
+  if (!dateRange || dateRange === 'all') return null
+  const days = { '1w': 7, '2w': 14, '1m': 30 }[dateRange]
+  if (!days) return null
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+}
+
+function notifyAppealsUpdated() {
+  window.dispatchEvent(new CustomEvent('vics:adminAppeals:updated'))
+}
+
+/**
+ * 미처리/완료 건수 (전체 테이블 기준, 필터와 무관)
+ */
+export async function getAdminAppealTotals() {
   try {
-    const { data, error } = await supabase
-      .from('appeals')
-      .select('*')
-      .order('created_at', { ascending: false })
-    if (error) throw error
-    return (data ?? []).map(normalizeAppeal)
+    const [pendingRes, completedRes] = await Promise.all([
+      applyDemoAppealExclusion(
+        supabase.from('appeals').select('id', { count: 'exact', head: true }).eq('status', APPEAL_STATUS.pending),
+      ),
+      applyDemoAppealExclusion(
+        supabase.from('appeals').select('id', { count: 'exact', head: true }).eq('status', APPEAL_STATUS.completed),
+      ),
+    ])
+    if (pendingRes.error) throw pendingRes.error
+    if (completedRes.error) throw completedRes.error
+    return {
+      pending: typeof pendingRes.count === 'number' ? pendingRes.count : 0,
+      completed: typeof completedRes.count === 'number' ? completedRes.count : 0,
+    }
   } catch (e) {
-    console.warn('[appealAdminStorage] 목록 조회 실패:', e)
-    return []
+    console.warn('[appealAdminStorage] 건수 조회 실패:', e)
+    return { pending: 0, completed: 0 }
   }
+}
+
+/**
+ * 이의 목록 — 서버 페이징 + count (필터는 DB에서 적용)
+ * @param {{ page?: number; pageSize?: number; sanctionType?: string; dateRange?: string; search?: string }} opts
+ * - `dateRange`: `'all'` | `'1w'` | `'2w'` | `'1m'`
+ * - `sanctionType`: 빈 문자열이면 전체
+ */
+export async function getAdminAppealsPaged({
+  page = 1,
+  pageSize = 10,
+  sanctionType = '',
+  dateRange = 'all',
+  search = '',
+} = {}) {
+  const safeSize = Math.min(100, Math.max(1, pageSize))
+  const safePage = Math.max(1, page)
+  const from = (safePage - 1) * safeSize
+  const to = from + safeSize - 1
+
+  try {
+    let q = applyDemoAppealExclusion(
+      supabase
+        .from('appeals')
+        .select(APPEAL_LIST_FIELDS, { count: 'exact' })
+        .order('created_at', { ascending: false }),
+    )
+
+    if (sanctionType) {
+      q = q.eq('sanction_type', sanctionType)
+    }
+    const since = createdAtLowerBound(dateRange)
+    if (since) {
+      q = q.gte('created_at', since)
+    }
+
+    const rawSearch = String(search || '').replace(/,/g, '').trim().slice(0, 80)
+    if (rawSearch) {
+      const quoted = ilikePatternQuotedForOr(rawSearch)
+      q = q.or(`receipt_id.ilike.${quoted},nickname.ilike.${quoted}`)
+    }
+
+    const { data, error, count } = await q.range(from, to)
+    if (error) throw error
+    return {
+      appeals: (data ?? []).filter((row) => !isDemoAppealRow(row)).map(normalizeAppeal),
+      totalCount: typeof count === 'number' ? count : 0,
+    }
+  } catch (e) {
+    console.warn('[appealAdminStorage] 페이징 목록 조회 실패:', e)
+    return { appeals: [], totalCount: 0 }
+  }
+}
+
+/**
+ * @deprecated 대량 로드 — `getAdminAppealsPaged` 사용
+ * 호환용: 필터 없이 최대 300건
+ */
+export async function getAdminAppeals() {
+  const { appeals } = await getAdminAppealsPaged({ page: 1, pageSize: 300, sanctionType: '', dateRange: 'all', search: '' })
+  return appeals
 }
 
 /** 단건 조회 */
@@ -81,10 +208,11 @@ export async function getAdminAppealById(id) {
   try {
     const { data, error } = await supabase
       .from('appeals')
-      .select('*')
+      .select(APPEAL_LIST_FIELDS)
       .or(`id.eq.${id},receipt_id.eq.${id}`)
       .single()
     if (error) throw error
+    if (!data || isDemoAppealRow(data)) return null
     return normalizeAppeal(data)
   } catch (e) {
     console.warn('[appealAdminStorage] 단건 조회 실패:', e)
@@ -111,6 +239,7 @@ export async function updateAdminAppeal(id, updates) {
       .select()
       .single()
     if (error) throw error
+    notifyAppealsUpdated()
     return normalizeAppeal(data)
   } catch (e) {
     console.warn('[appealAdminStorage] 수정 실패:', e)
@@ -118,17 +247,18 @@ export async function updateAdminAppeal(id, updates) {
   }
 }
 
-/** 통계 (목록에서 계산) */
-export async function getAppealStats() {
-  try {
-    const list = await getAdminAppeals()
-    return {
-      pending:   list.filter((a) => a.status === APPEAL_STATUS.pending).length,
-      completed: list.filter((a) => a.status === APPEAL_STATUS.completed).length,
-    }
-  } catch {
-    return { pending: 0, completed: 0 }
+/** 통계 — 이미 불러온 목록이 있으면 재쿼리하지 않음 */
+export function computeAppealStats(list) {
+  const arr = Array.isArray(list) ? list : []
+  return {
+    pending: arr.filter((a) => a.status === APPEAL_STATUS.pending).length,
+    completed: arr.filter((a) => a.status === APPEAL_STATUS.completed).length,
   }
+}
+
+/** 서버 건수 기반 통계 (목록 전체 로드 없음) */
+export async function getAppealStats() {
+  return getAdminAppealTotals()
 }
 
 /** 답변 템플릿 목록 (변경 불필요 — JS 상수) */

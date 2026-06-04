@@ -116,6 +116,7 @@ export function DeleteAccountPage() {
       }))
 
       await supabase.from('profiles').delete().eq('id', user.id)
+      window.dispatchEvent(new CustomEvent('vics:adminUsers:updated'))
       await supabase.auth.signOut()
       await signOut()
       navigate('/goodbye', { replace: true })

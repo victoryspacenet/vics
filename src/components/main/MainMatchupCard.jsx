@@ -1,5 +1,10 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { BarChart3, Play } from 'lucide-react'
+import { MatchupMediaOpenButton, MatchupMediaViewer } from '../matchup/MatchupMediaViewer'
+import { matchupSideToMedia } from '../../lib/matchupMediaView'
+import { isFeedDemoMatchupId } from '../../lib/matchupIds'
+import { useUIStore } from '../../store/uiStore'
 import { formatNumber, formatDate, calcPercent, cn } from '../../lib/utils'
 import { VsBadge } from '../ui/VsBadge'
 import { MatchupThumbFrame } from '../ui/MatchupThumbFrame'
@@ -13,7 +18,7 @@ import { fandomTierHasDiamondListNicknameAura } from '../../lib/fandomTiers'
 import { FandomBronzeStarBadge } from '../fandom/FandomBronzeStarBadge'
 
 /** 이미지·영상·텍스트 썸네일 (영상은 썸네일 없을 때 video 태그로 표시 — img에 mp4 넣으면 깨짐) */
-function MatchupSidePreview({ side, matchup: m }) {
+function MatchupSidePreview({ side, matchup: m, eagerMedia = false }) {
   const isLeft = side === 'left'
   const type = isLeft ? m.left_type : m.right_type
   const url = isLeft ? m.left_url : m.right_url
@@ -36,7 +41,16 @@ function MatchupSidePreview({ side, matchup: m }) {
 
   if (type === 'video') {
     if (safeThumb) {
-      return <img src={safeThumb} alt={label || ''} className="h-full w-full min-h-0 object-cover" />
+      return (
+        <img
+          src={safeThumb}
+          alt={label || ''}
+          className="h-full w-full min-h-0 object-cover"
+          loading={eagerMedia ? 'eager' : 'lazy'}
+          decoding="async"
+          fetchPriority={eagerMedia ? 'high' : 'low'}
+        />
+      )
     }
     if (safeUrl) {
       return (
@@ -45,7 +59,7 @@ function MatchupSidePreview({ side, matchup: m }) {
             src={safeUrl}
             muted
             playsInline
-            preload="metadata"
+            preload={eagerMedia ? 'metadata' : 'none'}
             className="h-full w-full object-cover"
             aria-label={label || ''}
           />
@@ -67,7 +81,16 @@ function MatchupSidePreview({ side, matchup: m }) {
   if (type === 'image') {
     const src = safeMediaUrl(thumb || url || '')
     if (src) {
-      return <img src={src} alt={label || ''} className="h-full w-full min-h-0 object-cover" />
+      return (
+        <img
+          src={src}
+          alt={label || ''}
+          className="h-full w-full min-h-0 object-cover"
+          loading={eagerMedia ? 'eager' : 'lazy'}
+          decoding="async"
+          fetchPriority={eagerMedia ? 'high' : 'low'}
+        />
+      )
     }
     return (
       <div className="flex h-full w-full items-center justify-center text-gray-400">
@@ -78,7 +101,16 @@ function MatchupSidePreview({ side, matchup: m }) {
 
   const legacySrc = safeMediaUrl(thumb || url || '')
   if (legacySrc) {
-    return <img src={legacySrc} alt={label || ''} className="h-full w-full min-h-0 object-cover" />
+    return (
+      <img
+        src={legacySrc}
+        alt={label || ''}
+        className="h-full w-full min-h-0 object-cover"
+        loading={eagerMedia ? 'eager' : 'lazy'}
+        decoding="async"
+        fetchPriority={eagerMedia ? 'high' : 'low'}
+      />
+    )
   }
 
   return (
@@ -90,14 +122,17 @@ function MatchupSidePreview({ side, matchup: m }) {
 
 const VARIANT_CARD = {
   best:
-    'border-amber-200/85 ring-1 ring-amber-100/55 shadow-md shadow-amber-200/30 bg-gradient-to-br from-white via-amber-50/20 to-orange-50/35 hover:border-amber-300/80 hover:shadow-lg hover:shadow-amber-300/35 hover:via-amber-50/30',
+    'border-amber-200/85 ring-1 ring-amber-100/55 shadow-md shadow-amber-200/30 bg-gradient-to-br from-slate-50 via-amber-50/30 to-orange-50/40 hover:border-amber-300/80 hover:shadow-lg hover:shadow-amber-300/35 hover:via-amber-50/35',
   hot:
-    'border-fuchsia-200/80 ring-1 ring-violet-100/50 shadow-md shadow-fuchsia-200/25 bg-gradient-to-br from-white via-violet-50/22 to-fuchsia-50/30 hover:border-fuchsia-300/75 hover:shadow-lg hover:shadow-fuchsia-200/35 hover:via-violet-50/32',
+    'border-fuchsia-200/80 ring-1 ring-violet-100/50 shadow-md shadow-fuchsia-200/25 bg-gradient-to-br from-slate-50 via-violet-50/30 to-fuchsia-50/35 hover:border-fuchsia-300/75 hover:shadow-lg hover:shadow-fuchsia-200/35 hover:via-violet-50/38',
   new:
-    'border-emerald-200/80 ring-1 ring-teal-100/50 shadow-md shadow-emerald-200/28 bg-gradient-to-br from-white via-emerald-50/20 to-cyan-50/28 hover:border-emerald-300/75 hover:shadow-lg hover:shadow-teal-200/35 hover:via-emerald-50/30',
+    'border-emerald-200/80 ring-1 ring-teal-100/50 shadow-md shadow-emerald-200/28 bg-gradient-to-br from-slate-50 via-emerald-50/28 to-cyan-50/32 hover:border-emerald-300/75 hover:shadow-lg hover:shadow-teal-200/35 hover:via-emerald-50/34',
 }
 
-export function MainMatchupCard({ matchup: m, variant, rank }) {
+export function MainMatchupCard({ matchup: m, variant, rank, eagerMedia = false }) {
+  const { showToast } = useUIStore()
+  const [viewerMedia, setViewerMedia] = useState(null)
+  const isDemo = isFeedDemoMatchupId(m.id)
   const { left, right } = calcPercent(m.left_votes, m.right_votes)
   const showNewRightPlaceholder = variant === 'new' && (m.right_type == null || m.right_type === undefined)
   const creator = m.profiles
@@ -107,6 +142,12 @@ export function MainMatchupCard({ matchup: m, variant, rank }) {
 
   const detailTo = `/matchup/${m.id}`
 
+  const handleDetailNav = (e) => {
+    if (!isDemo) return
+    e.preventDefault()
+    showToast('데모 카드는 상세·투표 페이지가 없어요. 썸네일을 눌러 크게 볼 수 있어요.', 'info')
+  }
+
   return (
     <div
       className={cn(
@@ -114,7 +155,7 @@ export function MainMatchupCard({ matchup: m, variant, rank }) {
         bannerGlow
           ? 'vics-feed-banner-highlight shadow-none'
           : VARIANT_CARD[variant] ??
-              'border-gray-200/80 bg-gradient-to-br from-white via-white to-slate-50/70 shadow-sm shadow-slate-200/40 hover:border-emerald-200/60 hover:shadow-md hover:via-cyan-50/20',
+              'border-gray-200/80 bg-gradient-to-br from-slate-50 via-slate-100/85 to-slate-100/75 shadow-sm shadow-slate-200/40 hover:border-emerald-200/60 hover:shadow-md hover:via-cyan-50/25',
         vipFrame && VIP_MATCHUP_SURFACE_CLASS,
       )}
     >
@@ -137,6 +178,7 @@ export function MainMatchupCard({ matchup: m, variant, rank }) {
       <div className="relative z-[6] p-4">
         <Link
           to={detailTo}
+          onClick={handleDetailNav}
           className="group -m-1 block rounded-xl p-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 focus-visible:ring-offset-1"
         >
           <div className="flex items-start justify-between gap-2 mb-3">
@@ -184,15 +226,17 @@ export function MainMatchupCard({ matchup: m, variant, rank }) {
           </div>
         )}
 
-        <Link
-          to={detailTo}
-          className="-m-1 block rounded-xl p-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 focus-visible:ring-offset-1"
-        >
         <div className="relative grid grid-cols-2 gap-2">
           <MatchupThumbFrame side="left" className="aspect-square w-full min-h-0">
-            <MatchupSidePreview side="left" matchup={m} />
+            <MatchupMediaOpenButton
+              media={matchupSideToMedia(m, 'left')}
+              onOpen={setViewerMedia}
+              className="h-full min-h-0"
+            >
+              <MatchupSidePreview side="left" matchup={m} eagerMedia={eagerMedia} />
+            </MatchupMediaOpenButton>
           </MatchupThumbFrame>
-          <div className="absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2">
+          <div className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2">
             <VsBadge size="sm" />
           </div>
           <MatchupThumbFrame side="right" className="aspect-square w-full min-h-0">
@@ -202,12 +246,23 @@ export function MainMatchupCard({ matchup: m, variant, rank }) {
                 <span className="text-[9px]">나중에 채워요</span>
               </div>
             ) : (
-              <MatchupSidePreview side="right" matchup={m} />
+              <MatchupMediaOpenButton
+                media={matchupSideToMedia(m, 'right')}
+                onOpen={setViewerMedia}
+                className="h-full min-h-0"
+              >
+                <MatchupSidePreview side="right" matchup={m} eagerMedia={eagerMedia} />
+              </MatchupMediaOpenButton>
             )}
           </MatchupThumbFrame>
         </div>
 
-        <div className={`mt-3 flex items-center ${variant === 'new' ? 'justify-end' : 'justify-between'}`}>
+        <Link
+          to={detailTo}
+          onClick={handleDetailNav}
+          className="-m-1 mt-3 block rounded-xl p-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 focus-visible:ring-offset-1"
+        >
+        <div className={`flex items-center ${variant === 'new' ? 'justify-end' : 'justify-between'}`}>
           {variant !== 'new' && (
             <div className="flex min-w-0 flex-1 items-center gap-1.5">
               <BarChart3
@@ -261,6 +316,12 @@ export function MainMatchupCard({ matchup: m, variant, rank }) {
           </p>
         )}
         </Link>
+
+        <MatchupMediaViewer
+          open={Boolean(viewerMedia)}
+          media={viewerMedia}
+          onClose={() => setViewerMedia(null)}
+        />
       </div>
     </div>
   )

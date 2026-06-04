@@ -1,93 +1,165 @@
 /**
- * 매치업 관리용 mock 데이터 — Supabase `admin_ui_config`
+ * 매치업 관리 — Supabase `matchups` + 관리자 상태 오버레이(`admin_ui_config`)
  */
 import { getAdminUiJson, setAdminUiJson } from './adminUiConfig'
+import { getCategoryLabelById } from './categoryAdminStorage'
+import { supabase } from './supabase'
 
-const KEY_MATCHUPS = 'admin_matchups_v1'
-const KEY_WARN_LOGS = 'admin_matchup_warning_logs_v1'
-const KEY_SUSPEND_LOGS = 'admin_matchup_suspension_logs_v1'
+const KEY_STATUS_OVERRIDES = 'admin_matchup_status_overrides_v1'
+
+const ADMIN_MATCHUP_LIST_SELECT =
+  'id, title, category, status, created_at, left_label, right_label, is_demo, right_type, expires_at'
+
+const ADMIN_LIST_LIMIT = 500
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const STATUS_OPTIONS = [
   { value: 'all', label: '전체' },
+  { value: 'waiting', label: '도전자 대기 (NEW)' },
   { value: 'active', label: '진행 중' },
-  { value: 'review', label: '검토 대기' },
   { value: 'ended', label: '종료' },
   { value: 'blocked', label: '차단' },
 ]
 
 const MATCHUP_STATUS_LABEL = {
+  waiting: '도전자 대기',
   active: '진행 중',
-  review: '검토 대기',
   ended: '종료',
   blocked: '차단',
 }
 
-export function getMatchupStatusLabel(status) {
-  return MATCHUP_STATUS_LABEL[status] ?? String(status)
-}
-
-export const MATCHUP_INITIAL_STATUS_ON_REPORT = 'review'
-
-/** category / categoryLabel — 유저 매치업 생성·LNB와 동일 id (`categoryAdminStorage` 기본 활성 목록) */
-const MOCK_MATCHUPS = [
-  { id: 992, category: 'eternal_quest',  categoryLabel: '영원한 난제', title: '아이언맨 vs 캡틴 아메리카',  reports: 0,  status: 'active',  createdAt: '02.12 10:00' },
-  { id: 991, category: 'food_gourmet',   categoryLabel: '맛집&맛식',   title: '부먹 vs 찍먹 (논란의 중심)', reports: 8,  status: 'review',  createdAt: '02.12 09:30' },
-  { id: 989, category: 'work_life',      categoryLabel: '직장&갓생',   title: 'iPhone 17 vs Galaxy S26',   reports: 0,  status: 'ended',   createdAt: '02.11 18:00' },
-  { id: 988, category: 'balance_game',   categoryLabel: '밸런스게임',  title: '롤(LoL) vs 도타2(DOTA2)',   reports: 12, status: 'blocked', createdAt: '02.11 15:40' },
-]
-
-const MOCK_DETAILS = {
-  992: {
-    userA: { name: '홍대고양이', imageUrl: '/logo.png', title: '오늘의 착장' },
-    userB: { name: '성수직장인', imageUrl: '/logo.png', title: '점심 메뉴 추천' },
-    reportedSides: [],
-    aiVerdict: { score: 12, label: '매우 낮음', reason: "User A는 '패션'이나 User B는 '음식' 이미지임. 주제 이탈 확실." },
-  },
-  991: {
-    userA: { name: '부먹파', imageUrl: '/logo.png', title: '찍먹은 이단' },
-    userB: { name: '찍먹파', imageUrl: '/logo.png', title: '부먹은 낭비' },
-    reportedSides: ['a', 'b'],
-    aiVerdict: { score: 45, label: '보통', reason: '양측 모두 음식 관련 이미지이나, 구도와 맥락이 상이함.' },
-  },
-  989: {
-    userA: { name: '애플유저', imageUrl: '/logo.png', title: 'iPhone 17' },
-    userB: { name: '삼성유저', imageUrl: '/logo.png', title: 'Galaxy S26' },
-    reportedSides: [],
-    aiVerdict: { score: 85, label: '매우 높음', reason: '동일 카테고리(스마트폰) 비교.' },
-  },
-  988: {
-    userA: { name: '롤유저', imageUrl: '/logo.png', title: 'LoL' },
-    userB: { name: '도타유저', imageUrl: '/logo.png', title: 'DOTA2' },
-    reportedSides: ['a', 'b'],
-    aiVerdict: { score: 62, label: '보통', reason: 'MOBA 장르 비교이나 게임별 특성 차이 있음.' },
-  },
-}
-
-const DEFAULT_DETAIL = {
-  userA: { name: 'User A', imageUrl: '/logo.png', title: '-' },
-  userB: { name: 'User B', imageUrl: '/logo.png', title: '-' },
-  reportedSides: [],
-  aiVerdict: { score: 0, label: '-', reason: 'AI 판정 정보 없음.' },
+const EMPTY_AI_VERDICT = {
+  score: 0,
+  label: '-',
+  reason: 'AI 판정 정보 없음.',
 }
 
 let _matchupsCache = null
 let _warnLogsCache = null
 let _suspendLogsCache = null
 
+const KEY_WARN_LOGS = 'admin_matchup_warning_logs_v1'
+const KEY_SUSPEND_LOGS = 'admin_matchup_suspension_logs_v1'
+
+export function getMatchupStatusLabel(status) {
+  if (status === 'review') return '진행 중'
+  return MATCHUP_STATUS_LABEL[status] ?? String(status)
+}
+
+function normalizeMatchupStatus(status) {
+  return status === 'review' ? 'active' : status
+}
+
+export function invalidateMatchupsAdminCache() {
+  _matchupsCache = null
+}
+
+function formatAdminCreatedAt(iso) {
+  if (!iso) return '-'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '-'
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mi = String(d.getMinutes()).padStart(2, '0')
+  return `${mm}.${dd} ${hh}:${mi}`
+}
+
+function buildListTitle(row) {
+  const title = String(row.title || '').trim()
+  if (title) return title
+  const left = String(row.left_label || '').trim()
+  const right = String(row.right_label || '').trim()
+  if (left && right) return `${left} vs ${right}`
+  return left || right || '(제목 없음)'
+}
+
+async function readStatusOverrides() {
+  const remote = await getAdminUiJson(KEY_STATUS_OVERRIDES, {})
+  return remote && typeof remote === 'object' && !Array.isArray(remote) ? remote : {}
+}
+
+function isVotePeriodExpired(expiresAt) {
+  if (!expiresAt) return false
+  const t = new Date(expiresAt).getTime()
+  return !Number.isNaN(t) && t <= Date.now()
+}
+
+/**
+ * 메인 피드 NEW 탭과 동일: active + right_type 없음.
+ * expires_at은 생성 시 투표 기간용으로만 저장되며, 도전자 참여 전에는 종료 판정에 쓰지 않음.
+ */
+function isNewWaitingMatchup(row) {
+  if (!row || row.status !== 'active') return false
+  return row.right_type == null
+}
+
+function mapRowToAdminStatus(row, overrides) {
+  const ov = overrides[String(row.id)]
+  if (ov === 'blocked') return 'blocked'
+  if (ov === 'ended') return 'ended'
+  if (row.status === 'closed') return 'ended'
+  if (row.status === 'active' && row.right_type == null) {
+    return 'waiting'
+  }
+  if (ov === 'active') return 'active'
+  if (row.status === 'active') {
+    return isVotePeriodExpired(row.expires_at) ? 'ended' : 'active'
+  }
+  return 'ended'
+}
+
+function adminStatusToDbStatus(adminStatus) {
+  if (adminStatus === 'ended' || adminStatus === 'blocked') return 'closed'
+  return 'active'
+}
+
+async function persistStatusOverride(matchupId, adminStatus) {
+  const overrides = await readStatusOverrides()
+  const key = String(matchupId)
+  if (adminStatus === 'active') {
+    delete overrides[key]
+  } else {
+    overrides[key] = adminStatus
+  }
+  await setAdminUiJson(KEY_STATUS_OVERRIDES, overrides)
+}
+
+async function fetchMatchupsFromSupabase() {
+  const overrides = await readStatusOverrides()
+  const { data, error } = await supabase
+    .from('matchups')
+    .select(ADMIN_MATCHUP_LIST_SELECT)
+    .order('created_at', { ascending: false })
+    .limit(ADMIN_LIST_LIMIT)
+
+  if (error) {
+    console.warn('[matchupsAdminStorage] fetch list', error)
+    return []
+  }
+
+  return (data || []).map((row) => ({
+    id: row.id,
+    category: row.category || '',
+    categoryLabel: getCategoryLabelById(row.category),
+    title: buildListTitle(row),
+    reports: 0,
+    status: normalizeMatchupStatus(mapRowToAdminStatus(row, overrides)),
+    createdAt: formatAdminCreatedAt(row.created_at),
+    hasChallenger: row.right_type != null,
+  }))
+}
+
 async function readMatchups() {
   if (_matchupsCache) return _matchupsCache
-  const remote = await getAdminUiJson(KEY_MATCHUPS, null)
-  _matchupsCache =
-    Array.isArray(remote) && remote.length > 0 ? remote : JSON.parse(JSON.stringify(MOCK_MATCHUPS))
+  _matchupsCache = await fetchMatchupsFromSupabase()
   return _matchupsCache
 }
 
-async function persistMatchups(list) {
-  await setAdminUiJson(KEY_MATCHUPS, list)
-  _matchupsCache = list
-}
-
-export async function getMatchups() {
+export async function getMatchups({ force = false } = {}) {
+  if (force) invalidateMatchupsAdminCache()
   return readMatchups()
 }
 
@@ -117,7 +189,7 @@ async function persistSuspendLogs(list) {
 
 export async function getMatchupAdminWarningLogs(matchupId) {
   const list = await readWarnLogs()
-  const filtered = matchupId != null ? list.filter((e) => e.matchupId === Number(matchupId)) : list
+  const filtered = matchupId != null ? list.filter((e) => String(e.matchupId) === String(matchupId)) : list
   return filtered.slice().sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt))
 }
 
@@ -134,7 +206,7 @@ export async function recordMatchupAdminWarningSent(matchupId, meta) {
 
 export async function getMatchupAdminSuspensionLogs(matchupId) {
   const list = await readSuspendLogs()
-  const filtered = matchupId != null ? list.filter((e) => e.matchupId === Number(matchupId)) : list
+  const filtered = matchupId != null ? list.filter((e) => String(e.matchupId) === String(matchupId)) : list
   return filtered.slice().sort((a, b) => new Date(b.appliedAt) - new Date(a.appliedAt))
 }
 
@@ -160,52 +232,100 @@ export function getReportedParticipantUserIdsForWarning(matchup) {
   return ids
 }
 
-export async function getMatchupDetail(id) {
-  const list = await readMatchups()
-  const base = list.find((m) => m.id === Number(id))
-  if (!base) return null
-  const detail = MOCK_DETAILS[base.id] ?? DEFAULT_DETAIL
-  const userIdA = detail.userA?.userId ?? `mock_mu_${base.id}_a`
-  const userIdB = detail.userB?.userId ?? `mock_mu_${base.id}_b`
-  const reportedSides = 'reportedSides' in detail ? detail.reportedSides : []
+async function fetchMatchupDetailFromSupabase(id) {
+  const { data: row, error } = await supabase
+    .from('matchups')
+    .select(
+      `id, title, category, status, left_label, right_label, right_type, expires_at,
+      left_url, left_thumbnail_url, right_url, right_thumbnail_url,
+      user_id, right_user_id,
+      profiles:user_id(id, nickname, avatar_url),
+      right_profiles:right_user_id(id, nickname, avatar_url)`
+    )
+    .eq('id', id)
+    .maybeSingle()
+
+  if (error || !row) return null
+
+  const overrides = await readStatusOverrides()
+  const listBase = {
+    id: row.id,
+    category: row.category || '',
+    categoryLabel: getCategoryLabelById(row.category),
+    title: buildListTitle(row),
+    reports: 0,
+    status: normalizeMatchupStatus(mapRowToAdminStatus(row, overrides)),
+    createdAt: formatAdminCreatedAt(row.created_at),
+    hasChallenger: row.right_type != null,
+  }
+
+  const mediaA = row.left_thumbnail_url || row.left_url || null
+  const hasChallenger = row.right_type != null
+
   return {
-    ...base,
-    ...detail,
-    reportedSides,
-    userA: { ...detail.userA, userId: userIdA },
-    userB: { ...detail.userB, userId: userIdB },
+    ...listBase,
+    userA: {
+      name: row.profiles?.nickname ?? '-',
+      imageUrl: mediaA || row.profiles?.avatar_url || null,
+      title: row.left_label ?? '-',
+      userId: row.user_id,
+    },
+    userB: hasChallenger
+      ? {
+          name: row.right_profiles?.nickname ?? '-',
+          imageUrl:
+            row.right_thumbnail_url || row.right_url || row.right_profiles?.avatar_url || null,
+          title: row.right_label ?? '-',
+          userId: row.right_user_id,
+        }
+      : {
+          name: null,
+          imageUrl: null,
+          title: null,
+          userId: null,
+        },
+    reportedSides: [],
+    aiVerdict: { ...EMPTY_AI_VERDICT },
   }
 }
 
-export async function updateMatchupStatus(id, status) {
-  const list = await readMatchups()
-  const idx = list.findIndex((m) => m.id === id)
-  if (idx < 0) return false
-  const next = list.map((m, i) => (i === idx ? { ...m, status } : m))
-  await persistMatchups(next)
+export async function getMatchupDetail(id) {
+  const sid = String(id || '').trim()
+  if (!UUID_RE.test(sid)) return null
+  return fetchMatchupDetailFromSupabase(sid)
+}
+
+async function applyAdminStatusToSupabase(matchupId, adminStatus) {
+  const dbStatus = adminStatusToDbStatus(adminStatus)
+  const { error } = await supabase.from('matchups').update({ status: dbStatus }).eq('id', matchupId)
+  if (error) {
+    console.warn('[matchupsAdminStorage] update status (DB)', error)
+  }
+  await persistStatusOverride(matchupId, adminStatus)
+  invalidateMatchupsAdminCache()
   return true
 }
 
+export async function updateMatchupStatus(id, status) {
+  if (!UUID_RE.test(String(id))) return false
+  return applyAdminStatusToSupabase(id, status)
+}
+
 export async function bulkUpdateStatus(ids, status) {
-  const list = await readMatchups()
-  const idSet = new Set(ids.map(Number))
+  const validIds = ids.filter((id) => UUID_RE.test(String(id)))
   let count = 0
-  const next = list.map((m) => {
-    if (idSet.has(m.id)) {
-      count += 1
-      return { ...m, status }
-    }
-    return m
-  })
-  await persistMatchups(next)
+  for (const id of validIds) {
+    const ok = await applyAdminStatusToSupabase(id, status)
+    if (ok) count += 1
+  }
   return count
 }
 
 export async function getMatchupStats() {
   const list = await readMatchups()
   return {
+    waiting: list.filter((m) => m.status === 'waiting').length,
     active: list.filter((m) => m.status === 'active').length,
-    review: list.filter((m) => m.status === 'review').length,
     ended: list.filter((m) => m.status === 'ended').length,
     blocked: list.filter((m) => m.status === 'blocked').length,
   }

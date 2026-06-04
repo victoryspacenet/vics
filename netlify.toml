@@ -1,5 +1,19 @@
+# 빌드 시 환경 변수: Netlify → Project configuration → Environment variables
+# (저장소의 .env.local 은 Netlify가 읽지 않음)
+# 로컬 `npm run dev`는 `.env.local` + `.env.development` — Supabase는
+# `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` 이름을 Netlify와 동일하게 맞추세요.
+# docs/DEPLOYMENT_ENV.md 참고
 [build]
   command = "npm run build"
+  publish = "dist"
+
+# 로컬 `npm run dev:netlify` — 브라우저는 http://localhost:8888
+# (Vite만 쓸 때는 `npm run dev` → http://localhost:5173)
+# targetPort: Netlify가 붙을 Vite 포트. Vite를 따로 띄우지 말고 netlify dev 한 번만 실행하는 것을 권장.
+[dev]
+  command = "npm run dev"
+  targetPort = 5173
+  port = 8888
   publish = "dist"
 
 [[redirects]]
@@ -21,8 +35,50 @@
   force = true
 
 [[redirects]]
+  from = "/api/fcm-register-token"
+  to = "/.netlify/functions/fcm-register-token"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/fcm-notice-broadcast"
+  to = "/.netlify/functions/fcm-notice-broadcast"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/fcm-send-users"
+  to = "/.netlify/functions/fcm-send-users"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/api/login-fail-notify"
   to = "/.netlify/functions/login-fail-notify"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/profiles-bootstrap-signup"
+  to = "/.netlify/functions/profiles-bootstrap-signup"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/nickname-check"
+  to = "/.netlify/functions/nickname-check"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/matchup-challenge-similarity"
+  to = "/.netlify/functions/matchup-challenge-similarity"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/matchup-report-moderation"
+  to = "/.netlify/functions/matchup-report-moderation"
   status = 200
   force = true
 

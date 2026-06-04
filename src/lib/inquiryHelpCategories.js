@@ -1,4 +1,4 @@
-import { FolderOpen, Flag, Swords, UserCircle } from 'lucide-react'
+import { FolderOpen, Flag, Swords, Trophy, UserCircle } from 'lucide-react'
 import { supabase } from './supabase'
 
 const TABLE = 'inquiry_help_categories'
@@ -92,6 +92,7 @@ const PRESET_STYLE = {
   matchup: { color: 'from-amber-400 to-orange-500', icon: Swords },
   account: { color: 'from-emerald-400 to-teal-500', icon: UserCircle },
   report: { color: 'from-rose-400 to-pink-500', icon: Flag },
+  ranking: { color: 'from-violet-400 to-indigo-500', icon: Trophy },
 }
 
 /**

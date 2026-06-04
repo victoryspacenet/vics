@@ -26,6 +26,11 @@ export class ErrorBoundary extends Component {
 
   render() {
     if (this.state.hasError) {
+      const err = this.state.error
+      const isDev = Boolean(import.meta.env?.DEV)
+      const devMessage = err instanceof Error ? err.message : String(err || '')
+      const devStack = err instanceof Error ? err.stack : ''
+
       return (
         <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-gray-50">
           <div className="max-w-sm w-full bg-white rounded-2xl shadow-lg border border-gray-100 p-8 text-center">
@@ -34,6 +39,24 @@ export class ErrorBoundary extends Component {
             <p className="text-sm text-gray-500 mb-6">
               화면이 예기치 않게 꺼졌을 수 있어요. 새로고침하면 해결될 거예요.
             </p>
+            {isDev && devMessage ? (
+              <div className="mb-4 text-left rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                <p className="font-semibold mb-1">개발 모드 — 오류 요약</p>
+                <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">
+                  {devMessage}
+                </pre>
+                {devStack ? (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer select-none text-[11px] font-medium text-amber-800">
+                      스택 보기
+                    </summary>
+                    <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] text-amber-900">
+                      {devStack}
+                    </pre>
+                  </details>
+                ) : null}
+              </div>
+            ) : null}
             <button
               onClick={this.handleRetry}
               className="flex items-center justify-center gap-2 w-full py-3.5 rounded-xl bg-[#22282E] text-white text-sm font-bold hover:bg-[#363d46] transition-colors"

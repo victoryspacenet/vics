@@ -354,7 +354,7 @@ BEGIN
           ) ORDER BY x.rk
         )
         FROM top_champ_all x
-        JOIN public.profiles p ON p.id = x.uid
+        JOIN public.profiles p ON p.id = x.uid AND public.rank_profile_eligible_for_board(p.id)
       ), '[]'::jsonb),
       'oracle_overall_top10',
       coalesce((
@@ -367,7 +367,7 @@ BEGIN
           ) ORDER BY x.rk
         )
         FROM top_ora_all x
-        JOIN public.profiles p ON p.id = x.uid
+        JOIN public.profiles p ON p.id = x.uid AND public.rank_profile_eligible_for_board(p.id)
       ), '[]'::jsonb),
       'champion_week_top3',
       coalesce((
@@ -380,7 +380,7 @@ BEGIN
           ) ORDER BY x.rk
         )
         FROM top_cw x
-        JOIN public.profiles p ON p.id = x.uid
+        JOIN public.profiles p ON p.id = x.uid AND public.rank_profile_eligible_for_board(p.id)
       ), '[]'::jsonb),
       'oracle_week_top3',
       coalesce((
@@ -393,7 +393,7 @@ BEGIN
           ) ORDER BY x.rk
         )
         FROM top_ow x
-        JOIN public.profiles p ON p.id = x.uid
+        JOIN public.profiles p ON p.id = x.uid AND public.rank_profile_eligible_for_board(p.id)
       ), '[]'::jsonb),
       'champion_month_top7',
       coalesce((
@@ -406,7 +406,7 @@ BEGIN
           ) ORDER BY x.rk
         )
         FROM top_cm x
-        JOIN public.profiles p ON p.id = x.uid
+        JOIN public.profiles p ON p.id = x.uid AND public.rank_profile_eligible_for_board(p.id)
       ), '[]'::jsonb),
       'oracle_month_top7',
       coalesce((
@@ -419,7 +419,7 @@ BEGIN
           ) ORDER BY x.rk
         )
         FROM top_om x
-        JOIN public.profiles p ON p.id = x.uid
+        JOIN public.profiles p ON p.id = x.uid AND public.rank_profile_eligible_for_board(p.id)
       ), '[]'::jsonb)
     ) INTO v_out;
   ELSE
@@ -440,6 +440,7 @@ BEGIN
             END DESC NULLS LAST
         )::bigint AS rk
       FROM public.profiles p
+      WHERE public.rank_profile_eligible_for_board(p.id)
     )
     SELECT jsonb_build_object(
       'champion_overall_top10', '[]'::jsonb,
@@ -461,7 +462,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.profiles_goat_period_leaderboard(boolean) IS
-  '메인 Goat: Champion/Oracle 누적·주·월 획득 P Top + (PT 없을 때) 누적/시즌 포인트 Top10.';
+  '메인 Goat: Champion/Oracle 누적·주·월 획득 P Top + (PT 없을 때) 누적/시즌 포인트 Top10. 프로필 행은 rank_profile_eligible_for_board(auth+이메일 패턴) 로 한정.';
 
 REVOKE ALL ON FUNCTION public.profiles_goat_period_leaderboard(boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.profiles_goat_period_leaderboard(boolean) TO anon, authenticated;

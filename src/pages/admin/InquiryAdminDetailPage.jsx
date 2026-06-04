@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, ChevronDown, FileText, Send, Loader2 } from 'lucide-react'
 import {
@@ -11,6 +11,7 @@ import {
 import { Modal } from '../../components/ui/Modal'
 import { useUIStore } from '../../store/uiStore'
 import { supabase } from '../../lib/supabase'
+import { resolveSiteUrl } from '../../lib/siteApiBase'
 
 const STATUS_LABELS = {
   [ADMIN_STATUS.pending]: '미답변',
@@ -38,7 +39,12 @@ export function InquiryAdminDetailPage() {
   const [templateOpen, setTemplateOpen] = useState(false)
   const [sendConfirmOpen, setSendConfirmOpen] = useState(false)
   const [templates, setTemplates] = useState([])
+  const [selectedTemplateId, setSelectedTemplateId] = useState(null)
   const isSbInquiry = isUUID(id)
+
+  useEffect(() => {
+    setSelectedTemplateId(null)
+  }, [id])
 
   useEffect(() => {
     void getReplyTemplates().then(setTemplates)
@@ -113,8 +119,14 @@ export function InquiryAdminDetailPage() {
   const handleLoadTemplate = async (templateId) => {
     const body = await getTemplateBody(templateId, inquiry?.nickname)
     setReply(body)
+    setSelectedTemplateId(templateId)
     setTemplateOpen(false)
   }
+
+  const selectedTemplateLabel = useMemo(() => {
+    if (!selectedTemplateId) return null
+    return templates.find((t) => t.id === selectedTemplateId)?.name ?? null
+  }, [selectedTemplateId, templates])
 
   const handleSaveDraft = async () => {
     if (isSbInquiry) {
@@ -163,7 +175,7 @@ export function InquiryAdminDetailPage() {
         const { data: sess } = await supabase.auth.getSession()
         const token = sess?.session?.access_token
         if (token && inquiry?.userId) {
-          const r = await fetch('/api/inquiry-reply-email', {
+          const r = await fetch(resolveSiteUrl('/api/inquiry-reply-email'), {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -279,22 +291,29 @@ export function InquiryAdminDetailPage() {
           <h3 className="text-sm font-bold text-[#22282E] mb-3">A. 답변 작성</h3>
           <div className="relative mb-3">
             <button
+              type="button"
+              disabled={inquiry.status === ADMIN_STATUS.completed}
               onClick={() => setTemplateOpen(!templateOpen)}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50"
+              className="flex w-full max-w-xl items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <FileText size={16} />
-              자주 쓰는 템플릿 불러오기
-              <ChevronDown size={14} className={templateOpen ? 'rotate-180' : ''} />
+              <FileText size={16} className="shrink-0" />
+              <span className="min-w-0 flex-1 truncate text-left font-medium text-[#22282E]">
+                {selectedTemplateLabel || '자주 쓰는 템플릿 불러오기'}
+              </span>
+              <ChevronDown size={14} className={`shrink-0 transition-transform ${templateOpen ? 'rotate-180' : ''}`} />
             </button>
             {templateOpen && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setTemplateOpen(false)} />
-                <div className="absolute top-full left-0 right-0 mt-1 py-1 bg-white rounded-lg border shadow-lg z-20 max-h-48 overflow-y-auto">
+                <div className="absolute top-full left-0 right-0 mt-1 max-w-xl py-1 bg-white rounded-lg border shadow-lg z-20 max-h-72 overflow-y-auto">
                   {templates.map((t) => (
                     <button
                       key={t.id}
+                      type="button"
                       onClick={() => handleLoadTemplate(t.id)}
-                      className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50"
+                      className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-50 ${
+                        t.id === selectedTemplateId ? 'bg-emerald-50/80 font-semibold text-emerald-900' : ''
+                      }`}
                     >
                       {t.name}
                     </button>

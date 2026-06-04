@@ -7,6 +7,7 @@ import {
 } from '../lib/inquiryCategoryHelp'
 import { getHelpCategoryPresentation, listInquiryHelpCategories } from '../lib/inquiryHelpCategories'
 import { cn } from '../lib/utils'
+import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../lib/layoutShellClasses'
 
 /** MZ 파스텔 — 문의 메인과 동일 계열 */
 const PAGE_BG =
@@ -143,7 +144,7 @@ export function InquiryCategoryPage() {
 
   return (
     <div className={cn('min-h-screen', PAGE_BG)}>
-      <div className="max-w-screen-lg mx-auto">
+      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto')}>
         <div className={cn('sticky top-0 z-10 px-4 py-3 flex items-center gap-3', HEADER_GLASS)}>
           <button
             type="button"

@@ -70,6 +70,11 @@ const TYPE_CONFIG = {
     color: 'text-cyan-600',
     bg: 'bg-gradient-to-br from-cyan-100 to-sky-100 ring-1 ring-cyan-200/60',
   },
+  moderation_forfeit: {
+    icon: AlertTriangle,
+    color: 'text-rose-700',
+    bg: 'bg-gradient-to-br from-rose-100 to-red-100 ring-1 ring-rose-200/60',
+  },
 }
 
 function payloadObj(notif) {
@@ -225,7 +230,8 @@ export function NotificationPanel({ onClose }) {
               notif.type === 'appeal_result' ||
               notif.type === 'content_deletion' ||
               notif.type === 'restriction_lift' ||
-              notif.type === 'inquiry_reply'
+              notif.type === 'inquiry_reply' ||
+              notif.type === 'moderation_forfeit'
             return (
               <button
                 key={notif.id}

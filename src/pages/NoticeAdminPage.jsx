@@ -250,13 +250,21 @@ export function NoticeAdminPage() {
             aria-hidden
           />
           <div className="relative space-y-4">
-            <Link
-              to="/admin/notice/popup/list"
-              className="inline-flex items-center gap-2 rounded-xl border border-white/80 bg-white/70 px-3 py-2 text-xs font-bold text-gray-600 shadow-sm backdrop-blur-sm transition hover:border-emerald-200 hover:bg-white hover:text-emerald-800"
-            >
-              <ArrowLeft size={16} strokeWidth={2.25} />
-              팝업 목록으로
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                to="/admin/notice/list"
+                className="inline-flex items-center gap-2 rounded-xl border border-white/80 bg-white/70 px-3 py-2 text-xs font-bold text-gray-600 shadow-sm backdrop-blur-sm transition hover:border-emerald-200 hover:bg-white hover:text-emerald-800"
+              >
+                <ArrowLeft size={16} strokeWidth={2.25} />
+                공지 목록
+              </Link>
+              <Link
+                to="/admin/notice/popup/list"
+                className="inline-flex items-center gap-2 rounded-xl border border-white/80 bg-white/70 px-3 py-2 text-xs font-bold text-gray-600 shadow-sm backdrop-blur-sm transition hover:border-violet-200 hover:bg-white hover:text-violet-800"
+              >
+                팝업 목록
+              </Link>
+            </div>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-5">
               <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-600/30 ring-4 ring-white/80">
                 <Megaphone size={26} strokeWidth={2.25} />
@@ -390,6 +398,7 @@ export function NoticeAdminPage() {
                 value={content}
                 onChange={setContent}
                 placeholder="이미지 드래그 앤 드롭 또는 툴바로 서식 적용"
+                onImageUploadError={(msg) => showToast(msg, 'error')}
               />
             </div>
           </SectionCard>

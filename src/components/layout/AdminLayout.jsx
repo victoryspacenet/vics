@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { Link, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { Search, Bell, Menu, X, LayoutDashboard, Swords, Users, FolderOpen, Megaphone, MessageSquareWarning, HeadphonesIcon, Settings, ExternalLink } from 'lucide-react'
 import { useUIStore } from '../../store/uiStore'
@@ -10,6 +10,7 @@ import { notifyNewAdminLoginDevice } from '../../lib/systemPushClient'
 import { useAdminPermissionStore } from '../../store/adminPermissionStore'
 import { Toast } from '../ui/Toast'
 import { AdminNotificationPanel, useAdminUnreadCount } from '../admin/AdminNotificationPanel'
+import { EmergencyMaintenanceControl } from '../admin/EmergencyMaintenanceControl'
 
 const SIDEBAR_ITEMS = [
   { to: '/admin/dashboard', label: '대시보드', icon: LayoutDashboard, menuKey: 'dashboard' },
@@ -39,9 +40,11 @@ export function AdminLayout() {
   const suspended = useAdminPermissionStore((s) => s.suspended)
 
   useEffect(() => {
-    if (!user?.email || !canAccessAdmin(user)) return
+    if (!user?.email) return
     void load(user)
-    void touchOperatorLastAccessByEmail(user.email)
+    if (canAccessAdmin(user)) {
+      void touchOperatorLastAccessByEmail(user.email)
+    }
   }, [user?.email, user, load])
 
   useEffect(() => {
@@ -67,8 +70,12 @@ export function AdminLayout() {
     showToast('이 메뉴에 대한 조회 권한이 없어요.', 'error')
   }, [pathname, loading, suspended, showToast])
 
-  // 세션 복원 중에는 판단 보류 (새로고침 시 user가 잠깐 null이 되는 문제 방지)
-  if (authLoading) {
+  if (!authLoading && !user) {
+    return <Navigate to="/" replace />
+  }
+
+  // 세션·운영자 권한 확인 전에는 판단 보류
+  if (authLoading || (user?.email && loading)) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
         <div className="text-sm font-medium text-gray-400">로딩 중…</div>
@@ -165,6 +172,7 @@ export function AdminLayout() {
               />
             </div>
           </div>
+          <EmergencyMaintenanceControl compact />
           <Link
             to="/"
             className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm font-bold hover:bg-emerald-100 transition-colors shrink-0"
@@ -206,7 +214,15 @@ export function AdminLayout() {
               권한 정보 확인 중…
             </div>
           ) : (
-            <Outlet />
+            <Suspense
+              fallback={
+                <div className="flex min-h-[40vh] items-center justify-center text-sm font-medium text-gray-500">
+                  페이지 로딩 중…
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
           )}
         </main>
       </div>

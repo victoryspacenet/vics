@@ -69,6 +69,7 @@
   body {
     color: #22282E;
     min-height: 100vh;
+    min-height: 100dvh;
     line-height: 1.65;
     letter-spacing: -0.01em;
     background: linear-gradient(
@@ -78,6 +79,21 @@
       #f3f6f4 100%
     );
     background-attachment: fixed;
+  }
+
+  /* 오프라인 배너(fixed) 높이만큼 본문이 가려지지 않도록 — OfflineConnectivityBanner에서 변수 설정 */
+  body.vics-offline-banner-open {
+    padding-top: var(--vics-offline-banner-h, 0px);
+  }
+
+  /* 앱·터치 기기: 더블탭 줌 지연 제거, 스크롤과 제스처 충돌 완화 */
+  button,
+  [role='button'],
+  summary,
+  input[type='button'],
+  input[type='submit'],
+  input[type='reset'] {
+    touch-action: manipulation;
   }
 
   h1,

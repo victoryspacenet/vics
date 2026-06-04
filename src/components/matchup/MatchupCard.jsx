@@ -17,22 +17,28 @@ import { getTier, tierAtLeast } from '../../lib/tiers'
 import { isFeedBannerHighlightActive } from '../../lib/bannerHighlightBoost'
 import { isMatchupCreatorVipTierGlow, VIP_MATCHUP_SURFACE_CLASS } from '../../lib/matchupCreatorVipGlow'
 import { formatDate, formatNumber, copyToClipboard, calcPercent, cn } from '../../lib/utils'
+import { voteViaApi } from '../../lib/voteApi'
 import { fandomTierHasDiamondListNicknameAura } from '../../lib/fandomTiers'
 import { FandomBronzeStarBadge } from '../fandom/FandomBronzeStarBadge'
+import { MatchupMediaOpenButton, MatchupMediaViewer } from './MatchupMediaViewer'
+import { matchupSideToMedia } from '../../lib/matchupMediaView'
+import { useMatchupEngagement } from './MatchupEngagementContext'
 
 export function MatchupCard({ matchup: initialMatchup, compact, onVoteUpdate }) {
   const { user, profile, fetchProfile } = useAuthStore()
   const { showToast } = useUIStore()
   const navigate = useNavigate()
+  const batchEngagement = useMatchupEngagement(initialMatchup?.id)
 
   const [matchup, setMatchup] = useState(initialMatchup)
   const [userVote, setUserVote] = useState(null)
-  const [isVoting, setIsVoting] = useState(false)
+  const [voteSubmitting, setVoteSubmitting] = useState(false)
   const [voteLocked, setVoteLocked] = useState(false)
   const [liked, setLiked] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
   const [fireworkTrigger, setFireworkTrigger] = useState(0)
   const [fireworkPos, setFireworkPos] = useState({ x: 0, y: 0 })
+  const [viewerMedia, setViewerMedia] = useState(null)
 
   const isComplete = matchup.right_type != null
   const userTier = getTier(profile || {})
@@ -42,11 +48,21 @@ export function MatchupCard({ matchup: initialMatchup, compact, onVoteUpdate }) 
   }, [initialMatchup])
 
   useEffect(() => {
-    if (user && matchup.id) {
-      fetchUserVote()
-      fetchUserLike()
+    if (!user || !matchup.id) return
+    if (batchEngagement?.ready) {
+      if (batchEngagement.userVote) {
+        setUserVote(batchEngagement.userVote)
+        setVoteLocked(true)
+      } else {
+        setUserVote(null)
+        setVoteLocked(false)
+      }
+      setLiked(batchEngagement.liked)
+      return
     }
-  }, [user, matchup.id])
+    void fetchUserVote()
+    void fetchUserLike()
+  }, [user, matchup.id, batchEngagement?.ready, batchEngagement?.userVote, batchEngagement?.liked])
 
   const fetchUserVote = async () => {
     const { data } = await supabase
@@ -73,36 +89,37 @@ export function MatchupCard({ matchup: initialMatchup, compact, onVoteUpdate }) 
 
   const handleVote = async (side, e) => {
     if (!user) return
-    if (isVoting || !isComplete) return
+    if (voteSubmitting || !isComplete) return
     if (tierAtLeast(userTier, 'master') && e) {
       setFireworkPos({ x: e.clientX, y: e.clientY })
       setFireworkTrigger((t) => t + 1)
     }
-    setIsVoting(true)
+    if (userVote) {
+      onVoteUpdate?.()
+      return
+    }
+    setVoteSubmitting(true)
     try {
-      if (!userVote) {
-        // 신규 투표
-        const { error } = await supabase
-          .from('votes')
-          .insert({ user_id: user.id, matchup_id: matchup.id, side })
-        if (error) throw error
-
-        setUserVote(side)
-        setMatchup((prev) => ({
-          ...prev,
-          left_votes: side === 'left' ? (prev.left_votes || 0) + 1 : prev.left_votes,
-          right_votes: side === 'right' ? (prev.right_votes || 0) + 1 : prev.right_votes,
-          total_votes: (prev.total_votes || 0) + 1,
-        }))
-        showToast('투표 완료! 매치업 종료 후 결과에 따라 포인트가 지급돼요', 'success')
-        setVoteLocked(true)
-        setTimeout(() => fetchProfile(user.id), 800)
+      const result = await voteViaApi(matchup.id, side)
+      if (result.error) {
+        showToast(result.error, 'error')
+        return
       }
+      setUserVote(side)
+      setMatchup((prev) => ({
+        ...prev,
+        left_votes: side === 'left' ? (prev.left_votes || 0) + 1 : prev.left_votes,
+        right_votes: side === 'right' ? (prev.right_votes || 0) + 1 : prev.right_votes,
+        total_votes: (prev.total_votes || 0) + 1,
+      }))
+      showToast('투표 완료! 매치업 종료 후 결과에 따라 포인트가 지급돼요', 'success')
+      setVoteLocked(true)
+      setTimeout(() => fetchProfile(user.id), 800)
       onVoteUpdate?.()
     } catch (err) {
-      showToast('투표 중 오류가 발생했어요', 'error')
+      showToast(err?.message || '투표 중 오류가 발생했어요', 'error')
     } finally {
-      setIsVoting(false)
+      setVoteSubmitting(false)
     }
   }
 
@@ -198,36 +215,38 @@ export function MatchupCard({ matchup: initialMatchup, compact, onVoteUpdate }) 
       )}
 
       {/* 콘텐츠 영역 */}
-      <Link to={`/matchup/${matchup.id}`} className="block">
-        <div className="grid grid-cols-2 gap-1 px-1 mb-1">
+      <div className="grid grid-cols-2 gap-1 px-1 mb-1">
+        <ContentBox
+          type={matchup.left_type}
+          url={matchup.left_url}
+          text={matchup.left_text}
+          thumbnail={matchup.left_thumbnail_url}
+          label={matchup.left_label || 'A'}
+          voted={userVote === 'left'}
+          compact={compact}
+          side="left"
+          media={matchupSideToMedia(matchup, 'left')}
+          onOpenMedia={setViewerMedia}
+        />
+        {isComplete ? (
           <ContentBox
-            type={matchup.left_type}
-            url={matchup.left_url}
-            text={matchup.left_text}
-            thumbnail={matchup.left_thumbnail_url}
-            label={matchup.left_label || 'A'}
-            voted={userVote === 'left'}
+            type={matchup.right_type}
+            url={matchup.right_url}
+            text={matchup.right_text}
+            thumbnail={matchup.right_thumbnail_url}
+            label={matchup.right_label || 'B'}
+            voted={userVote === 'right'}
             compact={compact}
-            side="left"
+            side="right"
+            media={matchupSideToMedia(matchup, 'right')}
+            onOpenMedia={setViewerMedia}
           />
-          {isComplete ? (
-            <ContentBox
-              type={matchup.right_type}
-              url={matchup.right_url}
-              text={matchup.right_text}
-              thumbnail={matchup.right_thumbnail_url}
-              label={matchup.right_label || 'B'}
-              voted={userVote === 'right'}
-              compact={compact}
-              side="right"
-            />
-          ) : (
-            <div className="flex items-center justify-center bg-gray-50 rounded-xl border-2 border-dashed border-gray-200 aspect-square text-gray-300 text-xs">
-              도전자 모집 중
-            </div>
-          )}
-        </div>
-      </Link>
+        ) : (
+          <div className="flex items-center justify-center bg-gray-50 rounded-xl border-2 border-dashed border-gray-200 aspect-square text-gray-300 text-xs">
+            도전자 모집 중
+          </div>
+        )}
+      </div>
 
       {/* 투표 버튼 */}
       {isComplete && (
@@ -238,6 +257,7 @@ export function MatchupCard({ matchup: initialMatchup, compact, onVoteUpdate }) 
             voted={userVote === 'left'}
             locked={voteLocked && userVote !== 'left'}
             guestLocked={!user}
+            submitting={voteSubmitting && !userVote}
             onClick={(e) => handleVote('left', e)}
           />
           <VoteButton
@@ -246,6 +266,7 @@ export function MatchupCard({ matchup: initialMatchup, compact, onVoteUpdate }) 
             voted={userVote === 'right'}
             locked={voteLocked && userVote !== 'right'}
             guestLocked={!user}
+            submitting={voteSubmitting && !userVote}
             onClick={(e) => handleVote('right', e)}
           />
         </div>
@@ -306,11 +327,28 @@ export function MatchupCard({ matchup: initialMatchup, compact, onVoteUpdate }) 
       </div>
 
       <VoteFireworks trigger={fireworkTrigger} x={fireworkPos.x} y={fireworkPos.y} />
+
+      <MatchupMediaViewer
+        open={Boolean(viewerMedia)}
+        media={viewerMedia}
+        onClose={() => setViewerMedia(null)}
+      />
     </div>
   )
 }
 
-function ContentBox({ type, url, text, thumbnail, label, voted, compact, side = 'left' }) {
+function ContentBox({
+  type,
+  url,
+  text,
+  thumbnail,
+  label,
+  voted,
+  compact,
+  side = 'left',
+  media,
+  onOpenMedia,
+}) {
   const height = compact ? 'h-28' : 'h-36'
   const neonRing =
     side === 'left'
@@ -325,25 +363,41 @@ function ContentBox({ type, url, text, thumbnail, label, voted, compact, side = 
       {voted && (
         <div className={`pointer-events-none absolute inset-0 z-[8] rounded-[10px] ${neonRing}`} />
       )}
-      <span className={`absolute left-2 top-2 z-10 ${labelBar} rounded-md px-2 py-0.5 text-xs font-bold text-white shadow-sm`}>
+      <span className={`pointer-events-none absolute left-2 top-2 z-10 ${labelBar} rounded-md px-2 py-0.5 text-xs font-bold text-white shadow-sm`}>
         {label}
       </span>
-      {type === 'image' && url && (
-        <img src={safeMediaUrl(thumbnail || url)} alt={label ?? ''} className="h-full w-full object-cover" />
+      <MatchupMediaOpenButton media={media} onOpen={onOpenMedia} className="h-full min-h-0">
+        {type === 'image' && url && (
+        <img
+          src={safeMediaUrl(thumbnail || url)}
+          alt={label ?? ''}
+          className="h-full w-full object-cover"
+          loading="lazy"
+          decoding="async"
+          fetchPriority="low"
+        />
       )}
       {type === 'video' && (url || thumbnail) && (
-        <img src={safeMediaUrl(thumbnail || url)} alt={label ?? ''} className="h-full w-full object-cover" />
+        <img
+          src={safeMediaUrl(thumbnail || url)}
+          alt={label ?? ''}
+          className="h-full w-full object-cover"
+          loading="lazy"
+          decoding="async"
+          fetchPriority="low"
+        />
       )}
       {type === 'text' && (
         <div className="flex h-full w-full items-center justify-center p-3">
           <p className="line-clamp-2 text-center text-xs font-medium text-[#22282E]">{text}</p>
         </div>
       )}
+      </MatchupMediaOpenButton>
     </MatchupThumbFrame>
   )
 }
 
-function VoteButton({ side, label, voted, locked, guestLocked, onClick }) {
+function VoteButton({ side, label, voted, locked, guestLocked, submitting, onClick }) {
   const isLeft = side === 'left'
   const chosen =
     'text-white shadow-lg active:scale-[0.98] ' +
@@ -355,19 +409,44 @@ function VoteButton({ side, label, voted, locked, guestLocked, onClick }) {
       ? 'bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white hover:shadow-[0_0_20px_rgba(217,70,239,0.4)] hover:scale-[1.02]'
       : 'bg-gradient-to-r from-sky-400 to-blue-500 text-white hover:shadow-[0_0_20px_rgba(14,165,233,0.4)] hover:scale-[1.02]') +
     ' active:scale-[0.97]'
-  const disabled = locked || guestLocked
+  const disabled = locked || guestLocked || submitting
   const guestIdle = guestLocked && !voted && !locked
   return (
     <button
       type="button"
-      title={guestIdle ? '로그인 후 투표할 수 있어요' : undefined}
+      title={
+        guestIdle
+          ? '로그인 후 투표할 수 있어요'
+          : submitting
+            ? '투표 처리 중…'
+            : undefined
+      }
       onClick={onClick}
       disabled={disabled}
-      className={`py-2 rounded-xl text-xs font-black transition-all ${
-        voted ? chosen : guestIdle ? 'cursor-not-allowed bg-slate-100 text-slate-400 ring-1 ring-slate-200/90 shadow-none' : locked ? 'bg-gray-100 text-gray-300 cursor-not-allowed shadow-none' : idle
+      className={`py-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+        voted
+          ? chosen
+          : guestIdle
+            ? 'cursor-not-allowed bg-slate-100 text-slate-400 ring-1 ring-slate-200/90 shadow-none'
+            : locked
+              ? 'bg-gray-100 text-gray-300 cursor-not-allowed shadow-none'
+              : submitting
+                ? 'cursor-wait opacity-90 bg-slate-200/90 text-slate-600 shadow-none'
+                : idle
       }`}
     >
-      {voted ? `✓ ${label}에 투표함` : guestIdle ? '로그인 후 투표' : `${label} 선택`}
+      {submitting ? (
+        <>
+          <span className="h-3.5 w-3.5 shrink-0 rounded-full border-2 border-current/30 border-t-current animate-spin" aria-hidden />
+          처리 중…
+        </>
+      ) : voted ? (
+        `✓ ${label}에 투표함`
+      ) : guestIdle ? (
+        '로그인 후 투표'
+      ) : (
+        `${label} 선택`
+      )}
     </button>
   )
 }

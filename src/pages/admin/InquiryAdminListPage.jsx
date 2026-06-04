@@ -2,10 +2,11 @@ import { useState, useMemo, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, ChevronDown, Flame, FolderOpen, Search, Clock } from 'lucide-react'
 import {
-  getAdminInquiries,
   ADMIN_STATUS,
   INQUIRY_CATEGORIES,
+  applyInquiryAdminListExclusions,
 } from '../../lib/inquiryAdminStorage'
+import { getAutoReplyExcludedInquiryIds } from '../../lib/inquiryAdminAutoReplyIds'
 import { supabase } from '../../lib/supabase'
 
 async function loadSLAHours() {
@@ -17,6 +18,11 @@ async function loadSLAHours() {
   return data?.value?.hours ?? 12
 }
 
+// NOTE: inquiries.user_id가 auth.users를 참조하는 환경에서는 PostgREST embed `profiles:user_id(...)`가
+// 관계를 못 찾아 목록 조회가 실패할 수 있습니다. (count 쿼리는 되는데 목록만 비는 현상)
+const INQUIRY_LIST_SELECT =
+  'id, receipt_id, user_id, category, category_label, title, content, status, image_urls, created_at'
+
 /** Supabase inquiries → 어드민 목록 공통 포맷으로 변환 */
 function normalizeSupabaseInquiry(row) {
   return {
@@ -27,11 +33,43 @@ function normalizeSupabaseInquiry(row) {
     categoryLabel: row.category_label || row.category,
     title: row.title,
     content: row.content,
-    nickname: row.profiles?.nickname || '(알 수 없음)',
+    nickname: '(알 수 없음)',
     createdAt: row.created_at,
     attachments: row.image_urls || [],
     _source: 'supabase',
   }
+}
+
+/** PostgREST `or()` 안에 넣을 ilike 패턴 (쉼표·따옴표 이스케이프) */
+function ilikePatternQuoted(trimmed) {
+  return `"${`%${trimmed}%`.replace(/"/g, '""')}"`
+}
+
+function buildInquiryListQuery({ statusFilter, categoryFilter, searchTrim }) {
+  let q = applyInquiryAdminListExclusions(
+    supabase
+      .from('inquiries')
+      .select(INQUIRY_LIST_SELECT, { count: 'exact' }),
+  )
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: true })
+
+  if (statusFilter === ADMIN_STATUS.completed) {
+    q = q.eq('status', 'completed')
+  } else if (statusFilter === ADMIN_STATUS.pending) {
+    q = q.neq('status', 'completed')
+  }
+
+  if (categoryFilter) {
+    q = q.eq('category', categoryFilter)
+  }
+
+  if (searchTrim) {
+    const quoted = ilikePatternQuoted(searchTrim)
+    q = q.or(`title.ilike.${quoted},content.ilike.${quoted}`)
+  }
+
+  return q
 }
 
 const STATUS_LABELS = {
@@ -55,66 +93,116 @@ export function InquiryAdminListPage() {
   const [statusOpen, setStatusOpen] = useState(false)
   const [categoryOpen, setCategoryOpen] = useState(false)
   const [slaHours, setSlaHours] = useState(12)
-  const [allInquiries, setAllInquiries] = useState([])
+  /** 자동응대가 붙은 문의 id */
+  const [autoInquiryIds, setAutoInquiryIds] = useState([])
+  const [listRows, setListRows] = useState([])
+  const [totalCount, setTotalCount] = useState(0)
+  const [statsPending, setStatsPending] = useState(0)
+  const [statsCompleted, setStatsCompleted] = useState(0)
+  const [slaBreachedDb, setSlaBreachedDb] = useState(0)
+  const [metaReady, setMetaReady] = useState(false)
   const [loading, setLoading] = useState(true)
 
-  const loadInquiries = useCallback(async () => {
+  const searchTrim = searchQuery.trim()
+
+  const loadGlobalMeta = useCallback(async () => {
+    const sla = await loadSLAHours()
+    setSlaHours(sla)
+
+    const autoIds = await getAutoReplyExcludedInquiryIds()
+    setAutoInquiryIds(autoIds)
+
+    const thresholdIso = new Date(Date.now() - sla * 60 * 60 * 1000).toISOString()
+
+    // 자동응답 문의도 운영자가 확인 가능해야 하므로, 통계에서도 제외하지 않습니다.
+    const pendingQ = applyInquiryAdminListExclusions(
+      supabase.from('inquiries').select('id', { count: 'exact', head: true }).neq('status', 'completed'),
+    )
+    const completedQ = applyInquiryAdminListExclusions(
+      supabase.from('inquiries').select('id', { count: 'exact', head: true }).eq('status', 'completed'),
+    )
+    const slaQ = applyInquiryAdminListExclusions(
+      supabase
+        .from('inquiries')
+        .select('id', { count: 'exact', head: true })
+        .neq('status', 'completed')
+        .lt('created_at', thresholdIso),
+    )
+
+    const [pr, cr, sr] = await Promise.all([pendingQ, completedQ, slaQ])
+    setStatsPending(typeof pr.count === 'number' ? pr.count : 0)
+    setStatsCompleted(typeof cr.count === 'number' ? cr.count : 0)
+    setSlaBreachedDb(typeof sr.count === 'number' ? sr.count : 0)
+  }, [])
+
+  const loadPage = useCallback(async () => {
     setLoading(true)
     try {
-      const sla = await loadSLAHours()
-      setSlaHours(sla)
+      const from = (page - 1) * PAGE_SIZE
+      const to = from + PAGE_SIZE - 1
+      const q = buildInquiryListQuery({
+        statusFilter,
+        categoryFilter,
+        searchTrim,
+      })
+      const { data, error, count } = await q.range(from, to)
+      if (error) throw error
+      const rows = data || []
+      const autoSet = new Set((autoInquiryIds || []).map(String))
 
-      // inquiries 조회
-      const { data: sbRows, error } = await supabase
-        .from('inquiries')
-        .select('id, receipt_id, user_id, category, category_label, title, content, status, image_urls, created_at')
-        .order('created_at', { ascending: false })
-
-      if (error || !sbRows) throw error || new Error('no data')
-
-      // 자동응대가 발송된 inquiry_id 목록 조회 → 어드민 목록에서 제외
-      const { data: autoReplied } = await supabase
-        .from('inquiry_replies')
-        .select('inquiry_id')
-        .eq('reply_type', 'auto')
-      const autoRepliedIds = new Set((autoReplied || []).map((r) => r.inquiry_id))
-
-      // 자동응대 제외 필터링
-      const filteredRows = sbRows.filter((r) => !autoRepliedIds.has(r.id))
-
-      // user_id 목록으로 profiles 별도 조회
-      const userIds = [...new Set(filteredRows.map((r) => r.user_id).filter(Boolean))]
-      let profileMap = {}
+      // 작성자 닉네임은 profiles에서 별도 조회 (embed 실패 방지)
+      const userIds = [...new Set(rows.map((r) => r.user_id).filter(Boolean).map(String))]
+      const nicknameById = {}
       if (userIds.length > 0) {
-        const { data: profiles } = await supabase
+        const { data: profRows } = await supabase
           .from('profiles')
           .select('id, nickname')
           .in('id', userIds)
-        if (profiles) {
-          profiles.forEach((p) => { profileMap[p.id] = p.nickname })
+        for (const p of profRows || []) {
+          nicknameById[String(p.id)] = p.nickname || ''
         }
       }
 
-      const supabaseItems = filteredRows.map((row) => normalizeSupabaseInquiry({
-        ...row,
-        profiles: { nickname: profileMap[row.user_id] || '(알 수 없음)' },
-      }))
-
-      // 목 데이터 중복 제거 후 병합
-      const sbReceiptIds = new Set(supabaseItems.map((i) => i.receiptId))
-      const mockItems = (await getAdminInquiries()).filter(
-        (m) => !sbReceiptIds.has(m.receiptId) && !sbReceiptIds.has(m.id)
+      setListRows(
+        rows.map((row) => ({
+          ...normalizeSupabaseInquiry(row),
+          nickname: nicknameById[String(row.user_id)] || '(알 수 없음)',
+          _autoReplied: autoSet.has(String(row.id)),
+        }))
       )
-      setAllInquiries([...supabaseItems, ...mockItems])
-    } catch {
-      // Supabase 실패 시 목 데이터로 fallback
-      setAllInquiries(await getAdminInquiries())
+      setTotalCount(typeof count === 'number' ? count : 0)
+    } catch (e) {
+      if (import.meta.env.DEV) {
+        console.warn('[InquiryAdminListPage] loadPage failed:', e?.message || e)
+      }
+      setListRows([])
+      setTotalCount(0)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [page, statusFilter, categoryFilter, searchTrim, autoInquiryIds])
 
-  useEffect(() => { loadInquiries() }, [loadInquiries])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      setLoading(true)
+      setMetaReady(false)
+      try {
+        await loadGlobalMeta()
+        if (!cancelled) setMetaReady(true)
+      } catch {
+        if (!cancelled) setMetaReady(true)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [loadGlobalMeta])
+
+  useEffect(() => {
+    if (!metaReady) return
+    void loadPage()
+  }, [metaReady, loadPage])
 
   const isSlaBreached = (inquiry) => {
     if (inquiry.status !== ADMIN_STATUS.pending) return false
@@ -122,28 +210,20 @@ export function InquiryAdminListPage() {
     return ageMs > slaHours * 60 * 60 * 1000
   }
 
-  const filtered = useMemo(() => {
-    return allInquiries.filter((i) => {
-      if (statusFilter && i.status !== statusFilter) return false
-      if (categoryFilter && i.category !== categoryFilter) return false
-      if (searchQuery.trim()) {
-        const q = searchQuery.trim().toLowerCase()
-        const matchTitle = (i.title || '').toLowerCase().includes(q)
-        const matchNick = (i.nickname || '').toLowerCase().includes(q)
-        if (!matchTitle && !matchNick) return false
-      }
-      return true
-    })
-  }, [allInquiries, statusFilter, categoryFilter, searchQuery])
+  const stats = useMemo(
+    () => ({
+      pending: statsPending,
+      completed: statsCompleted,
+    }),
+    [statsPending, statsCompleted],
+  )
 
-  const stats = useMemo(() => ({
-    pending:   allInquiries.filter((i) => i.status === ADMIN_STATUS.pending).length,
-    completed: allInquiries.filter((i) => i.status === ADMIN_STATUS.completed).length,
-  }), [allInquiries])
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+  const slaBreachedCount = slaBreachedDb
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-  const slaBreachedCount = allInquiries.filter(isSlaBreached).length
+  useEffect(() => {
+    setPage(1)
+  }, [statusFilter, categoryFilter, searchTrim])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -244,7 +324,7 @@ export function InquiryAdminListPage() {
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) => { setSearchQuery(e.target.value); setPage(1) }}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="닉네임/제목 검색..."
                 className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
               />
@@ -273,13 +353,13 @@ export function InquiryAdminListPage() {
                       불러오는 중...
                     </td>
                   </tr>
-                ) : paginated.length === 0 ? (
+                ) : listRows.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="px-4 py-12 text-center text-gray-400 text-sm">
                       검색 결과가 없습니다.
                     </td>
                   </tr>
-                ) : paginated.map((row) => {
+                ) : listRows.map((row) => {
                   const breached = isSlaBreached(row)
                   return (
                     <tr key={row.id} className={`border-b border-gray-50 hover:bg-gray-50/50 ${breached ? 'bg-red-50/30' : ''}`}>

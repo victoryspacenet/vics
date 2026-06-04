@@ -1,6 +1,14 @@
 import { create } from 'zustand'
 
-export const useUIStore = create((set) => ({
+/** B 도전 반영(성사) 또는 투표 1표 이상이면 수정 불가 */
+function isMatchupLockedForEdit(matchup) {
+  if (!matchup) return true
+  if (matchup.right_type != null) return true
+  if ((matchup.total_votes || 0) > 0) return true
+  return false
+}
+
+export const useUIStore = create((set, get) => ({
   isCreateDrawerOpen: false,
   /** 작성자(A) 쪽 수정 시 프리필용 매치업 행 (신규 생성 시 null) */
   createDrawerEditMatchup: null,
@@ -12,14 +20,26 @@ export const useUIStore = create((set) => ({
   toast: null,
 
   openCreateDrawer: () => set({ isCreateDrawerOpen: true, createDrawerEditMatchup: null }),
-  openCreateDrawerForEdit: (matchup) => set({ isCreateDrawerOpen: true, createDrawerEditMatchup: matchup }),
+  openCreateDrawerForEdit: (matchup) => {
+    if (isMatchupLockedForEdit(matchup)) {
+      get().showToast('매치업이 완료된 뒤에는 수정할 수 없어요.', 'info')
+      return
+    }
+    set({ isCreateDrawerOpen: true, createDrawerEditMatchup: matchup })
+  },
   closeCreateDrawer: () => set({ isCreateDrawerOpen: false, createDrawerEditMatchup: null }),
 
   openLoginModal: (context) => set({ isLoginModalOpen: true, loginModalContext: context }),
   closeLoginModal: () => set({ isLoginModalOpen: false, loginModalContext: null }),
 
-  openChallengeDrawer: (matchup, edit = false) =>
-    set({ challengeMatchup: matchup, challengeMatchupEdit: Boolean(edit) }),
+  openChallengeDrawer: (matchup, edit = false) => {
+    const wantEdit = Boolean(edit)
+    if (wantEdit && isMatchupLockedForEdit(matchup)) {
+      get().showToast('매치업이 완료된 뒤에는 수정할 수 없어요.', 'info')
+      return
+    }
+    set({ challengeMatchup: matchup, challengeMatchupEdit: wantEdit })
+  },
   closeChallengeDrawer: () => set({ challengeMatchup: null, challengeMatchupEdit: false }),
 
   showToast: (message, type = 'success') => {

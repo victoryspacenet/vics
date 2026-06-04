@@ -1,7 +1,15 @@
 import { supabase } from './supabase'
-import { FAQ_ITEMS, FAQ_MAIN_IDS } from './faqData'
+import { FAQ_ALL_IDS, FAQ_ITEMS, FAQ_MAIN_IDS } from './faqData'
+import { normalizeCategoryHelpRow } from './inquiryCategoryHelp'
+import { listInquiryHelpCategories } from './inquiryHelpCategories'
 
 const SETTINGS_KEY = 'inquiry_hot_faq'
+
+/** 카테고리 도움말 DB 행 — 문의 메인 핫 FAQ 참조 키 */
+export const HOT_FAQ_HELP_PREFIX = 'help:'
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 /** 다른 탭·창에서 저장했을 때 문의 메인이 갱신되도록 버전만 올림 (storage 이벤트) */
 export const INQUIRY_HOT_FAQ_LS_REV_KEY = 'vics_inquiry_hot_faq_rev'
@@ -14,16 +22,122 @@ function bumpLocalRevision() {
   }
 }
 
+export function isHotFaqHelpRef(ref) {
+  return String(ref || '').startsWith(HOT_FAQ_HELP_PREFIX)
+}
+
+export function hotFaqHelpRef(helpId) {
+  return `${HOT_FAQ_HELP_PREFIX}${String(helpId)}`
+}
+
+export function parseHotFaqHelpId(ref) {
+  if (!isHotFaqHelpRef(ref)) return null
+  const id = ref.slice(HOT_FAQ_HELP_PREFIX.length)
+  return UUID_RE.test(id) ? id : null
+}
+
+function normTitle(title) {
+  return String(title || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+function faqPairKey(category, title) {
+  return `${String(category || '').trim()}::${normTitle(title)}`
+}
+
+/**
+ * 노출 목록에 이미 올라간 항목(및 같은 질문의 faq id ↔ help: 짝) — 풀에서 제외
+ * @param {string[]} orderedRefs
+ * @param {{ id: string, category_slug: string, title: string }[]} helpRows
+ */
+export function buildHotFaqCoverSet(orderedRefs, helpRows) {
+  const cover = new Set(orderedRefs || [])
+  const helpByKey = new Map()
+  for (const row of helpRows || []) {
+    helpByKey.set(faqPairKey(row.category_slug, row.title), row)
+  }
+  const faqIdByKey = new Map()
+  for (const id of FAQ_ALL_IDS) {
+    const faq = FAQ_ITEMS[id]
+    if (faq) faqIdByKey.set(faqPairKey(faq.category, faq.question), id)
+  }
+
+  for (const ref of orderedRefs || []) {
+    if (FAQ_ITEMS[ref]) {
+      const faq = FAQ_ITEMS[ref]
+      const row = helpByKey.get(faqPairKey(faq.category, faq.question))
+      if (row) cover.add(hotFaqHelpRef(row.id))
+    }
+    if (isHotFaqHelpRef(ref)) {
+      const hid = parseHotFaqHelpId(ref)
+      const row = (helpRows || []).find((r) => String(r.id) === hid)
+      if (row) {
+        const fid = faqIdByKey.get(faqPairKey(row.category_slug, row.title))
+        if (fid) cover.add(fid)
+      }
+    }
+  }
+  return cover
+}
+
+/** 저장 시 같은 질문이면 help: 참조로 통일 (faq id 5·8 과 help: 중복 방지) */
+export async function normalizeHotFaqRefsForSave(refs) {
+  const helpRows = await fetchAllCategoryHelpRows()
+  const helpByKey = new Map(
+    helpRows.map((r) => [faqPairKey(r.category_slug, r.title), r]),
+  )
+  const out = []
+  const seenKeys = new Set()
+
+  for (const ref of refs || []) {
+    let finalRef = ref
+    let pairKey = null
+
+    if (FAQ_ITEMS[ref]) {
+      const faq = FAQ_ITEMS[ref]
+      pairKey = faqPairKey(faq.category, faq.question)
+      const row = helpByKey.get(pairKey)
+      if (row) finalRef = hotFaqHelpRef(row.id)
+    } else if (isHotFaqHelpRef(ref)) {
+      const hid = parseHotFaqHelpId(ref)
+      const row = helpRows.find((r) => String(r.id) === hid)
+      if (row) pairKey = faqPairKey(row.category_slug, row.title)
+    }
+
+    if (pairKey) {
+      if (seenKeys.has(pairKey)) continue
+      seenKeys.add(pairKey)
+    }
+
+    if (isValidHotFaqRefSimple(finalRef, helpRows)) out.push(finalRef)
+  }
+  return out
+}
+
+function isValidHotFaqRefSimple(ref, helpRows) {
+  const helpIdSet = new Set((helpRows || []).map((r) => String(r.id)))
+  return isValidHotFaqRef(ref, helpIdSet)
+}
+
+/** @returns {Promise<{ id: string, category_slug: string, title: string, on_list?: boolean }[]>} */
 export async function fetchCategoryHelpRowsForHotFilter() {
+  return fetchAllCategoryHelpRows()
+}
+
+/** 카테고리 FAQ에 저장된 모든 도움말 (노출·풀 구분 없음) */
+export async function fetchAllCategoryHelpRows() {
   try {
     const { data, error } = await supabase
       .from('inquiry_category_help')
-      .select('category_slug, title, on_list')
+      .select('id, category_slug, title, answer, body, steps, actions, illustration, on_list, sort_order')
+      .order('category_slug')
+      .order('sort_order', { ascending: true })
     if (error) {
       console.warn('[inquiryHotFaq] category_help:', error.message)
       return []
     }
-    return data || []
+    return (data || []).filter((r) => String(r.title || '').trim())
   } catch (e) {
     console.warn('[inquiryHotFaq] category_help fetch', e)
     return []
@@ -31,81 +145,155 @@ export async function fetchCategoryHelpRowsForHotFilter() {
 }
 
 /**
- * FAQ와 동일한 category_slug·제목(title)인 inquiry_category_help 행이 하나라도 있으면,
- * 그중 on_list=true 인 행이 없을 때 메인 핫 FAQ에서 제외한다.
- * (DB에 해당 제목 행이 없으면 코드 전용 FAQ로 보고 항상 허용)
- * @param {string[]} ids
- * @param {{ category_slug: string, title: string, on_list?: boolean }[]} helpRows
+ * @param {string} ref
+ * @param {Map<string, object>} helpById
+ * @param {Map<string, string>} categoryLabelBySlug
  */
-export function filterHotFaqIdsByListedCategoryHelp(ids, helpRows) {
-  const rows = helpRows || []
-  return ids.filter((id) => {
-    const faq = FAQ_ITEMS[id]
-    if (!faq) return false
-    const slug = faq.category
-    const q = String(faq.question || '').trim()
-    const matching = rows.filter(
-      (r) => r.category_slug === slug && String(r.title || '').trim() === q,
-    )
-    if (matching.length === 0) return true
-    return matching.some((r) => r.on_list !== false)
-  })
+export function resolveHotFaqRef(ref, helpById, categoryLabelBySlug) {
+  if (isHotFaqHelpRef(ref)) {
+    const hid = parseHotFaqHelpId(ref)
+    if (!hid) return null
+    const row = helpById?.get(hid)
+    if (!row) return null
+    const n = normalizeCategoryHelpRow(row)
+    if (!n) return null
+    const slug = n.category_slug
+    return {
+      id: ref,
+      kind: 'help',
+      question: n.title,
+      answer: n.answer || n.body || '',
+      categorySlug: slug,
+      categoryLabel: categoryLabelBySlug?.get(slug) || slug,
+      detailTo: `/inquiry/category/${slug}/help/${hid}`,
+    }
+  }
+  const faq = FAQ_ITEMS[ref]
+  if (!faq) return null
+  return {
+    id: ref,
+    kind: 'faq',
+    question: faq.question,
+    answer: faq.answer,
+    categorySlug: faq.category,
+    categoryLabel: categoryLabelBySlug?.get(faq.category) || faq.category,
+    detailTo: `/inquiry/faq/${ref}`,
+  }
 }
 
 /**
- * 문의 메인에 노출할 FAQ id 목록 (순서 유지). Supabase 미설정 시 faqData의 FAQ_MAIN_IDS.
- * 카테고리별 도움말 DB에 묶인 FAQ는 노출 목록(on_list)에 있을 때만 포함.
- * @returns {Promise<string[]>}
+ * @param {string[]} refs
  */
-export async function getHotFaqIds() {
-  const helpRows = await fetchCategoryHelpRowsForHotFilter()
-  let baseIds
+export async function resolveHotFaqRefs(refs) {
+  const [helpRows, cats] = await Promise.all([fetchAllCategoryHelpRows(), listInquiryHelpCategories()])
+  const helpById = new Map(helpRows.map((r) => [String(r.id), r]))
+  const categoryLabelBySlug = new Map(cats.map((c) => [c.slug, c.label]))
+  return (refs || [])
+    .map((ref) => resolveHotFaqRef(ref, helpById, categoryLabelBySlug))
+    .filter(Boolean)
+}
+
+function isValidHotFaqRef(ref, helpIdSet) {
+  if (isHotFaqHelpRef(ref)) {
+    const hid = parseHotFaqHelpId(ref)
+    return hid != null && helpIdSet.has(hid)
+  }
+  return Boolean(FAQ_ITEMS[ref])
+}
+
+/**
+ * 메인 FAQ에 아직 없는 항목 — 카테고리 도움말 전체 + faqData(중복 제목 제외)
+ * @param {string[]} orderedRefs
+ * @returns {Promise<{ ref: string, kind: 'help'|'faq', question: string, categoryLabel: string }[]>}
+ */
+export async function getHotFaqAddablePool(orderedRefs = []) {
+  const [helpRows, cats] = await Promise.all([fetchAllCategoryHelpRows(), listInquiryHelpCategories()])
+  const categoryLabelBySlug = new Map(cats.map((c) => [c.slug, c.label]))
+  const cover = buildHotFaqCoverSet(orderedRefs, helpRows)
+  const helpKeys = new Set(helpRows.map((r) => faqPairKey(r.category_slug, r.title)))
+
+  const pool = []
+
+  for (const row of helpRows) {
+    const ref = hotFaqHelpRef(row.id)
+    if (cover.has(ref)) continue
+    pool.push({
+      ref,
+      kind: 'help',
+      question: normTitle(row.title),
+      categoryLabel: categoryLabelBySlug.get(row.category_slug) || row.category_slug,
+    })
+  }
+
+  for (const id of FAQ_ALL_IDS) {
+    if (cover.has(id)) continue
+    const faq = FAQ_ITEMS[id]
+    if (!faq) continue
+    if (helpKeys.has(faqPairKey(faq.category, faq.question))) continue
+    pool.push({
+      ref: id,
+      kind: 'faq',
+      question: faq.question,
+      categoryLabel: categoryLabelBySlug.get(faq.category) || faq.category,
+    })
+  }
+
+  return pool
+}
+
+async function loadStoredHotFaqRefs() {
   try {
-    const { data, error } = await supabase.from('admin_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle()
+    const { data, error } = await supabase
+      .from('admin_settings')
+      .select('value')
+      .eq('key', SETTINGS_KEY)
+      .maybeSingle()
     if (error) console.warn('[inquiryHotFaq] get:', error.message)
     const ids = data?.value?.ids
-    if (Array.isArray(ids) && ids.length > 0) {
-      const valid = ids.filter((id) => FAQ_ITEMS[id])
-      if (valid.length > 0) baseIds = valid
-    }
+    if (Array.isArray(ids) && ids.length > 0) return ids.map(String)
   } catch (e) {
     console.warn('[inquiryHotFaq]', e)
   }
-  if (!baseIds) baseIds = [...FAQ_MAIN_IDS]
+  return null
+}
 
-  const filtered = filterHotFaqIdsByListedCategoryHelp(baseIds, helpRows)
-  if (filtered.length > 0) return filtered
+async function filterValidStoredRefs(refs) {
+  const helpRows = await fetchAllCategoryHelpRows()
+  const helpIdSet = new Set(helpRows.map((r) => String(r.id)))
+  return (refs || []).filter((ref) => isValidHotFaqRef(ref, helpIdSet))
+}
 
-  const fallback = filterHotFaqIdsByListedCategoryHelp([...FAQ_MAIN_IDS], helpRows)
+/**
+ * 문의 메인에 노출할 FAQ 참조 목록 (faq id 또는 help:uuid). Supabase 미설정 시 faqData FAQ_MAIN_IDS.
+ * @returns {Promise<string[]>}
+ */
+export async function getHotFaqIds() {
+  let baseIds = await loadStoredHotFaqRefs()
+  if (!baseIds?.length) baseIds = [...FAQ_MAIN_IDS]
+
+  const valid = await filterValidStoredRefs(baseIds)
+  if (valid.length > 0) return valid
+
+  const fallback = await filterValidStoredRefs([...FAQ_MAIN_IDS])
   if (fallback.length > 0) return fallback
 
   return [...FAQ_MAIN_IDS]
 }
 
+/** @returns {Promise<ReturnType<typeof resolveHotFaqRef>[]>} */
+export async function getHotFaqDisplayItems() {
+  const ids = await getHotFaqIds()
+  return resolveHotFaqRefs(ids)
+}
+
 /**
- * 카테고리별 도움말 저장 후, 메인 핫 FAQ(admin_settings)에서
- * 더 이상 카테고리 노출 목록에 없는 FAQ id를 제거한다.
+ * 카테고리별 도움말 저장 후, 삭제된 help: 참조·무효 faq id 정리
  */
 export async function pruneHotFaqIdsAfterCategoryHelpSave() {
-  const helpRows = await fetchCategoryHelpRowsForHotFilter()
-  let rawIds
-  try {
-    const { data, error } = await supabase.from('admin_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle()
-    if (error) {
-      console.warn('[inquiryHotFaq] prune get:', error.message)
-      return
-    }
-    const ids = data?.value?.ids
-    if (Array.isArray(ids) && ids.length > 0) {
-      rawIds = ids.filter((id) => FAQ_ITEMS[id])
-    }
-  } catch (e) {
-    console.warn('[inquiryHotFaq] prune', e)
-    return
-  }
-  if (!rawIds?.length) rawIds = [...FAQ_MAIN_IDS]
+  const rawIds = await loadStoredHotFaqRefs()
+  if (!rawIds?.length) return
 
-  const filtered = filterHotFaqIdsByListedCategoryHelp(rawIds, helpRows)
+  const filtered = await filterValidStoredRefs(rawIds)
   if (filtered.length === 0) return
 
   const same =
@@ -120,11 +308,14 @@ export async function pruneHotFaqIdsAfterCategoryHelpSave() {
 }
 
 /**
- * @param {string[]} ids - FAQ_ITEMS 키만 허용, 순서 그대로 저장
+ * @param {string[]} ids - faq id 또는 help:uuid, 순서 그대로 저장
  */
 export async function saveHotFaqIds(ids) {
-  const valid = [...new Set(ids)].filter((id) => FAQ_ITEMS[id])
-  if (valid.length === 0) throw new Error('최소 1개 이상의 FAQ를 선택해 주세요.')
+  const helpRows = await fetchAllCategoryHelpRows()
+  const normalized = await normalizeHotFaqRefsForSave(ids)
+  const helpIdSet = new Set(helpRows.map((r) => String(r.id)))
+  const valid = normalized.filter((ref) => isValidHotFaqRef(ref, helpIdSet))
+  if (valid.length === 0) throw new Error('최소 1개 이상의 항목을 선택해 주세요.')
   const { error } = await supabase.from('admin_settings').upsert(
     { key: SETTINGS_KEY, value: { ids: valid } },
     { onConflict: 'key' },
@@ -135,4 +326,9 @@ export async function saveHotFaqIds(ids) {
     window.dispatchEvent(new CustomEvent('vics:inquiry-hot-faq:updated'))
   }
   return valid
+}
+
+/** @deprecated filterHotFaqIdsByListedCategoryHelp — help: 참조 방식으로 대체. 하위 호환용 no-op 패스 */
+export function filterHotFaqIdsByListedCategoryHelp(ids, _helpRows) {
+  return ids
 }

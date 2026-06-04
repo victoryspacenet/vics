@@ -226,11 +226,16 @@ export function AdminAppealDetailPage() {
             <h3 className="text-sm font-bold text-red-700 mb-4">[1] 제재 원인 (Violation Info)</h3>
             <ul className="space-y-2 text-sm">
               <li>
-                제재 대상: <strong>{appeal.nickname}</strong> ({appeal.userId}) | 제재일: {appeal.sanctionDate}
+                제재 대상: <strong>{appeal.nickname}</strong> ({appeal.userId}) | 제재일: {appeal.sanctionDate || '-'}
               </li>
               <li>
                 위반 사유: <strong>{appeal.violationReason}</strong>
               </li>
+              {appeal.sanctionWarningId && (
+                <li className="text-xs text-gray-500">
+                  연결된 경고 ID: <code className="text-gray-700">{appeal.sanctionWarningId}</code>
+                </li>
+              )}
               <li>
                 원본 데이터: &quot;{appeal.originalContent}&quot; ({appeal.originalType})
               </li>

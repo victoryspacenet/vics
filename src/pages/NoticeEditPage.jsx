@@ -12,12 +12,14 @@ import {
   Send,
   Smartphone,
   Sparkles,
+  Trash2,
   Users,
 } from 'lucide-react'
 import { Modal } from '../components/ui/Modal'
 import { RichTextEditor } from '../components/notice/RichTextEditor'
+import { NoticeDeleteConfirmModal } from '../components/notice/NoticeDeleteConfirmModal'
 import { useUIStore } from '../store/uiStore'
-import { getAdminNotices, updateNotice } from '../lib/noticeStorage'
+import { getNoticeById, updateNotice, deleteNotice } from '../lib/noticeStorage'
 import { formatPushTitle, formatPushBody } from '../lib/noticePushFormat'
 import { TIERS } from '../lib/tiers'
 import { cn } from '../lib/utils'
@@ -73,8 +75,11 @@ export function NoticeEditPage() {
 
   const [notice, setNotice] = useState(null)
   const [notFound, setNotFound] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const [category, setCategory] = useState('update')
   const [title, setTitle] = useState('')
@@ -95,11 +100,15 @@ export function NoticeEditPage() {
   // 공지 데이터 로드 및 pre-fill
   useEffect(() => {
     let cancelled = false
-    getAdminNotices().then((list) => {
+    const load = async () => {
+      setLoading(true)
+      setNotFound(false)
+      setNotice(null)
+      const found = await getNoticeById(id)
       if (cancelled) return
-      const found = list.find((n) => n.id === id)
       if (!found) {
         setNotFound(true)
+        setLoading(false)
         return
       }
       setNotice(found)
@@ -111,8 +120,14 @@ export function NoticeEditPage() {
       setTargetAll(found.targetAll !== false)
       setTargetTierId(found.targetTierId || TIERS[0]?.id || 'player')
       setTargetTierExact(found.targetTierExact === true)
-    })
-    return () => { cancelled = true }
+      setLoading(false)
+    }
+    void load()
+    window.addEventListener('vics:notices:updated', load)
+    return () => {
+      cancelled = true
+      window.removeEventListener('vics:notices:updated', load)
+    }
   }, [id])
 
   useEffect(() => {
@@ -137,6 +152,21 @@ export function NoticeEditPage() {
       return
     }
     setConfirmOpen(true)
+  }
+
+  const handleDeleteConfirm = async () => {
+    setDeleting(true)
+    try {
+      await deleteNotice(id)
+      incrementNoticeListRefresh()
+      setDeleteOpen(false)
+      showToast('삭제됐어요.', 'success')
+      navigate('/admin/notice/list')
+    } catch (e) {
+      showToast(e?.message || '삭제에 실패했어요.', 'error')
+    } finally {
+      setDeleting(false)
+    }
   }
 
   const handleSave = async () => {
@@ -169,6 +199,14 @@ export function NoticeEditPage() {
 
   const syncPushMessage = () => {
     if (!pushMessage && title) setPushMessage(formatPushTitle(category, title))
+  }
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-slate-100/80 via-white to-emerald-50/30 px-4">
+        <Loader2 className="h-9 w-9 animate-spin text-emerald-600" aria-label="불러오는 중" />
+      </div>
+    )
   }
 
   if (notFound) {
@@ -210,16 +248,26 @@ export function NoticeEditPage() {
               <ArrowLeft size={16} strokeWidth={2.25} />
               공지 상세로 돌아가기
             </Link>
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-5">
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-lg shadow-violet-600/30 ring-4 ring-white/80">
-                <Megaphone size={26} strokeWidth={2.25} />
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-5">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-5 min-w-0">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-lg shadow-violet-600/30 ring-4 ring-white/80">
+                  <Megaphone size={26} strokeWidth={2.25} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-xl font-black tracking-tight text-[#22282E] sm:text-2xl">공지사항 수정</h1>
+                  <p className="mt-1 text-sm font-medium text-gray-600">
+                    수정한 내용은 저장 즉시 유저 공지 화면에 반영됩니다.
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0 flex-1">
-                <h1 className="text-xl font-black tracking-tight text-[#22282E] sm:text-2xl">공지사항 수정</h1>
-                <p className="mt-1 text-sm font-medium text-gray-600">
-                  수정한 내용은 저장 즉시 유저 공지 화면에 반영됩니다.
-                </p>
-              </div>
+              <button
+                type="button"
+                onClick={() => setDeleteOpen(true)}
+                className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-red-50 px-4 py-2.5 text-sm font-bold text-red-600 hover:bg-red-100 transition-colors"
+              >
+                <Trash2 size={16} />
+                삭제
+              </button>
             </div>
           </div>
         </div>
@@ -345,6 +393,7 @@ export function NoticeEditPage() {
                 value={content}
                 onChange={setContent}
                 placeholder="이미지 드래그 앤 드롭 또는 툴바로 서식 적용"
+                onImageUploadError={(msg) => showToast(msg, 'error')}
               />
             </div>
           </SectionCard>
@@ -615,6 +664,14 @@ export function NoticeEditPage() {
           </div>
         </div>
       </Modal>
+
+      <NoticeDeleteConfirmModal
+        isOpen={deleteOpen}
+        onClose={() => !deleting && setDeleteOpen(false)}
+        onConfirm={handleDeleteConfirm}
+        itemLabel={title || notice?.title}
+        confirming={deleting}
+      />
     </div>
   )
 }

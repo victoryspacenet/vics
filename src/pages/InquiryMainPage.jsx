@@ -8,10 +8,10 @@ import {
   ChevronRight,
   MessageCircle,
 } from 'lucide-react'
-import { FAQ_ITEMS, FAQ_MAIN_IDS } from '../lib/faqData'
-import { getHotFaqIds, INQUIRY_HOT_FAQ_LS_REV_KEY } from '../lib/inquiryHotFaq'
+import { getHotFaqDisplayItems, INQUIRY_HOT_FAQ_LS_REV_KEY } from '../lib/inquiryHotFaq'
 import { getHelpCategoryPresentation, listInquiryHelpCategories } from '../lib/inquiryHelpCategories'
 import { cn } from '../lib/utils'
+import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../lib/layoutShellClasses'
 
 /** MZ 파스텔 — 문의 폼·내역과 동일 계열 */
 const PAGE_BG =
@@ -28,9 +28,7 @@ export function InquiryMainPage() {
   const expandId = searchParams.get('expand')
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedFaq, setExpandedFaq] = useState(expandId || null)
-  const [faqList, setFaqList] = useState(() =>
-    FAQ_MAIN_IDS.map((id) => ({ id, ...FAQ_ITEMS[id] })).filter((x) => x.question),
-  )
+  const [faqList, setFaqList] = useState([])
   const [helpCategories, setHelpCategories] = useState([])
 
   const refreshHelpCategories = useCallback(() => {
@@ -38,9 +36,7 @@ export function InquiryMainPage() {
   }, [])
 
   const refreshFaqList = useCallback(() => {
-    getHotFaqIds().then((ids) => {
-      setFaqList(ids.map((id) => ({ id, ...FAQ_ITEMS[id] })).filter((x) => x.question))
-    })
+    void getHotFaqDisplayItems().then((items) => setFaqList(items))
   }, [])
 
   /** 라우트로 다시 들어올 때·뒤로가기(bfcache) 복귀 시 최신 목록 */
@@ -112,7 +108,7 @@ export function InquiryMainPage() {
 
   return (
     <div className={cn('min-h-screen w-full min-w-0', PAGE_BG)}>
-      <div className="max-w-screen-lg mx-auto w-full">
+      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto w-full')}>
         {/* 헤더 */}
         <div className={cn('sticky top-0 z-10 px-4 py-3 flex items-center gap-3', HEADER_GLASS)}>
           <button
@@ -186,6 +182,15 @@ export function InquiryMainPage() {
                       <p className="text-sm text-fuchsia-900/80 leading-relaxed pt-3">
                         {item.answer}
                       </p>
+                      {item.detailTo && (
+                        <Link
+                          to={item.detailTo}
+                          className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-fuchsia-700 hover:text-fuchsia-900"
+                        >
+                          자세히 보기
+                          <ChevronRight size={14} />
+                        </Link>
+                      )}
                     </div>
                   )}
                 </div>

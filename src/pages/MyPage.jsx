@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
 import { formatNumber, calcPercent, cn } from '../lib/utils'
+import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../lib/layoutShellClasses'
 import { sanitizeText, safeMediaUrl } from '../lib/sanitize'
 import {
   getTier,
@@ -18,7 +19,8 @@ import {
   profileHoldPoints,
 } from '../lib/tiers'
 import { TierBadge } from '../components/ui/TierBadge'
-import { mapTierSnapshotRow, EMPTY_TIER_RANK_INFO } from '../lib/creatorRankSnapshot'
+import { EMPTY_TIER_RANK_INFO } from '../lib/creatorRankSnapshot'
+import { fetchMyPageListsBundle } from '../lib/myPageData'
 import { VipPromoButton } from '../components/main/VipPromoButton'
 import { VsBadge } from '../components/ui/VsBadge'
 import { MatchupThumbFrame } from '../components/ui/MatchupThumbFrame'
@@ -146,33 +148,11 @@ export function MyPage() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      const { data: created } = await supabase
-        .from('matchups')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-      setCreatedMatchups(created || [])
-
-      const { data: votes } = await supabase
-        .from('votes')
-        .select('side, matchup_id, created_at, matchups(*)')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-      setVotedMatchups(votes || [])
-
-      const [{ data: trRows }, { count: totalUsers }] = await Promise.all([
-        supabase.rpc('profiles_tier_rank_snapshot_for_ids', { p_ids: [user.id] }),
-        supabase.from('profiles').select('id', { count: 'exact', head: true }),
-      ])
-      const tierInfo = mapTierSnapshotRow(trRows?.[0])
-      setTierRankSnapshot(tierInfo)
-      const rank =
-        tierInfo.overallRank != null && tierInfo.overallRank > 0 ? tierInfo.overallRank : '-'
-
-      setStats({
-        rank,
-        totalUsers: tierInfo.totalUsers || totalUsers || 0,
-      })
+      const bundle = await fetchMyPageListsBundle(user.id)
+      setCreatedMatchups(bundle.createdMatchups)
+      setVotedMatchups(bundle.votedMatchups)
+      setTierRankSnapshot(bundle.tierRankSnapshot)
+      setStats(bundle.stats)
     } catch (err) {
       console.error(err)
     } finally {
@@ -182,12 +162,8 @@ export function MyPage() {
 
   useEffect(() => {
     if (!user) return
-    fetchData()
-  }, [user])
-
-  useEffect(() => {
-    if (!user) return
-    fetchAttendanceStatus()
+    void fetchData()
+    void fetchAttendanceStatus()
   }, [user])
 
   const sortedCreated = [...createdMatchups].sort((a, b) => {
@@ -400,7 +376,11 @@ export function MyPage() {
   if (authLoading) {
     return (
       <div
-        className={`max-w-screen-lg mx-auto -mx-4 px-4 py-16 flex flex-col items-center justify-center min-h-[45vh] rounded-2xl ${neonShell.pageWrap}`}
+        className={cn(
+          LAYOUT_CONTENT_MAX_WIDTH_CLASS,
+          'mx-auto -mx-4 flex min-h-[45vh] flex-col items-center justify-center rounded-2xl px-4 py-16',
+          neonShell.pageWrap,
+        )}
       >
         <div
           className="h-10 w-10 border-2 border-pink-200 border-t-fuchsia-600 rounded-full animate-spin"
@@ -416,7 +396,7 @@ export function MyPage() {
   }
 
   return (
-    <div className={`max-w-screen-lg mx-auto -mx-4 px-4 py-4 sm:py-6 rounded-2xl ${neonShell.pageWrap}`}>
+    <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto -mx-4 rounded-2xl px-4 py-4 sm:py-6', neonShell.pageWrap)}>
 
       {/* ══ 프로필 헤더 ══ */}
       <div

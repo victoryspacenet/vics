@@ -5,6 +5,7 @@
 
 const MAX_SIZE = 1200
 const JPEG_QUALITY = 0.85
+const CROP_LOAD_TIMEOUT_MS = 90_000
 
 /**
  * 이미지를 1:1 정방형으로 중앙 크롭 후 리사이즈
@@ -15,7 +16,26 @@ export async function compressAndCropImage(file) {
   return new Promise((resolve, reject) => {
     const img = document.createElement('img')
     const url = URL.createObjectURL(file)
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      URL.revokeObjectURL(url)
+      reject(new Error('이미지 처리 시간이 초과했어요. 더 작은 사진으로 다시 시도해 주세요.'))
+    }, CROP_LOAD_TIMEOUT_MS)
+
+    const fail = (err) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      URL.revokeObjectURL(url)
+      reject(err)
+    }
+
     img.onload = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
       URL.revokeObjectURL(url)
       try {
         const { width, height } = img
@@ -38,19 +58,18 @@ export async function compressAndCropImage(file) {
 
         canvas.toBlob(
           (blob) => {
-            if (!blob) return reject(new Error('이미지 변환 실패'))
+            if (!blob) return fail(new Error('이미지 변환 실패'))
             resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }))
           },
           'image/jpeg',
           JPEG_QUALITY
         )
       } catch (err) {
-        reject(err)
+        fail(err)
       }
     }
     img.onerror = () => {
-      URL.revokeObjectURL(url)
-      reject(new Error('이미지 로드 실패'))
+      fail(new Error('이미지 로드 실패'))
     }
     img.src = url
   })

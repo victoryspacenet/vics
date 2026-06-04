@@ -2,8 +2,49 @@ import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
 import { MAIN_SPOTLIGHT_1H_COST } from '../lib/mainSpotlight'
 import { isRejoinCooldownDbError, REJOIN_COOLDOWN_USER_MESSAGE } from '../lib/rejoinCooldown'
+import { runWhenIdle } from '../lib/runDeferred'
+import {
+  clearTierMilestoneGrantThrottle,
+  markTierMilestoneGrantRan,
+  shouldRunTierMilestoneGrant,
+} from '../lib/tierMilestoneGrantThrottle'
 import { useUIStore } from './uiStore'
 import { useAdminPermissionStore } from './adminPermissionStore'
+import { SIGNUP_BONUS_POINTS, grantSignupBonusIfNeeded } from '../lib/signupRewards'
+
+/** 새 비밀번호 설정 페이지: auth Mutex 경합 줄이려 프로필·푸시 부가 작업 건너뜀(로그인 후 로드됨). */
+function skipHeavyAuthHooksOnResetPasswordPage() {
+  try {
+    return typeof window !== 'undefined' && window.location.pathname === '/reset-password'
+  } catch {
+    return false
+  }
+}
+
+/** `VITE_DEV_RESET_PURCHASES_FOR_NICKNAME` — 로컬 QA용 테스트 계정 */
+function devTestAccountResetNickname() {
+  return import.meta.env.VITE_DEV_RESET_PURCHASES_FOR_NICKNAME?.trim() || ''
+}
+
+function isDevTestAccountUiReset(profile) {
+  const nick = devTestAccountResetNickname()
+  return Boolean(import.meta.env.DEV && nick && String(profile?.nickname || '').trim() === nick)
+}
+
+/** DB에 남은 가상 구매·포인트를 UI에서 0으로 표시 (리워드 센터·마이페이지 등) */
+function applyDevTestAccountUiReset(profile) {
+  if (!isDevTestAccountUiReset(profile)) return profile
+  return {
+    ...profile,
+    points: 0,
+    oracle_points: 0,
+    neon_profile_theme_unlocked_at: null,
+    neon_profile_theme_expires_at: null,
+    neon_profile_theme_id: null,
+    profile_public_unlocked_at: null,
+    profile_public_expires_at: null,
+  }
+}
 
 function extractNickname(user) {
   const meta = user.raw_user_meta_data || user.user_metadata || {}
@@ -26,7 +67,7 @@ async function ensureProfile(user) {
     // 프로필 존재 여부 확인
     const { data: existing, error: selectErr } = await supabase
       .from('profiles')
-      .select('id, nickname')
+      .select('id, nickname, email, birthdate, gender')
       .eq('id', user.id)
       .maybeSingle()
 
@@ -34,12 +75,51 @@ async function ensureProfile(user) {
       console.warn('[ensureProfile] select error:', selectErr.message)
     }
 
-    if (existing) return // 이미 있으면 끝
+    if (existing) {
+      const meta = user.raw_user_meta_data || user.user_metadata || {}
+      const patch = {}
+      if (user.email && String(existing.email || '').toLowerCase() !== String(user.email || '').toLowerCase()) {
+        patch.email = user.email
+      }
+      const metaNick = typeof meta.nickname === 'string' ? meta.nickname.trim() : ''
+      const emailLocal = user.email ? String(user.email).split('@')[0] : ''
+      if (
+        metaNick &&
+        String(existing.nickname || '') !== metaNick &&
+        emailLocal &&
+        String(existing.nickname || '').toLowerCase() === emailLocal.toLowerCase()
+      ) {
+        patch.nickname = metaNick
+      }
+      const metaBd = meta.birthdate || null
+      if (metaBd && !existing.birthdate) patch.birthdate = metaBd
+      const metaGe =
+        meta.gender === 'male' || meta.gender === 'female' || meta.gender === 'other' ? meta.gender : null
+      if (metaGe && !existing.gender) patch.gender = metaGe
+      if (Object.keys(patch).length > 0) {
+        patch.updated_at = new Date().toISOString()
+        const { error: upErr } = await supabase.from('profiles').update(patch).eq('id', user.id)
+        if (upErr) console.warn('[ensureProfile] metadata patch:', upErr.message)
+        else {
+          try {
+            window.dispatchEvent(new CustomEvent('vics:adminUsers:updated'))
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      await grantSignupBonusIfNeeded(user.id)
+      return
+    }
 
     // 프로필 생성 (트리거가 실패했을 경우 대비)
     const meta = user.raw_user_meta_data || user.user_metadata || {}
     let nickname = extractNickname(user)
     const avatarUrl = meta.avatar_url || meta.picture || null
+    const birthdate = meta.birthdate || null
+    const genderRaw = meta.gender
+    const gender =
+      genderRaw === 'male' || genderRaw === 'female' || genderRaw === 'other' ? genderRaw : null
 
     // 닉네임 중복 확인 → 중복이면 숫자 추가
     for (let i = 0; i < 5; i++) {
@@ -52,12 +132,17 @@ async function ensureProfile(user) {
       nickname = extractNickname(user).slice(0, 15) + Math.floor(Math.random() * 9000 + 1000)
     }
 
-    const { error: insertErr } = await supabase.from('profiles').insert({
+    const insertRow = {
       id: user.id,
       email: user.email,
       nickname,
       avatar_url: avatarUrl,
-    })
+      points: SIGNUP_BONUS_POINTS,
+    }
+    if (birthdate) insertRow.birthdate = birthdate
+    if (gender) insertRow.gender = gender
+
+    const { error: insertErr } = await supabase.from('profiles').insert(insertRow)
 
     if (insertErr) {
       console.warn('[ensureProfile] insert error:', insertErr.message, insertErr.code)
@@ -72,6 +157,12 @@ async function ensureProfile(user) {
       }
     } else {
       console.log('[ensureProfile] 프로필 생성 완료:', nickname)
+      await grantSignupBonusIfNeeded(user.id)
+      try {
+        window.dispatchEvent(new CustomEvent('vics:adminUsers:updated'))
+      } catch {
+        /* ignore */
+      }
     }
   } catch (err) {
     // 프로필 생성 실패해도 로그인 플로우는 계속 진행
@@ -104,8 +195,18 @@ export const useAuthStore = create((set, get) => ({
           const { data: { session } } = await supabase.auth.getSession()
           if (session?.user) {
             set({ user: session.user })
-            await ensureProfile(session.user)
-            await get().fetchProfile(session.user.id)
+            void useAdminPermissionStore.getState().load(session.user)
+            if (!skipHeavyAuthHooksOnResetPasswordPage()) {
+              await ensureProfile(session.user)
+              await get().fetchProfile(session.user.id)
+              runWhenIdle(() => {
+                void import('../lib/pushNotifications').then((m) =>
+                  m.registerPushForCurrentUser().then((r) => {
+                    if (r?.error && !r?.skipped) console.warn('[Auth] push register:', r.error)
+                  }),
+                )
+              })
+            }
           } else {
             // Supabase에 세션이 없으면 UI도 비로그인으로 맞춤
             set({ user: null, profile: null })
@@ -121,12 +222,28 @@ export const useAuthStore = create((set, get) => ({
           try {
             if (session?.user) {
               set({ user: session.user })
-              if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+              void useAdminPermissionStore.getState().load(session.user)
+              if (skipHeavyAuthHooksOnResetPasswordPage()) {
+                return
+              }
+              if (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'INITIAL_SESSION') {
                 await ensureProfile(session.user)
               }
-              await get().fetchProfile(session.user.id)
+              if (event !== 'TOKEN_REFRESHED') {
+                await get().fetchProfile(session.user.id)
+              }
+              if (event === 'SIGNED_IN') {
+                runWhenIdle(() => {
+                  void import('../lib/pushNotifications').then((m) =>
+                    m.registerPushForCurrentUser().then((r) => {
+                      if (r?.error && !r?.skipped) console.warn('[Auth] push register:', r.error)
+                    }),
+                  )
+                })
+              }
             } else {
               // SIGNED_OUT뿐 아니라 INITIAL_SESSION(null) 등 세션 없음 모두 동기화
+              useAdminPermissionStore.getState().reset()
               set({ user: null, profile: null })
             }
           } catch (err) {
@@ -172,55 +289,55 @@ export const useAuthStore = create((set, get) => ({
             if (forceDiamondNick && String(profile.nickname || '').trim() === forceDiamondNick) {
               profile = { ...profile, fandom_tier: 'diamond' }
             }
-            // DEV: 네온/공개권한 강제 초기화 닉네임 목록 (env로 제어)
-            const resetPurchasesNick = import.meta.env.VITE_DEV_RESET_PURCHASES_FOR_NICKNAME?.trim()
-            if (resetPurchasesNick && String(profile.nickname || '').trim() === resetPurchasesNick) {
-              profile = {
-                ...profile,
-                neon_profile_theme_unlocked_at: null,
-                neon_profile_theme_expires_at: null,
-                neon_profile_theme_id: null,
-                profile_public_unlocked_at: null,
-                profile_public_expires_at: null,
-              }
-            }
+            profile = applyDevTestAccountUiReset(profile)
           }
 
-          try {
-            const { data: tierBonus, error: tierBonusErr } = await supabase.rpc(
-              'grant_matchup_tier_milestone_bonuses'
-            )
-            if (
-              !tierBonusErr &&
-              tierBonus?.ok === true &&
-              Number(tierBonus.total_granted || 0) > 0
-            ) {
-              const { data: refreshed, error: refErr } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('id', userId)
-                .maybeSingle()
-              if (!refErr && refreshed) {
-                profile = refreshed
-                if (import.meta.env.DEV) {
-                  const forceDiamondNick = import.meta.env.VITE_DEV_FANDOM_TIER_AS_DIAMOND_FOR_NICKNAME?.trim()
-                  if (forceDiamondNick && String(profile.nickname || '').trim() === forceDiamondNick) {
-                    profile = { ...profile, fandom_tier: 'diamond' }
-                  }
-                }
-                window.dispatchEvent(
-                  new CustomEvent('vics:matchup-tier-milestone-bonus', { detail: tierBonus })
-                )
-              }
-            }
-          } catch (e) {
-            console.warn('[fetchProfile] tier milestone bonus:', e?.message || e)
-          }
-
-          // 로그아웃 직후 등으로 user가 이미 없어졌으면 스테일 프로필로 UI가 되살아나지 않게 함
           const u = get().user
           if (!u || u.id !== userId) return
           set({ profile })
+
+          const skipTierMilestoneGrant = isDevTestAccountUiReset(profile)
+
+          runWhenIdle(() => {
+            void (async () => {
+              if (skipTierMilestoneGrant) return
+              if (!shouldRunTierMilestoneGrant(userId)) return
+              markTierMilestoneGrantRan(userId)
+              try {
+                const { data: tierBonus, error: tierBonusErr } = await supabase.rpc(
+                  'grant_matchup_tier_milestone_bonuses'
+                )
+                if (
+                  !tierBonusErr &&
+                  tierBonus?.ok === true &&
+                  Number(tierBonus.total_granted || 0) > 0
+                ) {
+                  const { data: refreshed, error: refErr } = await supabase
+                    .from('profiles')
+                    .select('*')
+                    .eq('id', userId)
+                    .maybeSingle()
+                  if (!refErr && refreshed) {
+                    let nextProfile = refreshed
+                    if (import.meta.env.DEV) {
+                      const forceDiamondNick = import.meta.env.VITE_DEV_FANDOM_TIER_AS_DIAMOND_FOR_NICKNAME?.trim()
+                      if (forceDiamondNick && String(nextProfile.nickname || '').trim() === forceDiamondNick) {
+                        nextProfile = { ...nextProfile, fandom_tier: 'diamond' }
+                      }
+                      nextProfile = applyDevTestAccountUiReset(nextProfile)
+                    }
+                    window.dispatchEvent(
+                      new CustomEvent('vics:matchup-tier-milestone-bonus', { detail: tierBonus })
+                    )
+                    const u2 = get().user
+                    if (u2 && u2.id === userId) set({ profile: nextProfile })
+                  }
+                }
+              } catch (e) {
+                console.warn('[fetchProfile] tier milestone bonus:', e?.message || e)
+              }
+            })()
+          })
         } catch (err) {
           console.error('[fetchProfile] 예상치 못한 오류:', err)
         }
@@ -254,7 +371,17 @@ export const useAuthStore = create((set, get) => ({
       },
 
       signOut: async () => {
+        const uid = get().user?.id
+        clearTierMilestoneGrantThrottle()
         useAdminPermissionStore.getState().reset()
+        if (uid) {
+          try {
+            const { clearPushDeviceTokensForUser } = await import('../lib/pushNotifications')
+            await clearPushDeviceTokensForUser(uid)
+          } catch (err) {
+            console.warn('[Auth] clearPushDeviceTokens:', err?.message || err)
+          }
+        }
         // 먼저 스토어를 비워 헤더·라우트가 즉시 비로그인으로 반응 (웹에서 클릭 후 무반응처럼 보이는 현상 완화)
         set({ user: null, profile: null })
         try {

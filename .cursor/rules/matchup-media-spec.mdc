@@ -1,6 +1,6 @@
 ---
 description: 매치업 미디어 규격 및 1:1 크롭 규칙
-globs: "**/CreateMatchupDrawer.jsx,**/ChallengeDrawer.jsx,**/lib/mediaCrop.js,**/lib/mediaSpec.js"
+globs: "**/CreateMatchupDrawer.jsx,**/ChallengeDrawer.jsx,**/lib/mediaCrop.js,**/lib/mediaSpec.js,**/lib/videoPoster.js"
 alwaysApply: false
 ---
 
@@ -21,11 +21,17 @@ alwaysApply: false
 - `compressAndCropImage()` 유틸 사용
 
 ### 영상
-- 썸네일: 1:1 정방형 (첫 프레임 중앙 크롭)
-- 본 영상: 1:1 컨테이너에 `object-cover`로 표시 (추후 서버 크롭 지원 검토)
+- 썸네일: 업로드 시 `captureVideoPosterJpegFile()`로 **JPEG 포스터**(`*-poster.jpg`)를 별도 저장해 `*_thumbnail_url`·유사도 검사에 사용 (첫 구간 프레임, 긴 변 720px 이하 JPEG)
+- 본 영상: 원본 파일 업로드(용량·길이·해상도·평균 비트레이트 추정은 `validateVideo()`)
+- 본 영상 표시: 1:1 컨테이너에 `object-cover` (추후 서버 트랜스코드 검토)
 
 ### 텍스트
 - 비율 제한 없음 (배경 없음)
+
+### A/B 형식 일치 (필수)
+- 매치업 **A측(`left_type`)과 도전 B측(`right_type`)은 반드시 동일 형식**: 이미지↔이미지, 영상↔영상, 텍스트↔텍스트
+- 클라이언트: `ChallengeDrawer` + `src/lib/matchupSideType.js`
+- 서버: `netlify/functions/matchup-challenge-similarity.js` (도전 제출 전 검사)
 
 ## 파일 규격
 
@@ -37,12 +43,14 @@ alwaysApply: false
 ## 영상 제한
 
 - **길이**: 15초 이내 (`MAX_VIDEO_SECONDS`)
-- **해상도**: 최대 1080p (긴 변 기준)
+- **해상도**: 최대 1080p (긴 변 기준, `VIDEO_MAX_SIDE`)
+- **평균 비트레이트(추정)**: 재생 길이 1.5초 이상일 때 `VIDEO_MAX_AVG_BITRATE_MBPS` 이하
 - 업로드 전 `validateVideo()`로 검증
 
 ## 관련 파일
 
-- `src/lib/mediaSpec.js` - 용량/해상도/길이 상수 및 검증
+- `src/lib/mediaSpec.js` - 용량/해상도/길이·비트레이트 상수 및 검증
+- `src/lib/videoPoster.js` - 영상 JPEG 포스터 추출
 - `src/lib/mediaCrop.js` - 1:1 크롭 유틸
 - `CreateMatchupDrawer.jsx` - NEW 매치업 생성
 - `ChallengeDrawer.jsx` - 도전 응답 업로드

@@ -27,6 +27,7 @@ import { Modal } from '../components/ui/Modal'
 import { supabase } from '../lib/supabase'
 import { VCARD_REPORT_COST, purchaseVcardReportRpc } from '../lib/victoryReportPurchase'
 import { parseStoryNeonPreviewParam } from '../lib/storyNeonThemes'
+import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../lib/layoutShellClasses'
 
 const PREVIEW_SCALE = 0.72
 
@@ -549,7 +550,7 @@ export function VictoryReportPage() {
           onComplete={handleCraftComplete}
         />
       )}
-      <div className="mx-auto max-w-screen-lg px-0 pt-2 sm:px-1">
+      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto px-0 pt-2 sm:px-1')}>
         <button
           type="button"
           onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/rewards'))}

@@ -11,13 +11,15 @@ import { useNotificationStore } from '../../store/notificationStore'
 import { Avatar } from '../ui/Avatar'
 import { Logo } from '../ui/Logo'
 import { cn } from '../../lib/utils'
+import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../../lib/layoutShellClasses'
 import { encodeForUrl } from '../../lib/sanitize'
-import { canAccessAdmin } from '../../lib/adminAuth'
+import { useCanAccessAdmin } from '../../lib/adminAuth'
 import { isLegendDiamondShellActive } from '../../lib/legendDiamondUiTheme'
 
 export function Header() {
   const location = useLocation()
   const { user, profile, signOut } = useAuthStore()
+  const showAdminNav = useCanAccessAdmin()
   const shellLd = Boolean(user && isLegendDiamondShellActive(profile))
   const { openCreateDrawer, openLoginModal } = useUIStore()
   const { unreadCount } = useNotificationStore()
@@ -96,7 +98,7 @@ export function Header() {
           : 'border-gray-100/80 bg-gradient-to-b from-white/95 via-white/85 to-slate-50/35 shadow-[0_1px_0_rgba(15,23,42,0.04)]',
       )}
     >
-      <div className="max-w-screen-lg mx-auto px-4 h-14 flex items-center gap-2 min-w-0">
+      <div className={cn('mx-auto flex h-14 w-full min-w-0 items-center gap-2 px-4', LAYOUT_CONTENT_MAX_WIDTH_CLASS)}>
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2 mr-2 shrink-0 group">
           <Logo size={32} dark={shellLd} link={false} />
@@ -110,13 +112,19 @@ export function Header() {
           </span>
         </Link>
 
-        <div className="flex-1" />
-
+        <nav
+          aria-label="주요 메뉴"
+          className={cn(
+            'flex min-w-0 flex-1 items-center gap-2',
+            'overflow-x-auto overscroll-x-contain scroll-smooth touch-pan-x scrollbar-hide',
+            'lg:justify-end lg:overflow-visible',
+          )}
+        >
         {/* 매치업목록 — 민트·라임 MZ */}
         <Link
           to="/matchups"
           className={cn(
-            'flex-shrink-0 px-3 py-2 text-xs sm:text-sm font-black rounded-2xl transition-all duration-300 whitespace-nowrap border',
+            'flex-shrink-0 touch-manipulation rounded-2xl border px-3 py-2.5 text-xs font-black transition-all duration-300 sm:py-2 sm:text-sm whitespace-nowrap',
             shellLd
               ? location.pathname === '/matchups'
                 ? 'border-cyan-400/50 bg-gradient-to-br from-cyan-500 via-teal-600 to-slate-900 text-cyan-50 shadow-[0_4px_18px_-4px_rgba(34,211,238,0.35)] ring-1 ring-cyan-200/25'
@@ -128,7 +136,7 @@ export function Header() {
         >
           매치업목록
         </Link>
-        {user && canAccessAdmin(user) && (
+        {user && showAdminNav && (
           <Link
             to="/admin/dashboard"
             className={cn(
@@ -163,7 +171,7 @@ export function Header() {
         <button
           onClick={handleCreateClick}
           className={cn(
-            'sm:hidden w-9 h-9 flex items-center justify-center rounded-xl transition-all',
+            'flex h-11 w-11 touch-manipulation items-center justify-center rounded-xl transition-all sm:hidden',
             shellLd
               ? 'bg-gradient-to-br from-cyan-400 to-emerald-600 text-white shadow-[0_0_14px_rgba(34,211,238,0.5)] hover:scale-105 active:scale-95'
               : 'bg-gradient-to-br from-lime-400 to-emerald-400 text-white shadow-[0_0_12px_rgba(132,204,22,0.5)] hover:scale-105 active:scale-95',
@@ -188,12 +196,12 @@ export function Header() {
                     : 'border-sky-200/80 bg-white text-[#22282E] placeholder:text-sky-400/80 focus:border-sky-400 focus:ring-2 focus:ring-sky-400/30',
                 )}
               />
-              <button
-                type="button"
-                onClick={() => setSearchOpen(false)}
-                className={cn(
-                  'p-2 rounded-2xl border transition-colors',
-                  shellLd
+            <button
+              type="button"
+              onClick={() => setSearchOpen(false)}
+              className={cn(
+                'flex min-h-11 min-w-11 touch-manipulation items-center justify-center rounded-2xl border p-2 transition-colors',
+                shellLd
                     ? 'border-slate-600 bg-slate-800 text-cyan-200 hover:bg-slate-700'
                     : 'border-sky-200/60 bg-sky-50/80 text-sky-500 hover:bg-sky-100 hover:text-sky-700',
                 )}
@@ -207,7 +215,7 @@ export function Header() {
               onClick={() => setSearchOpen(true)}
               title="검색"
               className={cn(
-                'p-2 rounded-2xl border transition-all duration-300',
+                'flex min-h-11 min-w-11 touch-manipulation items-center justify-center rounded-2xl border p-2 transition-all duration-300',
                 shellLd
                   ? 'border-slate-600/90 bg-slate-900/70 text-cyan-200 shadow-sm shadow-black/30 hover:border-cyan-500/40 hover:bg-slate-800/90 active:scale-95'
                   : 'border-sky-200/70 bg-gradient-to-br from-sky-50/90 to-cyan-50/50 text-sky-600 shadow-sm shadow-sky-200/20 hover:border-sky-300 hover:from-sky-100/80 hover:to-cyan-50 hover:text-sky-700 hover:shadow-md active:scale-95',
@@ -304,7 +312,7 @@ export function Header() {
               onClick={handleBellClick}
               title="알림"
               className={cn(
-                'p-2 rounded-2xl border transition-all duration-300 relative',
+                'relative flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-2xl border transition-all duration-300',
                 shellLd
                   ? isNotificationPanelOpen
                     ? 'border-fuchsia-400/50 bg-gradient-to-br from-fuchsia-600 via-purple-700 to-slate-950 text-fuchsia-50 shadow-[0_4px_16px_-4px_rgba(192,132,252,0.35)] ring-1 ring-fuchsia-300/25'
@@ -327,7 +335,7 @@ export function Header() {
               to="/ranking"
               title="랭킹"
               className={cn(
-                'p-2 rounded-2xl border transition-all duration-300',
+                'flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-2xl border transition-all duration-300',
                 shellLd
                   ? location.pathname === '/ranking'
                     ? 'border-amber-400/45 bg-gradient-to-br from-amber-500 via-orange-600 to-slate-950 text-amber-50 shadow-[0_4px_16px_-4px_rgba(245,158,11,0.3)] ring-1 ring-amber-200/20'
@@ -345,7 +353,7 @@ export function Header() {
               to="/notice"
               title="공지사항"
               className={cn(
-                'p-2 rounded-2xl border transition-all duration-300',
+                'flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-2xl border transition-all duration-300',
                 shellLd
                   ? isNoticeActive
                     ? 'border-violet-400/45 bg-gradient-to-br from-indigo-600 via-violet-700 to-slate-950 text-violet-50 shadow-[0_4px_16px_-4px_rgba(139,92,246,0.32)] ring-1 ring-violet-300/20'
@@ -363,7 +371,7 @@ export function Header() {
               <button
                 type="button"
                 onClick={() => { setProfileMenuOpen(!profileMenuOpen); closeNotificationPanel() }}
-                className="p-1 rounded-full hover:ring-2 hover:ring-pink-300/70 transition-all"
+                className="flex h-11 w-11 touch-manipulation items-center justify-center rounded-full p-0.5 transition-all hover:ring-2 hover:ring-pink-300/70"
               >
                 <Avatar
                   src={profile?.avatar_url}
@@ -415,7 +423,7 @@ export function Header() {
                         <Sparkles size={15} className="shrink-0 text-violet-500" />
                         서비스 소개
                       </Link>
-                      {canAccessAdmin(user) && (
+                      {showAdminNav && (
                         <Link
                           to="/admin/dashboard"
                           onClick={() => setProfileMenuOpen(false)}
@@ -446,7 +454,7 @@ export function Header() {
               to="/ranking"
               title="랭킹"
               className={cn(
-                'p-2 rounded-2xl border transition-all duration-300',
+                'flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-2xl border transition-all duration-300',
                 location.pathname === '/ranking'
                   ? 'border-amber-400/50 bg-gradient-to-br from-amber-400 via-yellow-400 to-orange-500 text-white shadow-[0_4px_16px_-4px_rgba(245,158,11,0.45)] ring-1 ring-white/45'
                   : 'border-amber-200/65 bg-gradient-to-br from-amber-50/90 to-yellow-50/35 text-amber-700 shadow-sm shadow-amber-200/25 hover:border-amber-300 hover:from-amber-50 hover:to-yellow-50 hover:text-amber-900 hover:shadow-md active:scale-95'
@@ -459,7 +467,7 @@ export function Header() {
               to="/notice"
               title="공지사항"
               className={cn(
-                'p-2 rounded-2xl border transition-all duration-300',
+                'flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-2xl border transition-all duration-300',
                 isNoticeActive
                   ? 'border-violet-400/50 bg-gradient-to-br from-indigo-500 via-violet-500 to-purple-600 text-white shadow-[0_4px_16px_-4px_rgba(139,92,246,0.4)] ring-1 ring-white/45'
                   : 'border-violet-200/65 bg-gradient-to-br from-violet-50/90 to-indigo-50/35 text-violet-700 shadow-sm shadow-violet-200/25 hover:border-violet-300 hover:from-violet-50 hover:to-indigo-50 hover:text-violet-900 hover:shadow-md active:scale-95'
@@ -472,7 +480,7 @@ export function Header() {
               to="/explore"
               title="탐색"
               className={cn(
-                'p-2 rounded-2xl border transition-all duration-300',
+                'flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-2xl border transition-all duration-300',
                 (location.pathname === '/explore' || location.pathname.startsWith('/feed/'))
                   ? 'border-sky-400/50 bg-gradient-to-br from-sky-400 via-cyan-400 to-teal-500 text-white shadow-[0_4px_16px_-4px_rgba(14,165,233,0.4)] ring-1 ring-white/45'
                   : 'border-sky-200/65 bg-gradient-to-br from-sky-50/90 to-cyan-50/35 text-sky-700 shadow-sm shadow-sky-200/25 hover:border-sky-300 hover:from-sky-50 hover:to-cyan-50 hover:text-sky-900 hover:shadow-md active:scale-95'
@@ -483,7 +491,7 @@ export function Header() {
             {/* 모바일 전용: 서비스 소개 아이콘 버튼 */}
             <Link
               to="/landing"
-              className="md:hidden p-2 rounded-xl hover:bg-violet-50 text-violet-400 hover:text-violet-600 transition-colors"
+              className="md:hidden flex h-11 w-11 touch-manipulation items-center justify-center rounded-xl p-2 text-violet-400 transition-colors hover:bg-violet-50 hover:text-violet-600"
               title="서비스 소개"
             >
               <Sparkles size={18} />
@@ -492,7 +500,7 @@ export function Header() {
               type="button"
               onClick={openLoginModal}
               className={cn(
-                'flex items-center gap-1.5 px-3 py-2 text-sm rounded-2xl font-black transition-all duration-300 border shrink-0',
+                'flex min-h-11 shrink-0 touch-manipulation items-center gap-1.5 rounded-2xl border px-4 py-2.5 text-sm font-black transition-all duration-300',
                 'border-indigo-200/75 bg-gradient-to-br from-indigo-50/95 via-white to-sky-50/60 text-indigo-700',
                 'shadow-sm shadow-indigo-200/30 hover:border-indigo-300/90 hover:from-indigo-100/80 hover:via-white hover:to-sky-100/50 hover:text-indigo-900 hover:shadow-md hover:shadow-indigo-200/40 active:scale-[0.98]'
               )}
@@ -502,13 +510,14 @@ export function Header() {
             </button>
             <Link
               to="/signup"
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-white rounded-xl transition-colors font-medium bg-[#22282E] hover:bg-[#363d46]"
+              className="flex min-h-11 touch-manipulation items-center gap-1.5 rounded-xl bg-[#22282E] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#363d46]"
             >
               <UserPlus size={16} />
               <span className="hidden sm:block">회원가입</span>
             </Link>
           </>
         )}
+        </nav>
       </div>
     </header>
   )

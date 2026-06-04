@@ -5,6 +5,7 @@ import {
   LogOut, Trash2, Shield, Award, Pencil, Lock,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { checkNicknameTaken } from '../lib/nicknameTakenApi'
 import { safeMediaUrl, parseBannedWordError, parseNicknameSeasonLimitError } from '../lib/sanitize'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
@@ -319,9 +320,13 @@ export function ProfileEditPage() {
     if (trimmed === profile?.nickname)  { setNicknameStatus('same'); return }
     setNicknameStatus('checking')
     nickCheckTimer.current = setTimeout(async () => {
-      const { data } = await supabase
-        .from('profiles').select('id').eq('nickname', trimmed).maybeSingle()
-      setNicknameStatus(data ? 'dup' : 'ok')
+      const { taken, error } = await checkNicknameTaken(trimmed)
+      if (error) {
+        setNicknameStatus('idle')
+        showToast('닉네임 확인에 실패했어요. 잠시 후 다시 시도해 주세요.', 'error')
+        return
+      }
+      setNicknameStatus(taken ? 'dup' : 'ok')
     }, 600)
   }
 
@@ -390,9 +395,9 @@ export function ProfileEditPage() {
           return
         }
         if (data) setProfile(data)
-        await fetchProfile(user.id)
         showToast('대표 배지가 저장되었습니다! ✓', 'success')
         navigate('/mypage')
+        void fetchProfile(user.id)
         return
       }
 
@@ -411,9 +416,9 @@ export function ProfileEditPage() {
         showToast('저장 결과를 확인할 수 없어요. 다시 시도해주세요', 'error')
         return
       }
-      await fetchProfile(user.id)
       showToast('프로필이 업데이트되었습니다! ✓', 'success')
       navigate('/mypage')
+      void fetchProfile(user.id)
     } catch {
       showToast('저장 중 오류가 발생했어요', 'error')
     } finally {

@@ -2,8 +2,14 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Helmet } from 'react-helmet-async'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Heart, Link2, Check, Send, Swords, Hash,
-         Clock, Users, X, ChevronRight, Zap, Image, Video, Type, AlertCircle, CheckCircle, CornerDownRight, ThumbsUp, Pencil, Trash2, Info, ChevronDown } from 'lucide-react'
+         Clock, Users, X, ChevronRight, Zap, Image, Video, Type, AlertCircle, CheckCircle, CornerDownRight, ThumbsUp, Pencil, Trash2, Info, ChevronDown, Flag } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import {
+  MATCHUP_COMMENT_SELECT,
+  MATCHUP_COMMENTS_INITIAL_LIMIT,
+  MATCHUP_COMMENTS_MORE_LIMIT,
+  fetchMatchupCommentsWindow,
+} from '../lib/matchupComments'
 import { voteViaApi } from '../lib/voteApi'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
@@ -28,8 +34,27 @@ import { FandomGoldExclusiveEmojiBar } from '../components/fandom/FandomGoldExcl
 import { MATCHUP_CREATOR_PROFILE_FIELDS, fetchCreatorRankMapForIds, EMPTY_TIER_RANK_INFO } from '../lib/creatorRankSnapshot'
 import { isMatchupCreatorVipTierGlow, VIP_MATCHUP_SURFACE_CLASS } from '../lib/matchupCreatorVipGlow'
 import { isFeedBannerHighlightActive } from '../lib/bannerHighlightBoost'
+import { Modal } from '../components/ui/Modal'
+import { submitMatchupReportAndRunModeration } from '../lib/matchupReports'
+import { MatchupMediaViewer } from '../components/matchup/MatchupMediaViewer'
+import { canOpenMatchupMediaView } from '../lib/matchupMediaView'
+import { canLoadMatchupFromDb, isFeedDemoMatchupId } from '../lib/matchupIds'
+import { MATCHUP_DETAIL_MATCHUP_COLUMNS } from '../lib/matchupQueryColumns'
 
-const MATCHUP_DETAIL_SELECT = `*, profiles:user_id(${MATCHUP_CREATOR_PROFILE_FIELDS}), right_profiles:right_user_id(${MATCHUP_CREATOR_PROFILE_FIELDS})`
+const MATCHUP_DETAIL_SELECT = `${MATCHUP_DETAIL_MATCHUP_COLUMNS}, profiles:user_id(${MATCHUP_CREATOR_PROFILE_FIELDS}), right_profiles:right_user_id(${MATCHUP_CREATOR_PROFILE_FIELDS})`
+const MATCHUP_DETAIL_SELECT_FALLBACK = `${MATCHUP_DETAIL_MATCHUP_COLUMNS}, profiles:user_id(id, nickname, avatar_url), right_profiles:right_user_id(id, nickname, avatar_url)`
+
+function shouldRetryMatchupDetailSelect(err) {
+  const msg = String(err?.message || err || '').toLowerCase()
+  return (
+    msg.includes('column') ||
+    msg.includes('does not exist') ||
+    msg.includes('fandom_tier') ||
+    msg.includes('featured_badge') ||
+    msg.includes('creator_wins') ||
+    msg.includes('schema cache')
+  )
+}
 
 const MAX_IMAGE_BYTES = MAX_IMAGE_MB * 1024 * 1024
 const MAX_VIDEO_BYTES = MAX_VIDEO_MB * 1024 * 1024
@@ -178,12 +203,22 @@ export function MatchupDetailPage() {
   const { showToast, openLoginModal, openChallengeDrawer, openCreateDrawerForEdit } = useUIStore()
 
   const [matchup, setMatchup] = useState(null)
+  /** loading | ready | not_found — matchup null이어도 로딩 스켈레톤과 구분 */
+  const [matchupLoadStatus, setMatchupLoadStatus] = useState('loading')
   const [authorProfile, setAuthorProfile] = useState(null)
   const [userVote, setUserVote] = useState(null)
   const [voteLocked, setVoteLocked] = useState(false)
+  /** 첫 투표 제출 중 — Netlify `/api/vote` 등 왕복 동안 UI 멈춤 완화 */
+  const [voteSubmitting, setVoteSubmitting] = useState(false)
   const [liked, setLiked] = useState(false)
   const [comments, setComments] = useState([])
   const [commentsLoading, setCommentsLoading] = useState(true)
+  /** null이면 아직 집계 미조회 — 배지는 matchup.comments_count 폴백 */
+  const [commentsTotal, setCommentsTotal] = useState(null)
+  const [commentsHasOlder, setCommentsHasOlder] = useState(false)
+  const [commentsLoadingMore, setCommentsLoadingMore] = useState(false)
+  const commentsLoadedOffsetRef = useRef(0)
+  const commentsTotalRef = useRef(null)
   const [commentText, setCommentText] = useState('')
   const [submittingComment, setSubmittingComment] = useState(false)
   const [submittingReplyFor, setSubmittingReplyFor] = useState(null)
@@ -197,6 +232,9 @@ export function MatchupDetailPage() {
   const [fireworkTrigger, setFireworkTrigger] = useState(0)
   const [fireworkPos, setFireworkPos] = useState({ x: 0, y: 0 })
   const [showUploadGuide, setShowUploadGuide] = useState(false)
+  const [reportModal, setReportModal] = useState(null)
+  const [reportReason, setReportReason] = useState('')
+  const [submittingReport, setSubmittingReport] = useState(false)
   const lastCommentAtRef = useRef(0)
   const fetchMatchupRef = useRef(null)
   const commentTextareaRef = useRef(null)
@@ -204,6 +242,7 @@ export function MatchupDetailPage() {
   const timer = useCountdown(matchup?.expires_at)
   const userTier = getTier(myProfile || {})
   const commentTree = useMemo(() => nestComments(comments), [comments])
+  const commentCountDisplay = commentsTotal ?? matchup?.comments_count ?? comments.length
 
   // 팬덤 티어는 fandom_points에서 역산 (profile.fandom_tier가 DB에 스테일 값으로 남을 수 있어 신뢰하지 않음)
   const myFandomTier = useMemo(() => {
@@ -225,61 +264,99 @@ export function MatchupDetailPage() {
     [matchup, showToast]
   )
 
-  useEffect(() => { fetchMatchup(); fetchComments() }, [id])
-  useEffect(() => { if (user) { fetchUserVote(); fetchUserLike() } }, [user, id])
-
-  // 실시간 투표 구독
+  // 투표 수 갱신: Realtime 대신 45초 폴링 (탭 visible일 때만)
   useEffect(() => {
-    const ch = supabase.channel(`matchup-${id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'matchups', filter: `id=eq.${id}` },
-        (p) => { if (p.new) setMatchup((prev) => ({ ...prev, ...p.new })) })
-      .subscribe()
-    return () => supabase.removeChannel(ch)
+    if (!id || !canLoadMatchupFromDb(id)) return undefined
+    let cancelled = false
+    const poll = async () => {
+      if (cancelled || document.visibilityState !== 'visible') return
+      const { data } = await supabase
+        .from('matchups')
+        .select('left_votes, right_votes, total_votes, comments_count, likes_count, status, expires_at')
+        .eq('id', id)
+        .maybeSingle()
+      if (!cancelled && data) {
+        setMatchup((prev) => (prev?.id === id ? { ...prev, ...data } : prev))
+      }
+    }
+    void poll()
+    const intervalId = window.setInterval(poll, 45_000)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void poll()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [id])
 
   /** 조기 return 위에 두어야 함 — 그 아래에 두면 스켈레톤 vs 본문에서 훅 개수가 달라져 크래시 */
-  const handleEditMySide = useCallback(() => {
+  const handleEditAuthorSide = useCallback(() => {
     if (!matchup || !user) return
-    if ((matchup.total_votes || 0) > 0) {
-      showToast('투표가 진행된 매치업은 수정할 수 없어요.', 'info')
+    if (matchup.right_type != null || (matchup.total_votes || 0) > 0) {
+      showToast('매치업이 완료된 뒤에는 수정할 수 없어요.', 'info')
       return
     }
-    const isMy = user.id === matchup.user_id
-    if (isMy) {
-      if (hasClickedFinalize) return
-      openCreateDrawerForEdit(matchup)
-      return
-    }
-    if (matchup.right_user_id && matchup.right_user_id !== user.id) {
-      showToast('도전자(B)만 오른쪽 콘텐츠를 수정할 수 있어요.', 'info')
-      return
-    }
-    openChallengeDrawer(matchup, Boolean(matchup.right_type))
-  }, [
-    matchup,
-    user,
-    hasClickedFinalize,
-    openCreateDrawerForEdit,
-    openChallengeDrawer,
-    showToast,
-  ])
+    if (user.id !== matchup.user_id) return
+    if (hasClickedFinalize) return
+    openCreateDrawerForEdit(matchup)
+  }, [matchup, user, hasClickedFinalize, openCreateDrawerForEdit, showToast])
 
   const fetchMatchup = async () => {
-    const { data } = await supabase
+    if (!canLoadMatchupFromDb(id)) {
+      setMatchup(null)
+      setAuthorProfile(null)
+      setMatchupLoadStatus('not_found')
+      return
+    }
+
+    setMatchupLoadStatus('loading')
+    let { data, error } = await supabase
       .from('matchups')
       .select(MATCHUP_DETAIL_SELECT)
-      .eq('id', id).single()
-    if (!data) return
-    let row = data
-    if (data.profiles?.id) {
-      const map = await fetchCreatorRankMapForIds([data.profiles.id])
-      row = {
-        ...data,
-        _creatorRankInfo: map[data.profiles.id] || { ...EMPTY_TIER_RANK_INFO },
-      }
+      .eq('id', id)
+      .single()
+
+    if (error && shouldRetryMatchupDetailSelect(error)) {
+      const retry = await supabase
+        .from('matchups')
+        .select(MATCHUP_DETAIL_SELECT_FALLBACK)
+        .eq('id', id)
+        .single()
+      data = retry.data
+      error = retry.error
     }
-    setMatchup(row)
-    setAuthorProfile(row.profiles)
+
+    if (error || !data) {
+      console.warn('[MatchupDetailPage] fetchMatchup:', error?.message || 'no data')
+      setMatchup(null)
+      setAuthorProfile(null)
+      setMatchupLoadStatus('not_found')
+      return
+    }
+
+    // 1) 티어 RPC 전에 본문·미디어를 먼저 반영해 체감 로딩 단축
+    const base = {
+      ...data,
+      _creatorRankInfo: { ...EMPTY_TIER_RANK_INFO },
+    }
+    setMatchup(base)
+    setAuthorProfile(data.profiles)
+    setMatchupLoadStatus('ready')
+
+    const pid = data.profiles?.id
+    if (!pid) return
+
+    const map = await fetchCreatorRankMapForIds([pid])
+    setMatchup((prev) => {
+      if (!prev || prev.id !== data.id) return prev
+      return {
+        ...prev,
+        _creatorRankInfo: map[pid] || { ...EMPTY_TIER_RANK_INFO },
+      }
+    })
   }
   fetchMatchupRef.current = fetchMatchup
 
@@ -300,14 +377,109 @@ export function MatchupDetailPage() {
     const { data } = await supabase.from('likes').select('id').eq('user_id', user.id).eq('matchup_id', id).maybeSingle()
     setLiked(!!data)
   }
-  const fetchComments = async () => {
+
+  const fetchCommentsReset = useCallback(async () => {
+    if (!canLoadMatchupFromDb(id)) {
+      setComments([])
+      setCommentsTotal(null)
+      commentsTotalRef.current = null
+      setCommentsHasOlder(false)
+      commentsLoadedOffsetRef.current = 0
+      setCommentsLoading(false)
+      return
+    }
     setCommentsLoading(true)
-    const { data } = await supabase.from('comments')
-      .select('*, profiles:user_id(id, nickname, avatar_url, featured_badge, fandom_tier)')
-      .eq('matchup_id', id).order('created_at', { ascending: true })
-    setComments(data || [])
-    setCommentsLoading(false)
-  }
+    commentsLoadedOffsetRef.current = 0
+    try {
+      const { rowsAsc, totalCount, fetched, error } = await fetchMatchupCommentsWindow({
+        matchupId: id,
+        offset: 0,
+        limit: MATCHUP_COMMENTS_INITIAL_LIMIT,
+        withTotal: true,
+      })
+      if (error) throw error
+      setComments(rowsAsc)
+      if (typeof totalCount === 'number') {
+        setCommentsTotal(totalCount)
+        commentsTotalRef.current = totalCount
+        setCommentsHasOlder(totalCount > fetched)
+      } else {
+        setCommentsTotal(null)
+        commentsTotalRef.current = null
+        setCommentsHasOlder(fetched >= MATCHUP_COMMENTS_INITIAL_LIMIT)
+      }
+      commentsLoadedOffsetRef.current = fetched
+    } catch {
+      showToast('댓글을 불러오지 못했어요', 'error')
+      setComments([])
+      setCommentsTotal(null)
+      commentsTotalRef.current = null
+      setCommentsHasOlder(false)
+      commentsLoadedOffsetRef.current = 0
+    } finally {
+      setCommentsLoading(false)
+    }
+  }, [id, showToast])
+
+  const loadOlderComments = useCallback(async () => {
+    if (!id || commentsLoadingMore || !commentsHasOlder) return
+    setCommentsLoadingMore(true)
+    try {
+      const off = commentsLoadedOffsetRef.current
+      const { rowsAsc, fetched, error } = await fetchMatchupCommentsWindow({
+        matchupId: id,
+        offset: off,
+        limit: MATCHUP_COMMENTS_MORE_LIMIT,
+        withTotal: false,
+      })
+      if (error) throw error
+      if (!fetched) {
+        setCommentsHasOlder(false)
+        return
+      }
+      setComments((prev) => {
+        const seen = new Set(prev.map((c) => c.id))
+        return [...rowsAsc.filter((c) => !seen.has(c.id)), ...prev]
+      })
+      commentsLoadedOffsetRef.current += fetched
+      const total = commentsTotalRef.current
+      if (typeof total === 'number') {
+        setCommentsHasOlder(total > commentsLoadedOffsetRef.current)
+      } else {
+        setCommentsHasOlder(fetched >= MATCHUP_COMMENTS_MORE_LIMIT)
+      }
+    } catch {
+      showToast('이전 댓글을 불러오지 못했어요', 'error')
+    } finally {
+      setCommentsLoadingMore(false)
+    }
+  }, [id, commentsLoadingMore, commentsHasOlder, showToast])
+
+  useEffect(() => {
+    if (!canLoadMatchupFromDb(id)) {
+      setMatchup(null)
+      setAuthorProfile(null)
+      setMatchupLoadStatus('not_found')
+      return
+    }
+    setMatchup(null)
+    setAuthorProfile(null)
+    setMatchupLoadStatus('loading')
+    void fetchMatchup()
+    if (user?.id) {
+      void Promise.all([fetchUserVote(), fetchUserLike()])
+    } else {
+      setUserVote(null)
+      setVoteLocked(false)
+      setLiked(false)
+    }
+  }, [id, user?.id])
+
+  /** 본문 표시 후 댓글 로드 — 상단 매치업·투표 UI가 먼저 그려지도록 */
+  useEffect(() => {
+    if (matchupLoadStatus !== 'ready' || !canLoadMatchupFromDb(id)) return
+    void fetchCommentsReset()
+  }, [id, matchupLoadStatus, fetchCommentsReset])
   const handleComment = async (e) => {
     e.preventDefault()
     if (!user) { openLoginModal(); return }
@@ -326,7 +498,7 @@ export function MatchupDetailPage() {
     try {
       const { data, error } = await supabase.from('comments').insert({
         user_id: user.id, matchup_id: id, content: commentText.trim(),
-      }).select('*, profiles:user_id(id, nickname, avatar_url, featured_badge, fandom_tier)').single()
+      }).select(MATCHUP_COMMENT_SELECT).single()
 
       if (error) {
         if (error.message?.includes('금칙어')) {
@@ -342,6 +514,11 @@ export function MatchupDetailPage() {
         lastCommentAtRef.current = now
         setComments((p) => [...p, data])
         setCommentText('')
+        setCommentsTotal((t) => {
+          const next = typeof t === 'number' ? t + 1 : t
+          if (typeof next === 'number') commentsTotalRef.current = next
+          return next
+        })
         setMatchup((p) => ({ ...p, comments_count: (p.comments_count || 0) + 1 }))
       }
     } catch { showToast('댓글 작성에 실패했어요', 'error') }
@@ -367,7 +544,7 @@ export function MatchupDetailPage() {
         matchup_id: id,
         content: trimmed,
         parent_id: parentId,
-      }).select('*, profiles:user_id(id, nickname, avatar_url, featured_badge, fandom_tier)').single()
+      }).select(MATCHUP_COMMENT_SELECT).single()
 
       if (error) {
         if (error.message?.includes('금칙어')) {
@@ -382,6 +559,11 @@ export function MatchupDetailPage() {
       if (data) {
         lastCommentAtRef.current = now
         setComments((p) => [...p, data])
+        setCommentsTotal((t) => {
+          const next = typeof t === 'number' ? t + 1 : t
+          if (typeof next === 'number') commentsTotalRef.current = next
+          return next
+        })
         setMatchup((p) => ({ ...p, comments_count: (p.comments_count || 0) + 1 }))
         showToast('답글이 등록됐어요', 'success')
         return true
@@ -400,18 +582,20 @@ export function MatchupDetailPage() {
       showToast('삭제에 실패했어요', 'error')
       return
     }
-    await fetchComments()
+    await fetchCommentsReset()
     await fetchMatchup()
   }
   const handleVote = async (side, e) => {
     if (!user) return
-    if (!matchup?.right_type || timer?.expired) return
+    if (voteSubmitting) return
+    if (!matchup?.right_type || timer?.expired || matchup?.challenger_forfeit_at) return
     if (tierAtLeast(userTier, 'master') && e) {
       setFireworkPos({ x: e.clientX, y: e.clientY })
       setFireworkTrigger((t) => t + 1)
     }
-    try {
-      if (!userVote) {
+    if (!userVote) {
+      setVoteSubmitting(true)
+      try {
         const result = await voteViaApi(id, side)
         if (result.error) {
           showToast(result.error, 'error')
@@ -429,9 +613,11 @@ export function MatchupDetailPage() {
         setResultVotedSide(side)
         setTimeout(() => setShowResultModal(true), 350)
         setTimeout(() => fetchProfile(user.id), 800)
+      } catch (err) {
+        showToast(err?.message || '투표 중 오류가 발생했어요', 'error')
+      } finally {
+        setVoteSubmitting(false)
       }
-    } catch (err) {
-      showToast(err?.message || '투표 중 오류가 발생했어요', 'error')
     }
   }
 
@@ -455,6 +641,43 @@ export function MatchupDetailPage() {
     setLinkCopied(true)
     showToast('링크가 복사됐어요!', 'success')
     setTimeout(() => setLinkCopied(false), 2500)
+  }
+
+  const openReportModal = useCallback((side) => {
+    if (!user) {
+      openLoginModal()
+      return
+    }
+    setReportReason('')
+    setReportModal({ side })
+  }, [user, openLoginModal])
+
+  const handleSubmitMatchupReport = async () => {
+    if (!reportModal?.side || !matchup?.id || !user) return
+    setSubmittingReport(true)
+    try {
+      const { penalized, moderationFailed } = await submitMatchupReportAndRunModeration({
+        matchupId: matchup.id,
+        reportedSide: reportModal.side,
+        reason: reportReason.trim() || null,
+      })
+      setReportModal(null)
+      setReportReason('')
+      if (penalized) {
+        showToast('신고 누적 및 AI 판정으로 챌린저 몰수패·300P 차감이 적용되었어요.', 'success')
+        await fetchMatchup()
+        if (user.id === matchup.right_user_id) void fetchProfile(user.id)
+        window.dispatchEvent(new CustomEvent('vics:matchup:updated', { detail: { matchupId: matchup.id } }))
+      } else if (moderationFailed) {
+        showToast('신고는 접수했어요. 자동 검사 연결에 문제가 있으면 운영에서 확인할 수 있어요.', 'info')
+      } else {
+        showToast('신고가 접수되었어요.', 'success')
+      }
+    } catch (err) {
+      showToast(err?.message || '신고 처리 중 오류가 발생했어요', 'error')
+    } finally {
+      setSubmittingReport(false)
+    }
   }
 
   // 최종 매치업 만들기 (User A 전용, B 업로드 완료 시)
@@ -491,24 +714,24 @@ export function MatchupDetailPage() {
     // 상태 갱신으로 투표 UI(카운트다운, 액션 바) 표시
   }
 
-  // ── 로딩 ─────────────────────────────────────────────────────────
-  if (!matchup) return <MatchupDetailSkeleton />
+  // ── 로딩 / 없음 ───────────────────────────────────────────────────
+  if (matchupLoadStatus === 'loading') return <MatchupDetailSkeleton />
+  if (matchupLoadStatus === 'not_found' || !matchup) {
+    return (
+      <MatchupDetailNotFound
+        isDemo={isFeedDemoMatchupId(id)}
+        onBack={() => navigate(-1)}
+        onHome={() => navigate('/')}
+      />
+    )
+  }
 
   const { left, right } = calcPercent(matchup.left_votes, matchup.right_votes)
   const isComplete  = matchup.right_type != null
-  const isExpired   = timer?.expired
+  const challengerForfeit = Boolean(matchup.challenger_forfeit_at)
+  const isExpired   = timer?.expired || challengerForfeit
   const isMyMatchup = user?.id === matchup.user_id
-  const isChallengerUser = Boolean(
-    user?.id && matchup.right_user_id === user.id && matchup.user_id !== user.id,
-  )
-  /** 투표 1표 이상이면 경쟁 시작 → 수정 UI 숨김 */
-  const matchupVotingStarted = (matchup.total_votes || 0) > 0
   const canAuthorEdit = isMyMatchup && !hasClickedFinalize
-  const canChallengerEdit =
-    !!user && !isMyMatchup && (!matchup.right_type || isChallengerUser)
-  const showBottomEditButton =
-    !matchupVotingStarted && (canAuthorEdit || canChallengerEdit)
-
   const showResults = isComplete && (userVote !== null || (matchup.total_votes || 0) > 0)
 
   const detailVipFrame =
@@ -634,25 +857,47 @@ export function MatchupDetailPage() {
             /* NEW 매치업: 매치업 만들기 폼 레이아웃과 동일 (📌 경쟁 제목, 카테고리, 투표 기간, 🥊 경쟁 구도) */
             <>
               <div className="p-5 space-y-5">
-                {/* 1. 📌 경쟁 제목 * */}
-                <div className="space-y-2.5">
+                {/* 1. 📌 경쟁 제목(중앙·A) + 설명(A | B) */}
+                <div className="space-y-3">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-[#22282E]">📌 경쟁 제목</span>
+                    <span className="text-sm font-bold text-[#22282E]">📌 경쟁 제목 · 도전 설명</span>
                     <span className="text-red-400 text-xs">*</span>
                   </div>
-                  <div className="relative">
-                    <div className="w-full px-4 py-3 text-sm font-medium bg-violet-50/50 border border-violet-200/45 rounded-xl text-[#22282E] pr-16">
-                      {matchup.title || '—'}
-                    </div>
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">
-                      {(matchup.title || '').length}/{TITLE_MAX}
-                    </span>
+                  <div className="flex flex-col items-center gap-2 text-center px-2">
+                    <p className="text-base font-black text-[#22282E] leading-snug">{matchup.title || '—'}</p>
+                    <p className="text-[10px] font-semibold text-violet-500/80">User A가 정한 경쟁 제목</p>
+                    <VsBadge variant="minimal" size="sm" animated={false} />
                   </div>
-                  <div className={cn(
-                    'w-full px-4 py-3 text-sm bg-violet-50/50 border border-violet-200/45 rounded-xl resize-none',
-                    matchup.description ? 'text-gray-600' : 'text-gray-300'
-                  )}>
-                    {matchup.description || '경쟁 설명을 추가해보세요 (선택)'}
+                  <div className="grid grid-cols-[1fr_36px_1fr] gap-2 items-stretch">
+                    <div className="space-y-1.5 min-w-0">
+                      <span className="text-[10px] font-black uppercase tracking-wide text-violet-600/90">
+                        작성자 (A) · 설명
+                      </span>
+                      <div
+                        className={cn(
+                          'w-full px-3 py-2.5 text-sm min-h-[4rem] bg-violet-50/50 border border-violet-200/45 rounded-xl',
+                          matchup.description ? 'text-gray-600' : 'text-gray-300 italic',
+                        )}
+                      >
+                        {matchup.description || '설명 없음'}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-center">
+                      <div className="w-px h-full min-h-[4rem] bg-violet-200/50" />
+                    </div>
+                    <div className="space-y-1.5 min-w-0">
+                      <span className="text-[10px] font-black uppercase tracking-wide text-violet-500">
+                        도전자 (B) · 설명
+                      </span>
+                      <div
+                        className={cn(
+                          'w-full px-3 py-2.5 text-sm min-h-[4rem] border border-dashed border-violet-200/55 rounded-xl',
+                          matchup.right_description ? 'bg-white text-gray-600' : 'bg-violet-50/40 text-violet-300/90 italic',
+                        )}
+                      >
+                        {matchup.right_description || '도전장에서 작성 (선택)'}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -833,7 +1078,7 @@ export function MatchupDetailPage() {
                   </div>
                 )}
 
-                {/* 안내(작성자) + 수정·삭제(비작성자는 삭제 비활성)·최종(작성자) */}
+                {/* 안내(작성자) + A쪽 수정·최종(작성자) — 도전은 구도 영역 「도전하기」 */}
                 <div className="space-y-3">
                   {isMyMatchup && (
                     <div className="flex items-start gap-2 px-3 py-2.5 bg-red-50 border border-red-100 rounded-xl">
@@ -843,79 +1088,80 @@ export function MatchupDetailPage() {
                       </p>
                     </div>
                   )}
-                  <div className="flex items-center gap-2">
-                    {showBottomEditButton && (
+                  {isMyMatchup && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {canAuthorEdit && (
+                        <button
+                          type="button"
+                          onClick={handleEditAuthorSide}
+                          disabled={hasClickedFinalize}
+                          title="작성자(A) 쪽만 수정해요"
+                          className={cn(
+                            'flex items-center justify-center gap-1.5 px-4 py-3 rounded-xl text-sm font-bold shrink-0 transition-colors',
+                            hasClickedFinalize
+                              ? 'text-violet-300 bg-violet-50/50 cursor-not-allowed'
+                              : 'text-violet-800 bg-violet-100/50 hover:bg-violet-200/50',
+                          )}
+                        >
+                          <Pencil size={14} />
+                          A 쪽 수정
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={handleEditMySide}
-                        disabled={isMyMatchup && hasClickedFinalize}
-                        title={
-                          isMyMatchup
-                            ? '작성자(A) 쪽만 수정해요'
-                            : matchup?.right_type
-                              ? '도전자(B) 쪽만 수정해요'
-                              : '도전자로 B 측 올리기'
-                        }
-                        className={cn(
-                          'flex items-center justify-center gap-1.5 px-4 py-3 rounded-xl text-sm font-bold shrink-0 transition-colors',
-                          isMyMatchup && hasClickedFinalize
-                            ? 'text-violet-300 bg-violet-50/50 cursor-not-allowed'
-                            : 'text-violet-800 bg-violet-100/50 hover:bg-violet-200/50',
-                        )}
-                      >
-                        <Pencil size={14} />
-                        수정
-                      </button>
-                    )}
-                    {!matchup?.right_type && (
-                      <button
-                        type="button"
-                        title={
-                          isMyMatchup
-                            ? undefined
-                            : '도전자(B)는 매치업을 삭제할 수 없어요. 작성자(A)만 삭제할 수 있어요.'
-                        }
-                        onClick={openDeleteConfirm}
-                        disabled={!isMyMatchup}
-                        className={cn(
-                          'flex items-center justify-center gap-1.5 px-4 py-3 rounded-xl text-sm font-bold shrink-0 transition-colors',
-                          isMyMatchup
-                            ? 'text-red-600 bg-red-50 hover:bg-red-100'
-                            : 'cursor-not-allowed bg-slate-100 text-slate-400',
-                        )}
-                      >
-                        <Trash2 size={14} />
-                        삭제
-                      </button>
-                    )}
-                    {isMyMatchup && (
-                      <button
                         onClick={handleFinalizeMatchup}
                         disabled={!matchup?.right_type}
-                        className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl text-sm font-black tracking-wide transition-all ${
+                        className={cn(
+                          'flex flex-1 min-w-[10rem] items-center justify-center gap-2 py-4 rounded-2xl text-sm font-black tracking-wide transition-all',
                           matchup?.right_type
                             ? 'bg-gradient-to-r from-violet-600 via-fuchsia-600 to-violet-700 text-white shadow-[0_0_28px_rgba(139,92,246,0.45)] hover:shadow-[0_0_40px_rgba(217,70,239,0.5)] hover:scale-[1.01] active:scale-[0.99]'
-                            : 'bg-violet-100/60 text-violet-300 cursor-not-allowed'
-                        }`}
+                            : 'bg-violet-100/60 text-violet-300 cursor-not-allowed',
+                        )}
                       >
                         {matchup?.right_type ? <Zap size={16} className="fill-current" /> : null}
                         최종 매치업 만들기
                       </button>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </>
           ) : (
             /* 완료된 매치업: 베스트/추천 이미지 형식 (제목, 날짜, 설명) */
             <>
-              <div className="px-6 pt-6 pb-5">
-                <h1 className="text-xl sm:text-2xl font-black text-violet-950 mb-1 leading-snug">
-                  {matchup.title}
-                </h1>
-                <p className="text-sm text-violet-400/90 mb-3">{formatDate(matchup.created_at)}</p>
-                {matchup.description && (
-                  <p className="text-sm text-gray-500 leading-relaxed">{matchup.description}</p>
+              <div className="px-6 pt-6 pb-5 space-y-4">
+                <p className="text-sm text-violet-400/90">{formatDate(matchup.created_at)}</p>
+                <div className="flex flex-col items-center gap-2 text-center">
+                  <h1 className="text-xl sm:text-2xl font-black text-violet-950 leading-snug">
+                    {matchup.title}
+                  </h1>
+                  <p className="text-[10px] font-semibold text-violet-500/80">User A가 정한 경쟁 제목</p>
+                  <VsBadge variant="minimal" size="sm" animated={false} />
+                </div>
+                {(matchup.description || matchup.right_description) && (
+                  <div className="grid grid-cols-[1fr_auto_1fr] gap-3 items-start pt-1">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black uppercase tracking-wide text-violet-600/90 mb-1">
+                        {matchup.left_label || 'A'} · 설명
+                      </p>
+                      {matchup.description ? (
+                        <p className="text-sm text-gray-500 leading-relaxed">{matchup.description}</p>
+                      ) : (
+                        <p className="text-sm text-gray-300 italic">—</p>
+                      )}
+                    </div>
+                    <div className="w-px self-stretch min-h-[2rem] bg-violet-200/60" />
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black uppercase tracking-wide text-fuchsia-600/90 mb-1">
+                        {matchup.right_label || 'B'} · 도전 설명
+                      </p>
+                      {matchup.right_description ? (
+                        <p className="text-sm text-gray-500 leading-relaxed">{matchup.right_description}</p>
+                      ) : (
+                        <p className="text-sm text-gray-300 italic">—</p>
+                      )}
+                    </div>
+                  </div>
                 )}
               </div>
             </>
@@ -925,6 +1171,11 @@ export function MatchupDetailPage() {
         {/* ── 경쟁 영역 (완료된 매치업만) ──────────────────────────────────────────── */}
         {isComplete && (
         <section className="px-5 py-6">
+          {challengerForfeit && (
+            <div className="mb-4 rounded-xl border border-rose-200/80 bg-rose-50 px-4 py-3 text-center text-sm font-semibold text-rose-900 leading-relaxed">
+              이 경쟁은 커뮤니티 가이드 위반으로 <strong>챌린저(B) 몰수패</strong>가 적용되었어요. (도전자 300P 차감)
+            </div>
+          )}
           {!isExpired && (
             <p className="text-xs text-gray-400 mb-3 text-center">투표는 1회 확정 (변경 불가)</p>
           )}
@@ -938,6 +1189,7 @@ export function MatchupDetailPage() {
               authorProfile={authorProfile}
               userVote={userVote}
               voteLocked={voteLocked}
+              voteSubmitting={voteSubmitting}
               isExpired={isExpired}
               isComplete={isComplete}
               onVote={handleVote}
@@ -945,6 +1197,8 @@ export function MatchupDetailPage() {
               percent={left}
               showResult={showResults}
               variant="best"
+              onRequestReport={openReportModal}
+              forfeitApplied={challengerForfeit}
             />
 
             {/* B측 = 도전자 */}
@@ -955,6 +1209,7 @@ export function MatchupDetailPage() {
                 authorProfile={null}
                 userVote={userVote}
                 voteLocked={voteLocked}
+                voteSubmitting={voteSubmitting}
                 isExpired={isExpired}
                 isComplete={isComplete}
                 onVote={handleVote}
@@ -962,6 +1217,8 @@ export function MatchupDetailPage() {
                 percent={right}
                 showResult={showResults}
                 variant="best"
+                onRequestReport={openReportModal}
+                forfeitApplied={challengerForfeit}
               />
             ) : (
               <ChallengerSlot
@@ -981,7 +1238,7 @@ export function MatchupDetailPage() {
           {/* 완료된 매치업: 카운트다운(진행 중일 때만) + 총 투표수 */}
           {isComplete && (
             <>
-              {matchup?.expires_at && timer && !timer.expired && (
+              {matchup?.expires_at && timer && !timer.expired && !challengerForfeit && (
                 <div className="mt-5 pt-5 border-t border-violet-100/55">
                   <div className="bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500 text-white rounded-xl px-5 py-4 text-center shadow-[0_8px_28px_-6px_rgba(251,146,60,0.45)]">
                     <p className="text-xs text-white/90 mb-1">투표 마감까지 남은 시간</p>
@@ -991,7 +1248,7 @@ export function MatchupDetailPage() {
                   </div>
                 </div>
               )}
-              <div className={`flex items-center justify-center gap-2 ${matchup?.expires_at && timer && !timer.expired ? 'mt-4' : 'mt-5 pt-5 border-t border-violet-100/55'}`}>
+              <div className={`flex items-center justify-center gap-2 ${matchup?.expires_at && timer && !timer.expired && !challengerForfeit ? 'mt-4' : 'mt-5 pt-5 border-t border-violet-100/55'}`}>
                 <Users size={14} className="text-violet-400" />
                 <span className="text-sm font-black bg-gradient-to-r from-violet-800 to-fuchsia-700 bg-clip-text text-transparent">
                   총 투표수: {formatNumber(matchup.total_votes || 0)}
@@ -1019,7 +1276,7 @@ export function MatchupDetailPage() {
                   {formatNumber(matchup.likes_count || 0)}
                 </button>
                 <a href="#comments" className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-violet-600/85 bg-violet-50/60 hover:bg-violet-100/70 transition-colors">
-                  💬 {comments.length}
+                  💬 {commentCountDisplay}
                 </a>
                 <span className="text-xs text-gray-400 font-medium">친구들에게 공유하기</span>
                 {SNS_LIST.map((sns) => (
@@ -1042,27 +1299,6 @@ export function MatchupDetailPage() {
                 </button>
               </div>
             </footer>
-            {user &&
-              !isExpired &&
-              !matchupVotingStarted &&
-              (isMyMatchup || isChallengerUser) && (
-              <div className="border-t border-violet-100/55 px-5 pb-5 pt-3">
-                <button
-                  type="button"
-                  onClick={handleEditMySide}
-                  disabled={isMyMatchup && hasClickedFinalize}
-                  className={cn(
-                    'inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-black text-violet-900 transition-colors',
-                    isMyMatchup && hasClickedFinalize
-                      ? 'cursor-not-allowed bg-violet-100/50 text-violet-300'
-                      : 'bg-violet-100/80 hover:bg-violet-200/80',
-                  )}
-                >
-                  <Pencil size={15} />
-                  {isMyMatchup ? '작성자(A) 쪽 수정' : '도전자(B) 쪽 수정'}
-                </button>
-              </div>
-            )}
           </>
         )}
       </article>
@@ -1090,7 +1326,15 @@ export function MatchupDetailPage() {
             <h2 className="text-base font-black bg-gradient-to-r from-violet-700 via-fuchsia-600 to-cyan-600 bg-clip-text text-transparent">
               댓글
             </h2>
-            <span className="text-sm text-gray-400 font-normal">{commentsLoading ? '…' : comments.length}</span>
+            <span className="text-sm text-gray-400 font-normal">
+              {commentsLoading
+                ? '…'
+                : (commentsTotal != null && commentsTotal > comments.length)
+                  ? `${comments.length} / ${commentsTotal}`
+                  : (commentsHasOlder
+                    ? `${comments.length}+`
+                    : commentCountDisplay)}
+            </span>
           </div>
 
           <div className="px-5 pt-4 pb-4 border-b border-violet-100/55">
@@ -1137,6 +1381,18 @@ export function MatchupDetailPage() {
           </div>
 
           <div className="px-5 py-5 space-y-5">
+            {!commentsLoading && commentsHasOlder && (
+              <div className="flex justify-center -mt-1 mb-1">
+                <button
+                  type="button"
+                  onClick={() => void loadOlderComments()}
+                  disabled={commentsLoadingMore}
+                  className="px-4 py-2 rounded-xl text-xs font-bold border border-violet-200/80 bg-white/80 text-violet-700 hover:bg-violet-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {commentsLoadingMore ? '불러오는 중…' : '이전 댓글 더보기'}
+                </button>
+              </div>
+            )}
             {commentsLoading ? (
               Array.from({ length: 3 }).map((_, i) => (
                 <div key={i} className="flex items-start gap-3 animate-pulse">
@@ -1175,6 +1431,49 @@ export function MatchupDetailPage() {
           </div>
         </section>
       )}
+
+      <Modal
+        isOpen={!!reportModal}
+        onClose={() => !submittingReport && setReportModal(null)}
+        title={reportModal?.side === 'left' ? `${leftLabel} 측 신고` : `${rightLabel} 측 신고`}
+        className="max-w-md"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600 leading-relaxed">
+            허위·악의 신고는 제재 대상이 될 수 있어요. 부적절한 콘텐츠만 신고해 주세요.
+          </p>
+          <div>
+            <label className="text-xs font-bold text-gray-500">사유 (선택)</label>
+            <textarea
+              value={reportReason}
+              onChange={(e) => setReportReason(e.target.value)}
+              rows={3}
+              maxLength={400}
+              disabled={submittingReport}
+              placeholder="간단히 적어주세요"
+              className="mt-1.5 w-full rounded-xl border border-violet-200/60 bg-white px-3 py-2.5 text-sm outline-none focus:border-violet-400 resize-none disabled:opacity-50"
+            />
+          </div>
+          <div className="flex gap-3 pt-1">
+            <button
+              type="button"
+              disabled={submittingReport}
+              onClick={() => setReportModal(null)}
+              className="flex-1 py-3 rounded-xl text-sm font-bold bg-violet-50 text-violet-800 hover:bg-violet-100 disabled:opacity-40"
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              disabled={submittingReport}
+              onClick={() => void handleSubmitMatchupReport()}
+              className="flex-1 py-3 rounded-xl text-sm font-black bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-40"
+            >
+              {submittingReport ? '처리 중…' : '신고 접수'}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Master 티어 전용 투표 이펙트 */}
       <VoteFireworks
@@ -1373,7 +1672,23 @@ function CommentItem({
 }
 
 // ── 옵션 카드 ──────────────────────────────────────────────────────
-function OptionCard({ side, matchup, authorProfile, userVote, voteLocked, isExpired, isComplete, onVote, user, percent, showResult, variant }) {
+function OptionCard({
+  side,
+  matchup,
+  authorProfile,
+  userVote,
+  voteLocked,
+  voteSubmitting = false,
+  isExpired,
+  isComplete,
+  onVote,
+  user,
+  percent,
+  showResult,
+  variant,
+  onRequestReport,
+  forfeitApplied,
+}) {
   const isLeft  = side === 'left'
   const type    = isLeft ? matchup.left_type  : matchup.right_type
   const url     = isLeft ? matchup.left_url   : matchup.right_url
@@ -1382,19 +1697,35 @@ function OptionCard({ side, matchup, authorProfile, userVote, voteLocked, isExpi
   const thumb   = isLeft ? matchup.left_thumbnail_url : matchup.right_thumbnail_url
 
   const voted   = userVote === side
-  const canVote = isComplete && !isExpired && !(voteLocked && !voted)
+  const canVote =
+    isComplete &&
+    !isExpired &&
+    !forfeitApplied &&
+    !(voteLocked && !voted) &&
+    !(voteSubmitting && !userVote)
   const isBestVariant = variant === 'best'
 
+  const forceLeftWin = Boolean(matchup.challenger_forfeit_at)
   const hasVotes = (matchup.total_votes || 0) > 0
-  const isDraw  = (matchup.left_votes || 0) === (matchup.right_votes || 0)
-  const winner  = isDraw ? null : (matchup.left_votes > matchup.right_votes ? 'left' : 'right')
+  const isDraw  = !forceLeftWin && (matchup.left_votes || 0) === (matchup.right_votes || 0)
+  const winner  = forceLeftWin ? 'left' : (isDraw ? null : (matchup.left_votes > matchup.right_votes ? 'left' : 'right'))
   const isWin   = !isDraw && side === winner
   const isLose  = !isDraw && side !== winner
-  const showWinLoseBadge = isComplete && hasVotes && isExpired
+  const showWinLoseBadge = isComplete && ((hasVotes && isExpired) || forceLeftWin)
 
-  const handleVoteClick = (e) => {
-    if (!user) return
-    if (canVote) onVote(side, e)
+  const reportSelf =
+    (isLeft && user?.id && matchup.user_id === user.id) ||
+    (!isLeft && user?.id && matchup.right_user_id === user.id)
+
+  const [viewerMedia, setViewerMedia] = useState(null)
+  const viewPayload = { type, url, thumbnail: thumb, text, label }
+  const canOpenViewer = canOpenMatchupMediaView(viewPayload)
+
+  const handleMediaPreview = (e) => {
+    if (e.target.closest('video')) return
+    if (!canOpenViewer) return
+    e.stopPropagation()
+    setViewerMedia(viewPayload)
   }
 
   return (
@@ -1423,9 +1754,9 @@ function OptionCard({ side, matchup, authorProfile, userVote, voteLocked, isExpi
       )}
       {/* 미디어 */}
       <div
-        onClick={(e) => canVote && user && handleVoteClick(e)}
+        onClick={handleMediaPreview}
         className={`relative group rounded-xl transition-all duration-200 ${
-          canVote && user ? 'cursor-pointer' : 'cursor-default'
+          canOpenViewer ? 'cursor-zoom-in' : 'cursor-default'
         } ${
           voted
             ? isLeft
@@ -1441,6 +1772,8 @@ function OptionCard({ side, matchup, authorProfile, userVote, voteLocked, isExpi
             <img
               src={safeMediaUrl(thumb || url)}
               alt={label}
+              loading="lazy"
+              decoding="async"
               className="h-full w-full object-cover transition-transform duration-400 group-hover:scale-105"
             />
           )}
@@ -1506,11 +1839,10 @@ function OptionCard({ side, matchup, authorProfile, userVote, voteLocked, isExpi
           </div>
         )}
 
-        {/* 투표 유도 호버 */}
-        {canVote && user && !voted && type !== 'video' && (
-          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors flex items-center justify-center pointer-events-none">
-            <span className="opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-r from-fuchsia-600 to-sky-500 text-white text-xs font-black px-3 py-1.5 rounded-full shadow-[0_0_20px_rgba(217,70,239,0.45)]">
-              클릭해서 투표
+        {canOpenViewer && type !== 'text' && (
+          <div className="pointer-events-none absolute inset-0 z-[12] flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
+            <span className="rounded-full bg-black/55 px-3 py-1.5 text-xs font-black text-white backdrop-blur-sm">
+              탭해서 크게 보기
             </span>
           </div>
         )}
@@ -1545,11 +1877,17 @@ function OptionCard({ side, matchup, authorProfile, userVote, voteLocked, isExpi
         <button
           type="button"
           onClick={(e) => {
-            if (!user) return
+            if (!user || voteSubmitting) return
             onVote(side, e)
           }}
-          disabled={!voted && (!user || (voteLocked && !!user))}
-          title={!user ? '로그인 후 투표할 수 있어요' : undefined}
+          disabled={!voted && (!user || (voteLocked && !!user) || voteSubmitting)}
+          title={
+            !user
+              ? '로그인 후 투표할 수 있어요'
+              : voteSubmitting && !userVote
+                ? '투표 처리 중…'
+                : undefined
+          }
           className={`w-full py-3 rounded-xl text-sm font-black transition-all active:scale-[0.97] flex items-center justify-center gap-1.5 ${
             voted
               ? isLeft
@@ -1559,20 +1897,48 @@ function OptionCard({ side, matchup, authorProfile, userVote, voteLocked, isExpi
                 ? 'cursor-not-allowed bg-slate-100 text-slate-400 ring-1 ring-slate-200/80'
                 : voteLocked
                   ? 'bg-violet-100/60 text-violet-300 cursor-not-allowed'
-                  : isLeft
-                    ? 'bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white hover:shadow-[0_0_28px_rgba(217,70,239,0.55)] hover:scale-[1.01]'
-                    : 'bg-gradient-to-r from-sky-400 to-blue-500 text-white hover:shadow-[0_0_28px_rgba(14,165,233,0.55)] hover:scale-[1.01]'
+                  : voteSubmitting && !userVote
+                    ? 'cursor-wait opacity-90 bg-slate-200/90 text-slate-600'
+                    : isLeft
+                      ? 'bg-gradient-to-r from-fuchsia-500 to-pink-400 text-white hover:shadow-[0_0_28px_rgba(217,70,239,0.55)] hover:scale-[1.01]'
+                      : 'bg-gradient-to-r from-sky-400 to-blue-500 text-white hover:shadow-[0_0_28px_rgba(14,165,233,0.55)] hover:scale-[1.01]'
           }`}
         >
-          {isBestVariant && <ThumbsUp size={14} className={voted ? 'fill-current' : ''} />}
-          {voted ? `✓ ${label}에 투표함` : !user ? '로그인 후 투표' : `${label}에 투표하기`}
+          {voteSubmitting && !userVote ? (
+            <>
+              <span className="h-4 w-4 shrink-0 rounded-full border-2 border-current/30 border-t-current animate-spin" aria-hidden />
+              처리 중…
+            </>
+          ) : (
+            <>
+              {isBestVariant && <ThumbsUp size={14} className={voted ? 'fill-current' : ''} />}
+              {voted ? `✓ ${label}에 투표함` : !user ? '로그인 후 투표' : `${label}에 투표하기`}
+            </>
+          )}
         </button>
       )}
       {isExpired && (
         <div className="w-full py-2.5 rounded-xl text-xs font-bold text-center bg-violet-100/50 text-violet-400">
-          {voted ? `✓ ${label} 투표` : '마감된 투표'}
+          {voted ? `✓ ${label} 투표` : forfeitApplied ? '몰수패로 경쟁 종료' : '마감된 투표'}
         </div>
       )}
+
+      {isComplete && user && onRequestReport && !forfeitApplied && !reportSelf && (
+        <button
+          type="button"
+          onClick={() => onRequestReport(side)}
+          className="flex w-full items-center justify-center gap-1.5 py-2 rounded-xl text-[11px] font-bold text-gray-400 hover:text-rose-600 hover:bg-rose-50/60 transition-colors border border-transparent hover:border-rose-100"
+        >
+          <Flag size={12} className="shrink-0" />
+          {label} 측 신고
+        </button>
+      )}
+
+      <MatchupMediaViewer
+        open={Boolean(viewerMedia)}
+        media={viewerMedia}
+        onClose={() => setViewerMedia(null)}
+      />
     </div>
   )
 }
@@ -1913,6 +2279,41 @@ function StoryCardSide({ type, url, text, label, pct, isWin, isVoted, animated, 
             />
           </div>
           <p className="text-white/60 text-[10px] mt-1 font-medium">{label}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── 매치업 없음 / 데모 ID ─────────────────────────────────────────
+function MatchupDetailNotFound({ isDemo, onBack, onHome }) {
+  return (
+    <div className="relative -mx-4 px-4 sm:mx-0 sm:px-0 pb-6">
+      <div className="max-w-lg mx-auto py-16 px-6 text-center">
+        <p className="text-4xl mb-4">{isDemo ? '🎭' : '🔍'}</p>
+        <h1 className="text-lg font-black text-[#22282E] mb-2">
+          {isDemo ? '데모 매치업은 상세 페이지가 없어요' : '매치업을 찾을 수 없어요'}
+        </h1>
+        <p className="text-sm text-gray-500 mb-8 leading-relaxed">
+          {isDemo
+            ? '메인에 표시되는 샘플 카드예요. 실제 매치업을 만들거나 피드에서 다른 카드를 눌러보세요.'
+            : '삭제되었거나 주소가 잘못됐을 수 있어요.'}
+        </p>
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
+          <button
+            type="button"
+            onClick={onBack}
+            className="w-full sm:w-auto px-5 py-2.5 rounded-xl text-sm font-bold text-violet-800 bg-violet-100 hover:bg-violet-200/80 transition-colors"
+          >
+            이전으로
+          </button>
+          <button
+            type="button"
+            onClick={onHome}
+            className="w-full sm:w-auto px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-fuchsia-600 to-sky-500 hover:opacity-95 transition-opacity"
+          >
+            홈으로
+          </button>
         </div>
       </div>
     </div>

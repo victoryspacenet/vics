@@ -4,12 +4,58 @@
 import { supabase } from './supabase'
 import { getTier, tierAtLeast } from './tiers'
 
+const POPUP_ROWS_TTL_MS = 5 * 60 * 1000
+let popupRowsCache = { key: '', rows: null, fetchedAt: 0 }
+
+export function invalidatePopupNoticeCache() {
+  popupRowsCache = { key: '', rows: null, fetchedAt: 0 }
+}
+
 function dispatchPopupUpdated() {
+  invalidatePopupNoticeCache()
   try {
     window.dispatchEvent(new CustomEvent('vics:popup-notices:updated'))
   } catch {
     void 0
   }
+}
+
+async function fetchPopupNoticeRows() {
+  const cacheKey = 'active-candidates'
+  const now = Date.now()
+  if (
+    popupRowsCache.key === cacheKey &&
+    popupRowsCache.rows &&
+    now - popupRowsCache.fetchedAt < POPUP_ROWS_TTL_MS
+  ) {
+    return popupRowsCache.rows
+  }
+
+  let rows = null
+  const { data: rpcRows, error: rpcErr } = await supabase.rpc('list_popup_notices_active_candidates')
+  if (!rpcErr && Array.isArray(rpcRows)) {
+    rows = rpcRows
+  } else {
+    if (rpcErr) {
+      console.warn('[popupNoticeStorage] list_popup_notices_active_candidates:', rpcErr.message)
+    }
+    const { data, error } = await supabase
+      .from('popup_notices')
+      .select('id, doc, created_at, updated_at')
+      .order('updated_at', { ascending: false })
+      .limit(50)
+    if (error) {
+      console.error('[popupNoticeStorage] list:', error.message)
+      return []
+    }
+    rows = (data || []).filter((row) => {
+      const d = row?.doc && typeof row.doc === 'object' ? row.doc : {}
+      return d.isActive !== false
+    })
+  }
+
+  popupRowsCache = { key: cacheKey, rows, fetchedAt: now }
+  return rows
 }
 
 // ── localStorage 스누즈 (비로그인 폴백 + Race-condition 보호) ──────────────
@@ -112,14 +158,7 @@ async function fetchSnoozeMap(userId) {
 
 /** 현재 노출 가능한 팝업 목록 */
 export async function getActivePopups(user = null, profile = null, rankInfo = null) {
-  const { data: rows, error } = await supabase
-    .from('popup_notices')
-    .select('id, doc, created_at, updated_at')
-    .order('updated_at', { ascending: false })
-  if (error) {
-    console.error('[popupNoticeStorage] list:', error.message)
-    return []
-  }
+  const rows = await fetchPopupNoticeRows()
   const list = (rows || []).map(rowToPopup)
   const dbDismissed = await fetchSnoozeMap(user?.id)
   // localStorage 스누즈: 비로그인 폴백 + DB 저장 Race-condition 보호

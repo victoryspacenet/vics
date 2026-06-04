@@ -217,15 +217,17 @@ create or replace trigger on_like_change
   after insert or delete on public.likes
   for each row execute function update_likes_count();
 
--- 신규 유저 프로필 자동 생성
+-- 신규 유저 프로필 자동 생성 — 전체 정의는 supabase_handle_new_user_unified.sql 과 동일하게 유지할 것.
+-- 아래는 초기 스키마용 요약이며, 운영 반영 시에는 unified 파일 실행을 권장합니다.
 create or replace function handle_new_user()
 returns trigger as $$
 begin
-  insert into public.profiles (id, email, nickname)
+  insert into public.profiles (id, email, nickname, points)
   values (
     new.id,
     new.email,
-    coalesce(new.raw_user_meta_data->>'nickname', split_part(new.email, '@', 1))
+    coalesce(nullif(trim(new.raw_user_meta_data->>'nickname'), ''), split_part(new.email, '@', 1)),
+    100
   );
   return new;
 end;

@@ -1,4 +1,6 @@
 import { supabase } from './supabase'
+import { isMainSeedMatchup } from './seedMatchupTitles'
+import { isSpotlightDemoMatchup } from './spotlightDemo'
 
 export const BANNER_HIGHLIGHT_COST = 1000
 /** 서버 상한: 구매 시각 + 48시간(실제 종료는 투표 expires_at과 비교해 더 이른 시각) */
@@ -26,6 +28,7 @@ export async function fetchBannerHighlightEligibleMatchups(userId) {
     )
     .eq('user_id', userId)
     .eq('status', 'active')
+    .eq('is_demo', false)
     .not('right_type', 'is', null)
     .or(`expires_at.is.null,expires_at.gt.${now}`)
     .order('created_at', { ascending: false })
@@ -35,7 +38,9 @@ export async function fetchBannerHighlightEligibleMatchups(userId) {
     if (import.meta.env.DEV) console.warn('[fetchBannerHighlightEligibleMatchups]', error.message)
     return []
   }
-  return data || []
+  return (data || []).filter(
+    (m) => !isSpotlightDemoMatchup(m) && !isMainSeedMatchup(m) && m.category !== 'spotlight_demo'
+  )
 }
 
 /**

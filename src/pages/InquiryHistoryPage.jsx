@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Plus, ChevronRight, Lightbulb, Loader2 } from 'lucide-react'
-import { getAppealKeywordHints, INQUIRY_STATUS } from '../lib/inquiryStorage'
+import { getAppealKeywordHints, INQUIRY_STATUS, fetchUserInquiriesPaged } from '../lib/inquiryStorage'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import { cn } from '../lib/utils'
+import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../lib/layoutShellClasses'
 
 /** MZ 파스텔 — 마이페이지·프로필 편집 계열 */
 const PAGE_BG =
@@ -100,48 +101,63 @@ export function InquiryHistoryPage() {
   const navigate = useNavigate()
   const { user } = useAuthStore()
   const [page, setPage] = useState(1)
-  const [items, setItems] = useState([])       // Supabase 조회 결과
+  const [items, setItems] = useState([])
+  const [totalCount, setTotalCount] = useState(0)
   const [autoRepliedIds, setAutoRepliedIds] = useState(new Set())
   const [loading, setLoading] = useState(true)
 
+  useEffect(() => {
+    setPage(1)
+  }, [user?.id])
+
   const loadHistory = useCallback(async () => {
-    if (!user) { setLoading(false); return }
+    if (!user) {
+      setItems([])
+      setTotalCount(0)
+      setAutoRepliedIds(new Set())
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
-      // 내 문의 목록 조회
-      const { data: rows } = await supabase
-        .from('inquiries')
-        .select('id, receipt_id, category, category_label, title, content, status, created_at')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
+      const { rows, totalCount: tc } = await fetchUserInquiriesPaged(user.id, { page, pageSize: PAGE_SIZE })
+      setItems(rows)
+      setTotalCount(tc)
 
-      const list = rows || []
-      setItems(list)
-
-      // 자동응대 완료 inquiry_id 목록
-      if (list.length > 0) {
+      if (rows.length > 0) {
+        const ids = rows.map((r) => r.id)
         const { data: replies } = await supabase
           .from('inquiry_replies')
           .select('inquiry_id')
           .eq('reply_type', 'auto')
-          .in('inquiry_id', list.map((r) => r.id))
+          .in('inquiry_id', ids)
         setAutoRepliedIds(new Set((replies || []).map((r) => r.inquiry_id)))
+      } else {
+        setAutoRepliedIds(new Set())
       }
     } catch {
       setItems([])
+      setTotalCount(0)
+      setAutoRepliedIds(new Set())
     } finally {
       setLoading(false)
     }
-  }, [user])
+  }, [user, page])
 
-  useEffect(() => { loadHistory() }, [loadHistory])
+  useEffect(() => {
+    void loadHistory()
+  }, [loadHistory])
 
-  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
-  const paginatedList = items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+
+  useEffect(() => {
+    const maxP = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+    if (page > maxP) setPage(maxP)
+  }, [totalCount, page])
 
   return (
     <div className={cn('min-h-screen', PAGE_BG)}>
-      <div className="max-w-screen-lg mx-auto">
+      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto')}>
         {/* 헤더: 뒤로 + 제목 + [+문의] */}
         <div className={cn('sticky top-0 z-10 px-4 py-3 flex items-center gap-3', HEADER_GLASS)}>
           <button
@@ -180,9 +196,9 @@ export function InquiryHistoryPage() {
             </div>
           ) : (
             <>
-              <p className="text-sm font-bold text-fuchsia-800/70 mb-4">전체 {items.length}건</p>
+              <p className="text-sm font-bold text-fuchsia-800/70 mb-4">전체 {totalCount}건</p>
               <div className="space-y-3">
-                {paginatedList.map((item) => {
+                {items.map((item) => {
                   const isAutoReplied = autoRepliedIds.has(item.id)
                   const isCompleted = item.status === 'completed'
                   const config = isAutoReplied
