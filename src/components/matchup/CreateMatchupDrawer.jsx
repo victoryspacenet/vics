@@ -37,7 +37,7 @@ import {
 import { captureVideoPosterJpegFile } from '../../lib/videoPoster'
 import { cameraPhotoToFile } from '../../lib/cameraPhotoToFile'
 import { getClipboardMediaFiles } from '../../lib/clipboardPasteFiles'
-import { uploadMatchupMediaValidated } from '../../lib/matchupMediaBucketUpload'
+import { uploadMatchupMediaValidated, warmupMatchupMediaUploadSession } from '../../lib/matchupMediaBucketUpload'
 import { mediaFileMatchesMatchupSideType } from '../../lib/matchupSideType'
 import { SmartphoneCameraCapture } from '../mobile/SmartphoneCameraCapture'
 import { getMatchupCategories } from '../../lib/categoryAdminStorage'
@@ -511,6 +511,9 @@ export function CreateMatchupDrawer({ onCreated }) {
     setShowSubmitWarning(false)
     setUploading(true)
     try {
+      setUploadStep('로그인 확인 중...')
+      await warmupMatchupMediaUploadSession(supabase)
+
       let leftUrl = null
       let leftThumb = null
 
@@ -635,20 +638,20 @@ export function CreateMatchupDrawer({ onCreated }) {
 
           {/* 임시 저장 복원 안내 */}
           {showRestorePrompt && (
-            <div className="flex items-center justify-between gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl">
-              <p className="text-sm font-semibold text-amber-800">임시 저장된 내용이 있어요</p>
+            <div className="flex items-center justify-between gap-3 px-4 py-3 bg-gradient-to-r from-amber-50 to-yellow-50/70 border border-amber-200/80 rounded-xl shadow-sm">
+              <p className="text-sm font-bold text-amber-800">💾 임시 저장된 내용이 있어요</p>
               <div className="flex gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={handleDiscardDraft}
-                  className="px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 rounded-lg transition-colors"
+                  className="px-3 py-1.5 text-xs font-bold text-amber-600 hover:bg-amber-100 rounded-lg transition-colors border border-amber-200/70"
                 >
                   버리기
                 </button>
                 <button
                   type="button"
                   onClick={handleRestoreDraft}
-                  className="px-3 py-1.5 text-xs font-bold bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors"
+                  className="px-3 py-1.5 text-xs font-black bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg shadow-sm hover:from-amber-600 hover:to-orange-600 transition-all"
                 >
                   복원하기
                 </button>
@@ -686,7 +689,7 @@ export function CreateMatchupDrawer({ onCreated }) {
           {/* 2. 카테고리 + 기간 (라벨 높이·컨트롤 높이 통일) */}
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <label className="flex min-h-[2.5rem] items-center text-xs font-semibold text-[#22282E] leading-tight">
+              <label className="flex min-h-[2.5rem] items-center text-xs font-bold bg-gradient-to-r from-fuchsia-700 to-violet-700 bg-clip-text text-transparent leading-tight">
                 카테고리
               </label>
               <div className="relative">
@@ -704,8 +707,8 @@ export function CreateMatchupDrawer({ onCreated }) {
               </div>
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="flex min-h-[2.5rem] items-center gap-1 text-xs font-semibold text-[#22282E] leading-tight">
-                <Clock size={12} className="shrink-0" aria-hidden /> 투표 기간
+              <label className="flex min-h-[2.5rem] items-center gap-1 text-xs font-bold bg-gradient-to-r from-violet-700 to-indigo-700 bg-clip-text text-transparent leading-tight">
+                <Clock size={12} className="shrink-0 text-violet-500" aria-hidden /> 투표 기간
               </label>
               <div className="relative">
                 <select
@@ -750,23 +753,24 @@ export function CreateMatchupDrawer({ onCreated }) {
                 {/* B측 — A와 동일: 닉네임 → gap-2 → [gap-1.5: 타입줄↔카드] */}
                 <div className="flex min-w-0 flex-1 flex-col gap-2">
                   <div
-                    className={`${MZ_IN} ${CTRL_ROW_H} w-full flex items-center rounded-lg border-dashed border-gray-200 bg-gray-50 px-3 text-xs font-semibold text-gray-400 select-none`}
+                    className={`${MZ_IN} ${CTRL_ROW_H} w-full flex items-center rounded-lg border-dashed border-emerald-300/40 bg-gradient-to-r from-emerald-950/80 to-teal-950/70 px-3 text-xs font-semibold text-emerald-400/80 select-none`}
                     aria-hidden
                   >
-                    B 닉네임
+                    ⚔️ 도전자
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <div className={CONTENT_TYPE_ROW} aria-hidden />
                     <div
                       className={cn(
                         FEED_CARD_FRAME,
-                        'flex flex-col items-center justify-center gap-2 border-2 border-dashed border-gray-200 bg-gray-50',
+                        'flex flex-col items-center justify-center gap-2 border-2 border-dashed border-emerald-400/30 bg-gradient-to-br from-emerald-950/85 via-teal-950/75 to-cyan-950/80',
                         '-translate-y-px'
                       )}
                     >
-                      <span className="text-[10px] font-bold text-gray-400">도전자 대기</span>
-                      <span className="text-[9px] text-gray-300 text-center px-2">나중에 도전자가 채워요</span>
-                      <span className="absolute left-2 top-2 z-10 rounded-md bg-gray-300/70 px-1.5 py-0.5 text-[10px] font-black text-white">B</span>
+                      <span className="text-2xl">⚔️</span>
+                      <span className="text-[10px] font-black text-emerald-300 text-center leading-tight">도전자 모집 중</span>
+                      <span className="text-[9px] text-teal-400/70 text-center px-2">나중에 도전자가 채워요</span>
+                      <span className="absolute left-2 top-2 z-10 rounded-md bg-emerald-800/70 px-1.5 py-0.5 text-[10px] font-black text-emerald-200">B</span>
                     </div>
                   </div>
                 </div>
@@ -780,13 +784,13 @@ export function CreateMatchupDrawer({ onCreated }) {
               </div>
             </div>
             {!leftContent && (
-              <p className="text-xs text-gray-400 text-center mt-1">
-                A를 먼저 올려주세요
+              <p className="text-xs font-bold text-fuchsia-500/70 text-center mt-1">
+                👆 A 콘텐츠를 먼저 올려주세요
               </p>
             )}
             {!category && (
-              <p className="text-xs text-amber-600 text-center mt-1">
-                위에서 카테고리를 선택해주세요
+              <p className="text-xs font-bold text-amber-600/80 text-center mt-1">
+                📂 위에서 카테고리를 선택해주세요
               </p>
             )}
           </FormSection>
@@ -795,10 +799,10 @@ export function CreateMatchupDrawer({ onCreated }) {
           <FormSection label="🏷️ 태그" hint={`최대 ${MAX_TAGS}개`}>
             <div className={MZ_TAG_WRAP}>
               {tags.map((t) => (
-                <span key={t} className="flex items-center gap-1 text-xs font-semibold bg-[#22282E] text-white px-2.5 py-1 rounded-full">
+                <span key={t} className="flex items-center gap-1 text-xs font-bold bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white px-2.5 py-1 rounded-full shadow-[0_2px_8px_-2px_rgba(192,38,211,0.4)]">
                   <Hash size={9} />{t}
                   <button type="button" onClick={() => setTags((p) => p.filter((x) => x !== t))}>
-                    <X size={9} className="hover:text-red-300" />
+                    <X size={9} className="hover:text-red-300 transition-colors" />
                   </button>
                 </span>
               ))}
@@ -892,9 +896,9 @@ export function CreateMatchupDrawer({ onCreated }) {
 
           {/* 업로드 진행 상태 */}
           {uploading && uploadStep && (
-            <div className="flex items-center gap-3 px-4 py-3 bg-gray-50 rounded-xl">
-              <span className="w-4 h-4 border-2 border-gray-300 border-t-[#22282E] rounded-full animate-spin shrink-0" />
-              <span className="text-sm text-gray-600">{uploadStep}</span>
+            <div className="flex items-center gap-3 px-4 py-3.5 bg-gradient-to-r from-fuchsia-50/90 via-violet-50/70 to-indigo-50/60 border border-fuchsia-200/60 rounded-xl shadow-sm">
+              <span className="w-4 h-4 border-2 border-fuchsia-200 border-t-fuchsia-600 rounded-full animate-spin shrink-0" />
+              <span className="text-sm font-bold text-fuchsia-700/90">{uploadStep}</span>
             </div>
           )}
 
@@ -922,7 +926,7 @@ export function CreateMatchupDrawer({ onCreated }) {
               className={cn(
                 'flex-1 py-3.5 rounded-2xl text-sm font-black tracking-wide transition-all duration-300',
                 canSubmit && !uploading
-                  ? 'bg-[#22282E] text-white shadow-[0_0_20px_rgba(34,40,46,0.35)] hover:shadow-[0_0_32px_rgba(34,40,46,0.55)] hover:scale-[1.01] active:scale-[0.99]'
+                  ? 'bg-gradient-to-r from-fuchsia-600 via-violet-600 to-indigo-600 text-white shadow-[0_4px_20px_-4px_rgba(192,38,211,0.55)] hover:shadow-[0_6px_28px_-4px_rgba(192,38,211,0.7)] hover:scale-[1.02] active:scale-[0.99] hover:from-fuchsia-500 hover:via-violet-500 hover:to-indigo-500'
                   : 'bg-gray-100 text-gray-400 cursor-not-allowed'
               )}
             >
@@ -999,7 +1003,7 @@ export function CreateMatchupDrawer({ onCreated }) {
             type="button"
             onClick={handleConfirmSubmit}
             disabled={uploading}
-            className="flex-1 py-3 rounded-2xl text-sm font-black tracking-wide bg-[#22282E] text-white shadow-[0_0_20px_rgba(34,40,46,0.35)] hover:shadow-[0_0_28px_rgba(34,40,46,0.5)] hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-40 disabled:hover:scale-100"
+            className="flex-1 py-3 rounded-2xl text-sm font-black tracking-wide bg-gradient-to-r from-fuchsia-600 via-violet-600 to-indigo-600 text-white shadow-[0_4px_18px_-4px_rgba(192,38,211,0.5)] hover:shadow-[0_6px_24px_-4px_rgba(192,38,211,0.65)] hover:scale-[1.01] active:scale-[0.99] hover:from-fuchsia-500 hover:via-violet-500 hover:to-indigo-500 transition-all disabled:opacity-40 disabled:hover:scale-100"
           >
             {isEditMode ? '저장하기' : '게시하기'}
           </button>
@@ -1015,9 +1019,9 @@ function FormSection({ label, required, hint, children }) {
   return (
     <div className="space-y-2.5">
       <div className="flex items-center gap-2">
-        <span className="text-sm font-bold text-[#22282E]">{label}</span>
-        {required && <span className="text-red-400 text-xs">*</span>}
-        {hint && <span className="text-xs text-gray-400 ml-auto">{hint}</span>}
+        <span className="text-sm font-black bg-gradient-to-r from-fuchsia-700 via-violet-700 to-indigo-700 bg-clip-text text-transparent">{label}</span>
+        {required && <span className="text-rose-400 text-xs font-black">*</span>}
+        {hint && <span className="text-xs text-fuchsia-400/80 ml-auto">{hint}</span>}
       </div>
       {children}
     </div>
@@ -1146,8 +1150,10 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
             onClick={() => switchType(id)}
             disabled={disabled}
             className={cn(
-              'flex items-center gap-1 px-2 py-1 text-[10px] font-semibold rounded-lg transition-colors',
-              contentType === id ? 'bg-[#22282E] text-white' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100',
+              'flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold rounded-lg transition-all',
+              contentType === id
+                ? 'bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white shadow-[0_2px_8px_-2px_rgba(192,38,211,0.5)]'
+                : 'text-fuchsia-500/70 hover:text-fuchsia-800 hover:bg-fuchsia-50/60 border border-fuchsia-100/60',
               disabled && 'opacity-40 cursor-not-allowed'
             )}
           >
@@ -1159,8 +1165,8 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
       )}
       {requiredType && (
         <div className={CONTENT_TYPE_ROW}>
-          <p className="text-[10px] font-semibold text-gray-500">
-            {effectiveType === 'image' ? '이미지' : effectiveType === 'video' ? '영상' : '텍스트'}로 올려주세요
+          <p className="text-[10px] font-bold text-fuchsia-500/80">
+            {effectiveType === 'image' ? '🖼️ 이미지' : effectiveType === 'video' ? '🎬 영상' : '✏️ 텍스트'}로 올려주세요
           </p>
         </div>
       )}
@@ -1209,17 +1215,31 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
           }}
           className={cn(
             FEED_CARD_FRAME,
-            'border-2 border-dashed transition-all outline-none focus-visible:ring-2 focus-visible:ring-[#22282E]/25',
+            'border-2 border-dashed transition-all outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-400/30',
             disabled || mediaBusy ? 'opacity-60 cursor-not-allowed' :
-            dragging ? 'border-[#22282E] bg-gray-100 scale-[1.02] cursor-copy' :
-            content ? 'border-[#22282E] cursor-default' :
-            'border-gray-200 bg-gray-50 hover:border-gray-400 hover:bg-gray-100 cursor-default active:scale-[0.98]'
+            dragging ? 'border-fuchsia-500 bg-fuchsia-50/80 scale-[1.02] cursor-copy' :
+            content ? 'border-fuchsia-400 cursor-default' :
+            'border-fuchsia-200/60 bg-gradient-to-br from-fuchsia-50/50 via-violet-50/30 to-indigo-50/40 hover:border-fuchsia-300 hover:from-fuchsia-50/80 hover:via-violet-50/60 cursor-default active:scale-[0.98]'
           )}
         >
           {content ? (
             <>
-              {content.type === 'image' && <img src={safeMediaUrl(content.preview)} alt="" className="w-full h-full object-cover" />}
-              {content.type === 'video' && <video src={safeMediaUrl(content.preview)} className="w-full h-full object-cover" muted />}
+              {content.type === 'image' && (
+                <img
+                  src={safeMediaUrl(content.preview)}
+                  alt=""
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+              )}
+              {content.type === 'video' && (
+                <video
+                  src={safeMediaUrl(content.preview)}
+                  className="absolute inset-0 w-full h-full object-cover"
+                  muted
+                  playsInline
+                  preload="metadata"
+                />
+              )}
               {!disabled && (
                 <button
                   type="button"
@@ -1237,26 +1257,26 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
               </div>
             </>
           ) : (
-            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-3 pb-10 text-gray-400">
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-3 pb-10">
               {mediaBusy ? (
                 <>
-                  <span className="w-6 h-6 border-2 border-gray-300 border-t-[#22282E] rounded-full animate-spin" />
-                  <p className="text-[10px] font-medium text-gray-500">{processingLabel}</p>
+                  <span className="w-6 h-6 border-2 border-fuchsia-200 border-t-fuchsia-600 rounded-full animate-spin" />
+                  <p className="text-[10px] font-bold text-fuchsia-500">{processingLabel}</p>
                 </>
               ) : (
                 <>
-                  <div className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center">
-                    <Upload size={16} className="text-gray-400" />
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-fuchsia-500 to-violet-600 flex items-center justify-center shadow-[0_4px_14px_-3px_rgba(192,38,211,0.45)]">
+                    <Upload size={16} className="text-white" strokeWidth={2.5} />
                   </div>
                   <div className="text-center">
-                    <p className="text-xs font-medium text-gray-500">드롭 또는 붙여넣기</p>
-                    <p className="text-[10px] text-gray-400 mt-0.5 leading-snug">
+                    <p className="text-xs font-bold text-fuchsia-700/80">드롭 또는 붙여넣기</p>
+                    <p className="text-[10px] text-fuchsia-500/55 mt-0.5 leading-snug">
                       {effectiveType === 'video'
-                        ? '파일 탐색기에서 영상을 복사한 뒤 이 박스를 한 번 눌러 포커스한 다음 '
-                        : '이미지를 복사한 뒤 이 박스를 한 번 눌러 포커스한 다음 '}
-                      <span className="font-bold text-gray-500">Ctrl+V</span>
+                        ? '영상 복사 후 박스 클릭 → '
+                        : '이미지 복사 후 박스 클릭 → '}
+                      <span className="font-black text-fuchsia-600/80">Ctrl+V</span>
                     </p>
-                    {optional && <p className="text-[10px] text-gray-300 mt-0.5">선택 사항</p>}
+                    {optional && <p className="text-[10px] text-fuchsia-400/50 mt-0.5">선택 사항</p>}
                   </div>
                 </>
               )}
@@ -1270,7 +1290,7 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
                 e.stopPropagation()
                 fileRef.current?.click()
               }}
-              className="pointer-events-auto absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-[11px] font-bold text-gray-700 shadow-sm transition hover:bg-gray-50"
+              className="pointer-events-auto absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-full border border-fuchsia-300/70 bg-gradient-to-r from-fuchsia-50 to-violet-50 px-4 py-1.5 text-[11px] font-bold text-fuchsia-700 shadow-sm transition hover:from-fuchsia-100 hover:to-violet-100 hover:shadow-[0_2px_10px_-3px_rgba(192,38,211,0.35)]"
             >
               파일에서 선택
             </button>

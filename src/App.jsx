@@ -5,8 +5,6 @@ import { useUIStore } from './store/uiStore'
 import { useNotificationStore } from './store/notificationStore'
 import { Layout } from './components/layout/Layout'
 import { Modal } from './components/ui/Modal'
-import { CreateMatchupDrawer } from './components/matchup/CreateMatchupDrawer'
-import { ChallengeDrawer } from './components/matchup/ChallengeDrawer'
 import { LoginModal, LoginPage } from './pages/LoginPage'
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
 import { ResetPasswordPage } from './pages/ResetPasswordPage'
@@ -21,6 +19,7 @@ import * as LazyExtra from './routes/lazyDevAndHeavyPages'
 import * as LazyNIR from './routes/lazyNoticeInquiryRanking'
 import * as LazyRMM from './routes/lazyRewardsMatchupMypage'
 import * as LazySP from './routes/lazySecondaryPublicPages'
+import * as LazyDrawers from './routes/lazyMatchupDrawers'
 import { consumeStoredLoginReturn, getSafeReturnPath } from './lib/loginReturn'
 import { RoutePageSkeleton } from './components/ui/RoutePageSkeleton'
 import { prefetchCommonRoutes } from './lib/routePrefetch'
@@ -34,6 +33,21 @@ function RouteSuspense({ Page: P }) {
   return (
     <Suspense fallback={<RouteLoadingFallback />}>
       <P />
+    </Suspense>
+  )
+}
+
+/** 전역 매치업 Drawer — 열릴 때만 lazy 청크 로드 */
+function GlobalMatchupDrawers({ onCreated }) {
+  const isCreateDrawerOpen = useUIStore((s) => s.isCreateDrawerOpen)
+  const challengeMatchup = useUIStore((s) => s.challengeMatchup)
+
+  if (!isCreateDrawerOpen && !challengeMatchup) return null
+
+  return (
+    <Suspense fallback={null}>
+      {isCreateDrawerOpen ? <LazyDrawers.CreateMatchupDrawer onCreated={onCreated} /> : null}
+      {challengeMatchup ? <LazyDrawers.ChallengeDrawer /> : null}
     </Suspense>
   )
 }
@@ -74,7 +88,10 @@ function App() {
 
   useEffect(() => {
     initialize()
-    runWhenIdle(() => prefetchCommonRoutes(), { timeoutMs: 2000 })
+    runWhenIdle(() => {
+      prefetchCommonRoutes()
+      LazyDrawers.prefetchMatchupDrawers()
+    }, { timeoutMs: 2000 })
 
     // OAuth 콜백 후 URL 해시에 에러가 있는 경우 감지
     const hash = window.location.hash
@@ -91,26 +108,24 @@ function App() {
   // 로그인 상태 변경 시 알림 구독 관리
   useEffect(() => {
     if (user?.id) {
-      fetchNotifications(user.id)
+      fetchNotifications(user.id, { force: true })
       subscribeRealtime(user.id)
     } else {
       resetNotifications()
     }
-    return () => {
-      // 컴포넌트 언마운트 시 구독 해제 불필요 (앱 전체 생명주기)
-    }
-  }, [user?.id])
+    return () => resetNotifications()
+  }, [user?.id, fetchNotifications, subscribeRealtime, resetNotifications])
 
   useEffect(() => {
     if (!user?.id) return
     if (noticePushRefresh <= 0) return
-    void fetchNotifications(user.id)
+    void fetchNotifications(user.id, { force: true })
   }, [noticePushRefresh, user?.id, fetchNotifications])
 
   useEffect(() => {
     const onNotif = () => {
       const uid = useAuthStore.getState().user?.id
-      if (uid) void useNotificationStore.getState().fetchNotifications(uid)
+      if (uid) void useNotificationStore.getState().fetchNotifications(uid, { force: true })
     }
     window.addEventListener('vics:notifications:updated', onNotif)
     return () => window.removeEventListener('vics:notifications:updated', onNotif)
@@ -129,20 +144,25 @@ function App() {
 
   // 절전/복귀 후 알림·홈 갱신 (Realtime 미사용 — 폴링은 subscribeRealtime 내부)
   useEffect(() => {
+    let reconnectTimer = null
     const reconnect = () => {
       if (!user?.id) return
-      fetchNotifications(user.id)
-      homeRefreshRef.current?.()
+      if (reconnectTimer) window.clearTimeout(reconnectTimer)
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null
+        fetchNotifications(user.id, { force: true })
+        homeRefreshRef.current?.()
+      }, 450)
     }
 
     const onVisible = () => {
-      if (document.visibilityState === 'visible') setTimeout(reconnect, 100)
+      if (document.visibilityState === 'visible') reconnect()
     }
 
-    const onOnline = () => setTimeout(reconnect, 200)
+    const onOnline = () => reconnect()
 
     const onPageShow = (e) => {
-      if (e.persisted) setTimeout(reconnect, 100) // bfcache에서 복원 시
+      if (e.persisted) reconnect()
     }
 
     document.addEventListener('visibilitychange', onVisible)
@@ -150,11 +170,12 @@ function App() {
     window.addEventListener('pageshow', onPageShow)
 
     return () => {
+      if (reconnectTimer) window.clearTimeout(reconnectTimer)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('online', onOnline)
       window.removeEventListener('pageshow', onPageShow)
     }
-  }, [user?.id])
+  }, [user?.id, fetchNotifications])
 
   return (
     <BrowserRouter>
@@ -287,11 +308,7 @@ function App() {
         </Routes>
       </Layout>
 
-      {/* 전역 매치업 생성 Drawer */}
-      <CreateMatchupDrawer onCreated={() => homeRefreshRef.current?.()} />
-
-      {/* 전역 도전하기 Drawer (User B) */}
-      <ChallengeDrawer />
+      <GlobalMatchupDrawers onCreated={() => homeRefreshRef.current?.()} />
 
       {/* 전역 로그인 모달 */}
       <Modal

@@ -17,6 +17,16 @@ export const EMERGENCY_DEFAULT_RECOVERY_HOURS = 2
 
 export const SERVER_MAINTENANCE_UPDATED = 'vics:server-maintenance:updated'
 
+/** 평상시 admin_settings 반복 조회 완화 (탭·폴링마다 DB 왕복 방지) */
+const MAINTENANCE_CONFIG_CACHE_MS = 90_000
+let maintenanceConfigCache = null
+let maintenanceConfigCacheAt = 0
+
+function invalidateMaintenanceConfigCache() {
+  maintenanceConfigCache = null
+  maintenanceConfigCacheAt = 0
+}
+
 export const MAINTENANCE_MODES = {
   off: 'off',
   planned: 'planned',
@@ -99,6 +109,10 @@ export async function deactivateServerMaintenance() {
 }
 
 export async function fetchServerMaintenanceConfig() {
+  const now = Date.now()
+  if (maintenanceConfigCache && now - maintenanceConfigCacheAt < MAINTENANCE_CONFIG_CACHE_MS) {
+    return maintenanceConfigCache
+  }
   try {
     const { data, error } = await supabase
       .from('admin_settings')
@@ -106,10 +120,16 @@ export async function fetchServerMaintenanceConfig() {
       .eq('key', SERVER_MAINTENANCE_SETTINGS_KEY)
       .maybeSingle()
     if (error) throw error
-    return normalizeConfig(data?.value)
+    const normalized = normalizeConfig(data?.value)
+    maintenanceConfigCache = normalized
+    maintenanceConfigCacheAt = now
+    return normalized
   } catch (e) {
     console.warn('[serverMaintenance] fetch:', e?.message || e)
-    return normalizeConfig(null)
+    const fallback = normalizeConfig(null)
+    maintenanceConfigCache = fallback
+    maintenanceConfigCacheAt = now
+    return fallback
   }
 }
 
@@ -132,6 +152,7 @@ export async function saveServerMaintenanceConfig(patch) {
     { onConflict: 'key' },
   )
   if (error) throw error
+  invalidateMaintenanceConfigCache()
   try {
     window.dispatchEvent(new CustomEvent(SERVER_MAINTENANCE_UPDATED))
   } catch {
@@ -158,17 +179,47 @@ export function shouldProbeServerHealth(config, lastReachable) {
   return false
 }
 
+const HEALTH_PROBE_SESSION_KEY = 'vics:last_health_probe_ok_at'
+const HEALTH_PROBE_SESSION_MS = 5 * 60 * 1000
+
+function shouldSkipRecentHealthProbe() {
+  if (typeof window === 'undefined') return false
+  try {
+    const raw = sessionStorage.getItem(HEALTH_PROBE_SESSION_KEY)
+    if (!raw) return false
+    const at = Number(raw)
+    return Number.isFinite(at) && Date.now() - at < HEALTH_PROBE_SESSION_MS
+  } catch {
+    return false
+  }
+}
+
+function markRecentHealthProbeOk() {
+  if (typeof window === 'undefined') return
+  try {
+    sessionStorage.setItem(HEALTH_PROBE_SESSION_KEY, String(Date.now()))
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * 서버 가용성 판단
  * @param {{ light?: boolean }} [opts] — light: 정적 출처 HEAD/GET만 (Supabase 미조회)
  */
 export async function probeServerHealth({ light = false } = {}) {
+  if (light && shouldSkipRecentHealthProbe()) {
+    return true
+  }
   const ctrl = new AbortController()
   const tid = window.setTimeout(() => ctrl.abort(), light ? 8000 : 10000)
   try {
     if (!light) {
       const { error } = await supabase.from('admin_settings').select('key').limit(1)
-      if (!error) return true
+      if (!error) {
+        markRecentHealthProbeOk()
+        return true
+      }
     }
     const res = await fetch(resolveProbeUrl(), {
       method: 'GET',
@@ -176,7 +227,9 @@ export async function probeServerHealth({ light = false } = {}) {
       credentials: 'omit',
       signal: ctrl.signal,
     })
-    return res.ok || res.status < 500
+    const ok = res.ok || res.status < 500
+    if (ok && light) markRecentHealthProbeOk()
+    return ok
   } catch {
     return false
   } finally {

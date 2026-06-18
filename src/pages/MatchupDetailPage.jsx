@@ -612,7 +612,7 @@ export function MatchupDetailPage() {
         showToast('투표 완료! 매치업 종료 후 결과에 따라 포인트가 지급돼요', 'success')
         setResultVotedSide(side)
         setTimeout(() => setShowResultModal(true), 350)
-        setTimeout(() => fetchProfile(user.id), 800)
+        setTimeout(() => fetchProfile(user.id, { force: true }), 800)
       } catch (err) {
         showToast(err?.message || '투표 중 오류가 발생했어요', 'error')
       } finally {
@@ -666,7 +666,7 @@ export function MatchupDetailPage() {
       if (penalized) {
         showToast('신고 누적 및 AI 판정으로 챌린저 몰수패·300P 차감이 적용되었어요.', 'success')
         await fetchMatchup()
-        if (user.id === matchup.right_user_id) void fetchProfile(user.id)
+        if (user.id === matchup.right_user_id) void fetchProfile(user.id, { force: true })
         window.dispatchEvent(new CustomEvent('vics:matchup:updated', { detail: { matchupId: matchup.id } }))
       } else if (moderationFailed) {
         showToast('신고는 접수했어요. 자동 검사 연결에 문제가 있으면 운영에서 확인할 수 있어요.', 'info')
@@ -837,9 +837,9 @@ export function MatchupDetailPage() {
       {/* 뒤로가기 */}
       <button
         onClick={() => navigate(-1)}
-        className="flex items-center gap-1.5 text-sm text-violet-500/75 hover:text-violet-800 font-semibold transition-colors"
+        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-violet-200/60 bg-gradient-to-r from-white to-violet-50/60 text-sm font-bold text-violet-700/80 hover:text-violet-900 hover:border-violet-300/70 hover:shadow-sm shadow-[0_1px_4px_rgba(139,92,246,0.08)] transition-all active:scale-95"
       >
-        <ArrowLeft size={15} /> 돌아가기
+        <ArrowLeft size={14} /> 돌아가기
       </button>
 
       {/* ══ 메인 카드 ══════════════════════════════════════════════ */}
@@ -859,24 +859,24 @@ export function MatchupDetailPage() {
               <div className="p-5 space-y-5">
                 {/* 1. 📌 경쟁 제목(중앙·A) + 설명(A | B) */}
                 <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-[#22282E]">📌 경쟁 제목 · 도전 설명</span>
-                    <span className="text-red-400 text-xs">*</span>
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-fuchsia-500 via-violet-600 to-indigo-600 shadow-[0_3px_12px_-2px_rgba(139,92,246,0.5)] text-sm">📌</span>
+                    <span className="text-sm font-black bg-gradient-to-r from-fuchsia-700 via-violet-700 to-indigo-700 bg-clip-text text-transparent">경쟁 제목 · 도전 설명</span>
+                    <span className="text-rose-400 text-xs font-black">*</span>
                   </div>
                   <div className="flex flex-col items-center gap-2 text-center px-2">
-                    <p className="text-base font-black text-[#22282E] leading-snug">{matchup.title || '—'}</p>
-                    <p className="text-[10px] font-semibold text-violet-500/80">User A가 정한 경쟁 제목</p>
+                    <p className="text-base font-black bg-gradient-to-r from-fuchsia-700 via-violet-700 to-indigo-600 bg-clip-text text-transparent leading-snug">{matchup.title || '—'}</p>
                     <VsBadge variant="minimal" size="sm" animated={false} />
                   </div>
                   <div className="grid grid-cols-[1fr_36px_1fr] gap-2 items-stretch">
                     <div className="space-y-1.5 min-w-0">
-                      <span className="text-[10px] font-black uppercase tracking-wide text-violet-600/90">
+                      <span className="text-[10px] font-black uppercase tracking-wide text-amber-600/90">
                         작성자 (A) · 설명
                       </span>
                       <div
                         className={cn(
-                          'w-full px-3 py-2.5 text-sm min-h-[4rem] bg-violet-50/50 border border-violet-200/45 rounded-xl',
-                          matchup.description ? 'text-gray-600' : 'text-gray-300 italic',
+                          'w-full px-3 py-2.5 text-sm min-h-[4rem] bg-gradient-to-br from-amber-50 to-orange-50/60 border border-amber-200/55 rounded-xl',
+                          matchup.description ? 'text-amber-900/80' : 'text-amber-300/70 italic',
                         )}
                       >
                         {matchup.description || '설명 없음'}
@@ -886,13 +886,13 @@ export function MatchupDetailPage() {
                       <div className="w-px h-full min-h-[4rem] bg-violet-200/50" />
                     </div>
                     <div className="space-y-1.5 min-w-0">
-                      <span className="text-[10px] font-black uppercase tracking-wide text-violet-500">
-                        도전자 (B) · 설명
+                      <span className="text-[10px] font-black uppercase tracking-wide text-emerald-500">
+                        ⚔️ 도전자 (B) · 설명
                       </span>
                       <div
                         className={cn(
-                          'w-full px-3 py-2.5 text-sm min-h-[4rem] border border-dashed border-violet-200/55 rounded-xl',
-                          matchup.right_description ? 'bg-white text-gray-600' : 'bg-violet-50/40 text-violet-300/90 italic',
+                          'w-full px-3 py-2.5 text-sm min-h-[4rem] border border-dashed border-emerald-500/35 rounded-xl',
+                          matchup.right_description ? 'bg-emerald-950/70 text-emerald-100' : 'bg-emerald-950/50 text-emerald-400/80 italic',
                         )}
                       >
                         {matchup.right_description || '도전장에서 작성 (선택)'}
@@ -904,16 +904,16 @@ export function MatchupDetailPage() {
                 {/* 2. 카테고리 + 투표 기간 */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-[#22282E]">카테고리</label>
-                    <div className="px-3 py-2.5 text-sm bg-violet-50/50 border border-violet-200/45 rounded-xl text-gray-600">
+                    <label className="text-xs font-black bg-gradient-to-r from-fuchsia-600 to-violet-600 bg-clip-text text-transparent flex items-center gap-1">🏷️ 카테고리</label>
+                    <div className="px-3 py-2.5 text-sm bg-gradient-to-br from-fuchsia-50/70 to-violet-50/50 border border-fuchsia-200/50 rounded-xl font-semibold text-fuchsia-800/80">
                       {getCategoryLabelById(matchup.category)}
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-[#22282E] flex items-center gap-1">
-                      <Clock size={12} /> 투표 기간
+                    <label className="text-xs font-black bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent flex items-center gap-1">
+                      <Clock size={12} className="text-violet-500" /> 투표 기간
                     </label>
-                    <div className="px-3 py-2.5 text-sm bg-violet-50/50 border border-violet-200/45 rounded-xl text-gray-600">
+                    <div className="px-3 py-2.5 text-sm bg-gradient-to-br from-violet-50/70 to-indigo-50/50 border border-violet-200/50 rounded-xl font-semibold text-violet-800/80">
                       {matchup.expires_at
                         ? (() => {
                             const h = Math.round((new Date(matchup.expires_at) - new Date(matchup.created_at)) / 3600000)
@@ -926,32 +926,33 @@ export function MatchupDetailPage() {
 
                 {/* 3. 🥊 경쟁 구도 * */}
                 <div className="space-y-2.5">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-[#22282E]">🥊 경쟁 구도</span>
-                    <span className="text-red-400 text-xs">*</span>
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-400 via-rose-500 to-fuchsia-600 shadow-[0_3px_12px_-2px_rgba(244,63,94,0.45)] text-sm">🥊</span>
+                    <span className="text-sm font-black bg-gradient-to-r from-orange-600 via-rose-600 to-fuchsia-700 bg-clip-text text-transparent">경쟁 구도</span>
+                    <span className="text-rose-400 text-xs font-black">*</span>
                   </div>
                   <div className="grid grid-cols-[1fr_36px_1fr] gap-2 items-stretch">
                     {/* A측 = 매치업 최초 작성자 */}
                     <div className="space-y-2">
-                      <div className="px-3 py-2 text-xs font-semibold bg-violet-50/50 border border-violet-200/45 rounded-lg text-[#22282E]">
-                        <span className="block text-[10px] font-black uppercase tracking-wide text-violet-600/90">
+                      <div className="px-3 py-2 text-xs font-semibold bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/70 rounded-lg">
+                        <span className="block text-[10px] font-black uppercase tracking-wide text-amber-600/90">
                           작성자 (A)
                         </span>
-                        <span className="mt-0.5 block font-bold">{matchup.left_label || 'A'}</span>
+                        <span className="mt-0.5 block font-bold text-amber-800">{matchup.left_label || 'A'}</span>
                       </div>
-                      <div className="relative aspect-square rounded-xl overflow-hidden bg-violet-100/50 border border-violet-200/40">
+                      <div className="relative aspect-square rounded-xl overflow-hidden bg-amber-50/40 border border-amber-200/40">
                         {matchup.left_type === 'image' && (matchup.left_thumbnail_url || matchup.left_url) && (
-                          <img src={safeMediaUrl(matchup.left_thumbnail_url || matchup.left_url)} alt="A" className="w-full h-full object-cover" />
+                          <img src={safeMediaUrl(matchup.left_thumbnail_url || matchup.left_url)} alt="A" className="absolute inset-0 w-full h-full object-cover" />
                         )}
                         {matchup.left_type === 'video' && matchup.left_url && (
-                          <video src={safeMediaUrl(matchup.left_url)} className="w-full h-full object-cover" muted />
+                          <video src={safeMediaUrl(matchup.left_url)} className="absolute inset-0 w-full h-full object-cover" muted playsInline preload="metadata" />
                         )}
                         {matchup.left_type === 'text' && (
-                          <div className="w-full h-full flex items-center justify-center p-4 bg-violet-50/60">
-                            <p className="text-sm font-bold text-center text-[#22282E]">{matchup.left_text}</p>
+                          <div className="absolute inset-0 flex items-center justify-center p-4 bg-gradient-to-br from-amber-900/90 via-orange-950/85 to-rose-950/80">
+                            <p className="text-sm font-bold text-center text-amber-100">{matchup.left_text}</p>
                           </div>
                         )}
-                        <span className="absolute top-2 left-2 text-[10px] font-black bg-[#22282E]/70 text-white px-1.5 py-0.5 rounded-md">
+                        <span className="absolute top-2 left-2 text-[10px] font-black bg-gradient-to-r from-amber-500 to-orange-500 text-white px-1.5 py-0.5 rounded-md shadow-sm">
                           {matchup.left_label || 'A'}
                         </span>
                       </div>
@@ -964,33 +965,39 @@ export function MatchupDetailPage() {
 
                     {/* B측 = 도전자 */}
                     <div className="space-y-2">
-                      <div className="px-3 py-2 text-xs font-semibold text-violet-400/90 bg-violet-50/40 border border-dashed border-violet-200/50 rounded-lg">
-                        <span className="block text-[10px] font-black uppercase tracking-wide text-violet-500">
-                          도전자 (B)
+                      <div className="px-3 py-2 text-xs font-semibold bg-gradient-to-r from-emerald-950/80 via-teal-950/70 to-cyan-950/75 border border-dashed border-emerald-500/40 rounded-lg">
+                        <span className="block text-[10px] font-black uppercase tracking-wide text-emerald-400">
+                          ⚔️ 도전자 (B)
                         </span>
-                        <span className="mt-0.5 block font-bold text-violet-800/90">{matchup.right_label || 'B'}</span>
+                        <span className="mt-0.5 block font-bold text-emerald-200/90">{matchup.right_label || 'B'}</span>
                       </div>
-                      <div className="relative aspect-square rounded-xl border-2 border-dashed border-violet-200/55 bg-gradient-to-br from-violet-50/70 to-fuchsia-50/40 flex flex-col items-center justify-center gap-2">
-                        <span className="text-[10px] font-bold text-gray-400">도전자 대기</span>
-                        <span className="text-[9px] text-gray-300 text-center px-2">나중에 도전자가 채워요</span>
+                      <div className="relative aspect-square rounded-xl border-2 border-dashed border-emerald-500/40 bg-gradient-to-br from-emerald-950/88 via-teal-950/78 to-cyan-950/82 flex flex-col items-center justify-center gap-3 px-3">
+                        <div className="flex flex-col items-center gap-1.5">
+                          <span className="text-xl">⚔️</span>
+                          <span className="text-[11px] font-black text-emerald-300 tracking-wide">도전자 모집 중</span>
+                          <span className="text-[9px] text-teal-400/70 text-center">아직 상대방이 없어요</span>
+                        </div>
                         {!isMyMatchup && (
                           user ? (
                             <button
                               onClick={() => openChallengeDrawer(matchup)}
-                              className="flex items-center gap-1 px-4 py-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white text-xs font-black rounded-xl hover:from-violet-500 hover:to-fuchsia-500 shadow-md transition-colors"
+                              className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-white text-xs font-black rounded-xl hover:from-emerald-400 hover:to-cyan-400 shadow-[0_4px_16px_-4px_rgba(16,185,129,0.6)] transition-all hover:scale-105 active:scale-95"
                             >
                               <Swords size={13} /> 도전하기
                             </button>
                           ) : (
                             <button
                               onClick={openLoginModal}
-                              className="flex items-center gap-1 px-3 py-2 border-2 border-violet-500 text-violet-700 text-xs font-black rounded-xl hover:bg-violet-600 hover:text-white hover:border-violet-600 transition-colors"
+                              className="flex items-center gap-1.5 px-3 py-2 border-2 border-emerald-500/70 text-emerald-300 text-xs font-black rounded-xl hover:bg-emerald-600 hover:text-white hover:border-emerald-600 transition-colors"
                             >
                               <Swords size={13} /> 로그인하고 도전
                             </button>
                           )
                         )}
-                        <span className="absolute top-2 left-2 text-[10px] font-black bg-gray-300/70 text-white px-1.5 py-0.5 rounded-md">B</span>
+                        {isMyMatchup && (
+                          <span className="text-[9px] text-teal-400/60 text-center px-2 leading-relaxed">공유해서 도전자를<br/>모집해 보세요!</span>
+                        )}
+                        <span className="absolute top-2 left-2 text-[10px] font-black bg-gradient-to-r from-emerald-500 to-teal-500 text-white px-1.5 py-0.5 rounded-md shadow-sm">B</span>
                       </div>
                     </div>
                   </div>
@@ -1062,18 +1069,48 @@ export function MatchupDetailPage() {
               </div>
 
               {/* NEW 매치업: 태그·안내·최종 생성 버튼 */}
-              <div className="px-5 pt-2 pb-5 space-y-4 border-t border-violet-100/55">
+              <div className="px-5 pt-3 pb-5 space-y-4 border-t border-violet-100/55">
                 {matchup.tags?.length > 0 && (
                   <div>
-                    <p className="text-xs font-bold text-gray-500 mb-2 flex items-center gap-1.5">
-                      🏷️ 태그 (작성자 A가 설정함)
+                    <p className="text-[10px] font-black bg-gradient-to-r from-fuchsia-600 to-violet-600 bg-clip-text text-transparent mb-2 flex items-center gap-1.5">
+                      🏷️ 태그 (작성자 A 설정)
                     </p>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-1.5">
                       {matchup.tags.map((tag) => (
-                        <span key={tag} className="inline-flex items-center text-xs font-semibold text-gray-600">
-                          [ #{tag} ]
+                        <span key={tag} className="inline-flex items-center px-2.5 py-1 text-[11px] font-bold rounded-full bg-gradient-to-r from-fuchsia-100 to-violet-100 text-fuchsia-700 border border-fuchsia-200/60">
+                          #{tag}
                         </span>
                       ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 창작자 전용: 공유 유도 배너 */}
+                {isMyMatchup && !matchup?.right_type && (
+                  <div className="rounded-2xl overflow-hidden bg-gradient-to-br from-emerald-950/85 via-teal-950/80 to-cyan-950/75 border border-emerald-500/30 shadow-[0_4px_20px_-6px_rgba(16,185,129,0.4)]">
+                    <div className="px-4 py-3.5">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-lg">📣</span>
+                        <span className="text-sm font-black text-emerald-300 tracking-wide">도전자를 모집해 보세요!</span>
+                      </div>
+                      <p className="text-[11px] text-teal-300/80 leading-relaxed mb-3">
+                        아직 도전자가 없어요. 링크를 공유하면 다른 유저가<br/>
+                        <span className="font-bold text-emerald-300">⚔️ 도전자(B)로 참여</span>해 매치업을 완성할 수 있어요.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (navigator.share) {
+                            navigator.share({ title: matchup.title, url: window.location.href }).catch(() => {})
+                          } else {
+                            navigator.clipboard?.writeText(window.location.href)
+                            showToast('링크가 복사됐어요!', 'success')
+                          }
+                        }}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-white text-xs font-black shadow-[0_4px_14px_-4px_rgba(16,185,129,0.55)] hover:from-emerald-400 hover:to-cyan-400 transition-all hover:scale-[1.01] active:scale-[0.99]"
+                      >
+                        🔗 링크 공유하기
+                      </button>
                     </div>
                   </div>
                 )}
@@ -1081,10 +1118,10 @@ export function MatchupDetailPage() {
                 {/* 안내(작성자) + A쪽 수정·최종(작성자) — 도전은 구도 영역 「도전하기」 */}
                 <div className="space-y-3">
                   {isMyMatchup && (
-                    <div className="flex items-start gap-2 px-3 py-2.5 bg-red-50 border border-red-100 rounded-xl">
-                      <span className="text-sm shrink-0 mt-0.5">📢</span>
-                      <p className="text-[11px] text-red-700 leading-relaxed">
-                        <span className="font-bold">&apos;최종 매치업 만들기&apos;</span>를 누르면 즉시 투표가 시작되며 수정이 불가능해요.
+                    <div className="flex items-start gap-2.5 px-3.5 py-3 bg-gradient-to-r from-rose-50/90 via-pink-50/70 to-fuchsia-50/60 border border-rose-200/60 rounded-xl">
+                      <span className="text-base shrink-0 mt-0.5">📢</span>
+                      <p className="text-[11px] text-rose-700 leading-relaxed">
+                        <span className="font-black">&apos;최종 매치업 만들기&apos;</span>를 누르면 즉시 투표가 시작되며 수정이 불가능해요.
                       </p>
                     </div>
                   )}
@@ -1097,10 +1134,10 @@ export function MatchupDetailPage() {
                           disabled={hasClickedFinalize}
                           title="작성자(A) 쪽만 수정해요"
                           className={cn(
-                            'flex items-center justify-center gap-1.5 px-4 py-3 rounded-xl text-sm font-bold shrink-0 transition-colors',
+                            'flex items-center justify-center gap-1.5 px-4 py-3 rounded-xl text-sm font-bold shrink-0 transition-all',
                             hasClickedFinalize
                               ? 'text-violet-300 bg-violet-50/50 cursor-not-allowed'
-                              : 'text-violet-800 bg-violet-100/50 hover:bg-violet-200/50',
+                              : 'text-amber-700 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/60 hover:from-amber-100 hover:to-orange-100',
                           )}
                         >
                           <Pencil size={14} />
@@ -1114,7 +1151,7 @@ export function MatchupDetailPage() {
                         className={cn(
                           'flex flex-1 min-w-[10rem] items-center justify-center gap-2 py-4 rounded-2xl text-sm font-black tracking-wide transition-all',
                           matchup?.right_type
-                            ? 'bg-gradient-to-r from-violet-600 via-fuchsia-600 to-violet-700 text-white shadow-[0_0_28px_rgba(139,92,246,0.45)] hover:shadow-[0_0_40px_rgba(217,70,239,0.5)] hover:scale-[1.01] active:scale-[0.99]'
+                            ? 'bg-gradient-to-r from-violet-600 via-fuchsia-600 to-violet-700 text-white shadow-[0_4px_28px_-4px_rgba(139,92,246,0.55)] hover:shadow-[0_4px_40px_-4px_rgba(217,70,239,0.6)] hover:scale-[1.01] active:scale-[0.99]'
                             : 'bg-violet-100/60 text-violet-300 cursor-not-allowed',
                         )}
                       >
@@ -1132,10 +1169,9 @@ export function MatchupDetailPage() {
               <div className="px-6 pt-6 pb-5 space-y-4">
                 <p className="text-sm text-violet-400/90">{formatDate(matchup.created_at)}</p>
                 <div className="flex flex-col items-center gap-2 text-center">
-                  <h1 className="text-xl sm:text-2xl font-black text-violet-950 leading-snug">
+                  <h1 className="text-xl sm:text-2xl font-black leading-snug bg-gradient-to-r from-violet-700 via-fuchsia-600 to-violet-700 bg-clip-text text-transparent">
                     {matchup.title}
                   </h1>
-                  <p className="text-[10px] font-semibold text-violet-500/80">User A가 정한 경쟁 제목</p>
                   <VsBadge variant="minimal" size="sm" animated={false} />
                 </div>
                 {(matchup.description || matchup.right_description) && (
@@ -1249,9 +1285,11 @@ export function MatchupDetailPage() {
                 </div>
               )}
               <div className={`flex items-center justify-center gap-2 ${matchup?.expires_at && timer && !timer.expired && !challengerForfeit ? 'mt-4' : 'mt-5 pt-5 border-t border-violet-100/55'}`}>
-                <Users size={14} className="text-violet-400" />
-                <span className="text-sm font-black bg-gradient-to-r from-violet-800 to-fuchsia-700 bg-clip-text text-transparent">
-                  총 투표수: {formatNumber(matchup.total_votes || 0)}
+                <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-r from-violet-100/80 to-fuchsia-100/70 border border-violet-200/50">
+                  <Users size={14} className="text-violet-500" />
+                  <span className="text-sm font-black bg-gradient-to-r from-violet-800 to-fuchsia-700 bg-clip-text text-transparent">
+                    총 투표수: {formatNumber(matchup.total_votes || 0)}
+                  </span>
                 </span>
               </div>
             </>
@@ -1322,19 +1360,24 @@ export function MatchupDetailPage() {
           id="comments"
           className="bg-gradient-to-br from-white/90 via-violet-50/55 to-fuchsia-50/35 border border-violet-200/45 rounded-2xl overflow-hidden shadow-[0_16px_44px_-18px_rgba(139,92,246,0.22)] backdrop-blur-[2px]"
         >
-          <div className="px-5 pt-5 pb-4 border-b border-violet-100/55 flex items-center gap-2">
-            <h2 className="text-base font-black bg-gradient-to-r from-violet-700 via-fuchsia-600 to-cyan-600 bg-clip-text text-transparent">
-              댓글
-            </h2>
-            <span className="text-sm text-gray-400 font-normal">
-              {commentsLoading
-                ? '…'
-                : (commentsTotal != null && commentsTotal > comments.length)
-                  ? `${comments.length} / ${commentsTotal}`
-                  : (commentsHasOlder
-                    ? `${comments.length}+`
-                    : commentCountDisplay)}
+          <div className="px-5 pt-5 pb-4 border-b border-violet-100/55 flex items-center gap-3">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-pink-500 shadow-[0_3px_12px_-2px_rgba(168,85,247,0.45)] shrink-0">
+              <span className="text-sm">💬</span>
             </span>
+            <div className="flex items-baseline gap-2">
+              <h2 className="text-base font-black bg-gradient-to-r from-violet-700 via-fuchsia-600 to-cyan-600 bg-clip-text text-transparent">
+                댓글
+              </h2>
+              <span className="text-sm text-violet-400/70 font-semibold tabular-nums">
+                {commentsLoading
+                  ? '…'
+                  : (commentsTotal != null && commentsTotal > comments.length)
+                    ? `${comments.length} / ${commentsTotal}`
+                    : (commentsHasOlder
+                      ? `${comments.length}+`
+                      : commentCountDisplay)}
+              </span>
+            </div>
           </div>
 
           <div className="px-5 pt-4 pb-4 border-b border-violet-100/55">
@@ -1732,22 +1775,32 @@ function OptionCard({
     <div className="flex flex-col gap-2">
       {/* 베스트/추천: 카드 위 아바타+이름 */}
       {isBestVariant && (
-        <div className="flex items-center gap-2">
+        <div className={cn(
+          'flex items-center gap-2 px-2.5 py-1.5 rounded-xl',
+          isLeft
+            ? 'bg-gradient-to-r from-fuchsia-50/80 to-pink-50/60 border border-fuchsia-100/60'
+            : 'bg-gradient-to-r from-sky-50/80 to-blue-50/60 border border-sky-100/60',
+        )}>
           {isLeft && authorProfile ? (
             <UserProfileLink userId={authorProfile?.id} className="flex items-center gap-2 min-w-0">
               <Avatar src={authorProfile?.avatar_url} alt={authorProfile?.nickname} size="sm" />
               <span className="flex min-w-0 items-center gap-1">
-                <span className="text-sm font-semibold text-[#22282E] truncate">{authorProfile?.nickname || '사용자'}</span>
+                <span className="text-sm font-bold text-[#22282E] truncate">{authorProfile?.nickname || '사용자'}</span>
                 <FandomBronzeStarBadge tierId={authorProfile?.fandom_tier} />
                 <FeaturedBadgeSpan badgeId={authorProfile?.featured_badge} className="translate-y-px shrink-0" />
               </span>
             </UserProfileLink>
           ) : (
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-200 to-fuchsia-200 flex items-center justify-center text-xs font-bold text-violet-800/80">
+              <div className={cn(
+                'w-8 h-8 rounded-full flex items-center justify-center text-xs font-black',
+                isLeft
+                  ? 'bg-gradient-to-br from-fuchsia-400 to-pink-500 text-white'
+                  : 'bg-gradient-to-br from-sky-400 to-blue-500 text-white',
+              )}>
                 {(label || 'B')[0]}
               </div>
-              <span className="text-sm font-semibold text-[#22282E]">{label}</span>
+              <span className="text-sm font-bold text-[#22282E]">{label}</span>
             </div>
           )}
         </div>
@@ -1789,8 +1842,13 @@ function OptionCard({
             </div>
           )}
           {type === 'text' && (
-            <div className="flex h-full w-full items-center justify-center bg-violet-50/50 p-4">
-              <p className="text-center text-sm font-bold leading-relaxed text-[#22282E] sm:text-base">{text}</p>
+            <div className={cn(
+              'flex h-full w-full items-center justify-center p-4',
+              isLeft
+                ? 'bg-gradient-to-br from-amber-950/90 via-orange-900/80 to-rose-950/85'
+                : 'bg-gradient-to-br from-violet-950/90 via-fuchsia-900/80 to-indigo-950/85',
+            )}>
+              <p className="text-center text-sm font-bold leading-relaxed text-white/90 drop-shadow-sm sm:text-base">{text}</p>
             </div>
           )}
           {type !== 'text' && (
@@ -1822,18 +1880,18 @@ function OptionCard({
         {showWinLoseBadge && (
           <div className="absolute top-2 left-2 z-10">
             {isWin && (
-              <span className="inline-flex items-center gap-0.5 text-[10px] font-black bg-green-500 text-white px-2 py-0.5 rounded-full shadow-sm">
-                ✓ WIN
+              <span className="inline-flex items-center gap-0.5 text-[10px] font-black bg-gradient-to-r from-emerald-400 to-green-500 text-white px-2 py-0.5 rounded-full shadow-[0_0_12px_rgba(74,222,128,0.55)]">
+                👑 WIN
               </span>
             )}
             {isLose && (
-              <span className="inline-flex items-center gap-0.5 text-[10px] font-black bg-red-500 text-white px-2 py-0.5 rounded-full shadow-sm">
+              <span className="inline-flex items-center gap-0.5 text-[10px] font-black bg-gradient-to-r from-rose-500 to-red-500 text-white px-2 py-0.5 rounded-full shadow-[0_0_8px_rgba(239,68,68,0.4)]">
                 ✗ 패배
               </span>
             )}
             {isDraw && (
-              <span className="inline-flex items-center gap-0.5 text-[10px] font-black bg-gray-500 text-white px-2 py-0.5 rounded-full shadow-sm">
-                무승부
+              <span className="inline-flex items-center gap-0.5 text-[10px] font-black bg-gradient-to-r from-slate-500 to-gray-500 text-white px-2 py-0.5 rounded-full shadow-sm">
+                🤝 무승부
               </span>
             )}
           </div>
@@ -1918,7 +1976,14 @@ function OptionCard({
         </button>
       )}
       {isExpired && (
-        <div className="w-full py-2.5 rounded-xl text-xs font-bold text-center bg-violet-100/50 text-violet-400">
+        <div className={cn(
+          'w-full py-2.5 rounded-xl text-xs font-bold text-center',
+          voted
+            ? isLeft
+              ? 'bg-gradient-to-r from-fuchsia-100/80 to-pink-100/60 text-fuchsia-700 border border-fuchsia-200/50'
+              : 'bg-gradient-to-r from-sky-100/80 to-blue-100/60 text-sky-700 border border-sky-200/50'
+            : 'bg-violet-100/50 text-violet-400',
+        )}>
           {voted ? `✓ ${label} 투표` : forfeitApplied ? '몰수패로 경쟁 종료' : '마감된 투표'}
         </div>
       )}
@@ -1947,19 +2012,17 @@ function OptionCard({
 function ChallengerSlot({ user, isMyMatchup, onChallenge, onLogin }) {
   return (
     <div className="flex flex-col gap-2">
-      <div className="aspect-square rounded-xl border-2 border-dashed border-violet-200/55 bg-gradient-to-br from-violet-50/80 to-cyan-50/40 flex flex-col items-center justify-center gap-3 px-3">
-        <div className="w-14 h-14 rounded-full bg-violet-100/70 flex items-center justify-center">
-          <Swords size={24} className="text-violet-400" />
-        </div>
+      <div className="aspect-square rounded-xl overflow-hidden border border-dashed border-emerald-400/35 bg-gradient-to-br from-emerald-950/88 via-teal-950/78 to-cyan-950/82 flex flex-col items-center justify-center gap-3 px-3">
+        <span className="text-4xl sm:text-5xl">⚔️</span>
         <div className="text-center">
-          <p className="text-sm font-black text-violet-600/90">도전자 모집 중</p>
-          <p className="text-xs text-violet-400/80 mt-0.5">아직 상대방이 없어요</p>
+          <p className="text-sm font-black text-emerald-300 tracking-wide">도전자 모집 중</p>
+          <p className="text-xs text-teal-400/80 mt-0.5">아직 상대방이 없어요</p>
         </div>
         {!isMyMatchup && (
           user ? (
             <button
               onClick={onChallenge}
-              className="flex items-center gap-1.5 px-5 py-2.5 text-white text-xs font-black rounded-xl bg-gradient-to-r from-lime-400 via-emerald-400 to-teal-500 shadow-[0_0_24px_rgba(132,204,22,0.5)] hover:shadow-[0_0_32px_rgba(132,204,22,0.65)] hover:scale-[1.03] active:scale-[0.97] transition-all"
+              className="flex items-center gap-1.5 px-5 py-2.5 text-[#0f1f0f] text-xs font-black rounded-xl bg-gradient-to-r from-lime-400 via-emerald-400 to-teal-500 shadow-[0_0_24px_rgba(132,204,22,0.5)] hover:shadow-[0_0_32px_rgba(132,204,22,0.65)] hover:scale-[1.03] active:scale-[0.97] transition-all"
             >
               <Swords size={13} /> 도전하기
             </button>
@@ -2232,13 +2295,13 @@ function StoryCardSide({ type, url, text, label, pct, isWin, isVoted, animated, 
       {/* 미디어 영역 */}
       <div className="aspect-square relative overflow-hidden">
         {type === 'image' && url ? (
-          <img src={safeMediaUrl(url)} alt={label} className={`w-full h-full object-cover transition-all duration-500 ${isWin ? '' : 'brightness-50 saturate-50'}`} />
+          <img src={safeMediaUrl(url)} alt={label} className={`absolute inset-0 w-full h-full object-cover transition-all duration-500 ${isWin ? '' : 'brightness-50 saturate-50'}`} />
         ) : type === 'text' ? (
-          <div className="w-full h-full bg-white/10 flex items-center justify-center p-3">
+          <div className="absolute inset-0 bg-white/10 flex items-center justify-center p-3">
             <p className="text-white text-xs font-bold text-center leading-snug">{text}</p>
           </div>
         ) : (
-          <div className="w-full h-full bg-white/10 flex items-center justify-center">
+          <div className="absolute inset-0 bg-white/10 flex items-center justify-center">
             <span className="text-3xl">🎬</span>
           </div>
         )}
@@ -2326,20 +2389,24 @@ function MatchupDetailSkeleton() {
     <div className="relative -mx-4 px-4 sm:mx-0 sm:px-0 pb-6">
       <div className="pointer-events-none absolute inset-x-0 -top-3 bottom-0 -z-10 sm:-inset-x-3 sm:rounded-[2rem] bg-gradient-to-b from-violet-500/[0.09] via-fuchsia-400/[0.05] to-cyan-400/[0.11]" />
       <div className="max-w-3xl mx-auto space-y-5 animate-pulse">
-        <div className="h-5 bg-violet-200/50 rounded-xl w-24" />
-        <div className="bg-gradient-to-br from-white/90 via-violet-50/60 to-cyan-50/40 border border-violet-200/40 rounded-2xl p-6 space-y-4">
-          <div className="h-7 bg-violet-200/40 rounded-xl w-3/4" />
-          <div className="h-4 bg-violet-100/50 rounded w-1/2" />
+        <div className="h-9 bg-gradient-to-r from-violet-200/60 to-violet-100/40 rounded-xl w-28" />
+        <div className="bg-gradient-to-br from-white/90 via-violet-50/60 to-cyan-50/40 border border-violet-200/40 rounded-2xl p-6 space-y-5 overflow-hidden relative">
+          <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-violet-300/60 via-fuchsia-300/50 to-cyan-300/40 rounded-t-2xl" />
+          <div className="h-7 bg-violet-200/50 rounded-xl w-3/4 mx-auto" />
+          <div className="h-4 bg-violet-100/50 rounded w-1/2 mx-auto" />
           <div className="grid grid-cols-2 gap-4">
-            <div className="aspect-square bg-violet-100/50 rounded-xl" />
-            <div className="aspect-square bg-fuchsia-100/40 rounded-xl" />
+            <div className="aspect-square bg-gradient-to-br from-fuchsia-100/50 to-pink-100/40 rounded-xl" />
+            <div className="aspect-square bg-gradient-to-br from-sky-100/50 to-blue-100/40 rounded-xl" />
           </div>
-          <div className="h-10 bg-violet-100/50 rounded-xl" />
-          <div className="h-10 bg-violet-100/50 rounded-xl" />
+          <div className="h-12 bg-violet-100/50 rounded-xl" />
+          <div className="h-12 bg-violet-100/50 rounded-xl" />
         </div>
         <div className="bg-gradient-to-br from-white/85 to-violet-50/50 border border-violet-200/40 rounded-2xl p-6 space-y-3">
-          <div className="h-5 bg-violet-200/40 rounded w-16" />
-          <div className="h-20 bg-violet-100/50 rounded-xl" />
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-gradient-to-br from-violet-200/70 to-fuchsia-200/60 rounded-xl" />
+            <div className="h-5 bg-violet-200/50 rounded w-16" />
+          </div>
+          <div className="h-24 bg-violet-100/50 rounded-xl" />
         </div>
       </div>
     </div>

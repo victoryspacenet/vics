@@ -20,7 +20,7 @@ import {
 const PAGE_BG =
   'bg-gradient-to-br from-rose-50/98 via-fuchsia-50/35 to-cyan-50/50'
 const SECTION_CARD =
-  'rounded-2xl border border-pink-100/50 bg-white/92 shadow-[0_4px_28px_-10px_rgba(244,114,182,0.18)] backdrop-blur-[2px]'
+  'rounded-2xl border border-pink-100/50 bg-white/95 shadow-[0_4px_28px_-10px_rgba(244,114,182,0.18)] backdrop-blur-[2px] overflow-hidden'
 const HEADER_GLASS =
   'bg-gradient-to-b from-white/90 via-rose-50/40 to-fuchsia-50/20 backdrop-blur-md border-b border-pink-100/55'
 
@@ -200,7 +200,7 @@ export function ProfileImageEditPage() {
 
       showToast(avatarFile ? '프로필 사진이 업데이트됐어요 ✓' : '배경 효과가 저장됐어요 ✓', 'success')
       navigate('/mypage/edit')
-      void fetchProfile(user.id)
+      void fetchProfile(user.id, { force: true })
     } catch {
       showToast('저장 중 오류가 발생했어요', 'error')
     } finally {
@@ -215,18 +215,26 @@ export function ProfileImageEditPage() {
     <div className={cn('max-w-screen-sm mx-auto min-h-screen', PAGE_BG)}>
 
       {/* ── 상단 바 ── */}
-      <div className={cn('sticky top-0 z-30 flex items-center justify-between h-14 px-4', HEADER_GLASS)}>
+      <div className={cn('sticky top-0 z-30 flex items-center gap-2.5 h-14 px-4', HEADER_GLASS)}>
         <button
           onClick={() => navigate('/mypage/edit')}
-          className="p-2 -ml-2 rounded-xl hover:bg-pink-100/60 transition-colors"
+          className="flex items-center gap-1 pl-2 pr-3 py-2 -ml-1 rounded-xl bg-gradient-to-r from-pink-50 to-fuchsia-50 border border-pink-200/60 hover:from-pink-100 hover:to-fuchsia-100 transition-all shrink-0 shadow-sm"
         >
-          <ArrowLeft size={20} className="text-fuchsia-900" />
+          <ArrowLeft size={15} className="text-fuchsia-700" />
+          <span className="text-xs font-bold text-fuchsia-700">뒤로</span>
         </button>
-        <h1 className="text-base font-black text-fuchsia-950">프로필 사진 수정</h1>
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-fuchsia-500 to-pink-500 shadow-md shadow-fuchsia-300/40">
+            <Camera size={13} className="text-white" />
+          </span>
+          <h1 className="text-base font-black bg-gradient-to-r from-fuchsia-700 to-pink-600 bg-clip-text text-transparent truncate">
+            프로필 사진 수정
+          </h1>
+        </div>
         <button
           onClick={handleSave}
           disabled={!hasChanges || saving}
-          className={`px-4 py-1.5 text-sm font-black rounded-full transition-all ${
+          className={`px-4 py-1.5 text-sm font-black rounded-full transition-all shrink-0 ${
             hasChanges && !saving
               ? 'bg-gradient-to-r from-fuchsia-600 to-pink-500 text-white hover:brightness-105 active:scale-95 shadow-md shadow-fuchsia-300/35'
               : 'bg-fuchsia-100/60 text-fuchsia-400/80 cursor-not-allowed'
@@ -239,7 +247,9 @@ export function ProfileImageEditPage() {
       <div className="px-4 py-6 space-y-4">
 
         {/* ══ 메인 이미지 편집 영역 ══ */}
-        <div className={`${SECTION_CARD} p-8`}>
+        <div className={SECTION_CARD}>
+          <div className="h-1 bg-gradient-to-r from-pink-400 via-fuchsia-400 to-violet-400" />
+          <div className="p-8">
 
           {/* 대형 아바타 프리뷰 (중앙) */}
           <div className="flex flex-col items-center gap-4">
@@ -289,17 +299,21 @@ export function ProfileImageEditPage() {
           </div>
 
           {/* 구분선 */}
-          <div className="h-px bg-gradient-to-r from-transparent via-pink-200/70 to-transparent my-6" />
+          <div className="h-px bg-gradient-to-r from-transparent via-pink-200/60 to-transparent my-6" />
 
           {/* ── 배경 효과 선택 ── */}
           <div>
-            <div className="flex items-center gap-2 mb-3">
-              <Sparkles size={14} className="text-fuchsia-500" />
-              <span className="text-sm font-black text-fuchsia-950">배경 효과 선택</span>
-              <span className="text-xs text-fuchsia-700/50 hidden sm:inline">(티어 컬러 반영)</span>
+            <div className="flex items-center gap-2.5 mb-4">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 shadow-sm">
+                <Sparkles size={13} className="text-white" />
+              </span>
+              <div>
+                <span className="text-sm font-black bg-gradient-to-r from-violet-700 to-fuchsia-700 bg-clip-text text-transparent">배경 효과 선택</span>
+                <span className="text-xs text-fuchsia-700/45 ml-1.5 hidden sm:inline">(티어 컬러 반영)</span>
+              </div>
             </div>
 
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-4 gap-2.5">
               {BG_EFFECTS.map((ef) => (
                 <button
                   key={ef.id}
@@ -308,28 +322,32 @@ export function ProfileImageEditPage() {
                     userPickedBgRef.current = true
                     setBgEffect(ef.id)
                   }}
-                  className={`flex flex-col items-center gap-1.5 p-2.5 rounded-2xl border-2 transition-all ${
+                  className={`flex flex-col items-center gap-1.5 p-3 rounded-2xl border-2 transition-all ${
                     localRing === ef.id
-                      ? 'border-fuchsia-500 bg-gradient-to-br from-pink-50 to-fuchsia-50 shadow-md shadow-pink-200/40 scale-[1.03]'
-                      : 'border-transparent bg-white/60 hover:border-pink-200/80 hover:bg-rose-50/50'
+                      ? 'border-fuchsia-500 bg-gradient-to-br from-pink-50 to-fuchsia-50 shadow-md shadow-fuchsia-200/50 scale-[1.04]'
+                      : 'border-slate-100 bg-white/60 hover:border-pink-200/80 hover:bg-rose-50/50'
                   }`}
                 >
-                  <div className={`w-10 h-10 rounded-full ${ef.previewCls}`} />
+                  <div className={`w-10 h-10 rounded-full shadow-sm ${ef.previewCls}`} />
                   <span className="text-[11px] font-bold text-fuchsia-900/80">{ef.label}</span>
                   {localRing === ef.id && (
-                    <div className="w-4 h-1 bg-gradient-to-r from-fuchsia-500 to-pink-500 rounded-full" />
+                    <div className="w-5 h-1 bg-gradient-to-r from-fuchsia-500 to-pink-500 rounded-full" />
                   )}
                 </button>
               ))}
             </div>
 
             {/* 안내 */}
-            <div className="mt-4 px-4 py-3 bg-gradient-to-r from-violet-50/70 to-fuchsia-50/50 rounded-xl border border-violet-100/40">
-              <p className="text-[11px] text-fuchsia-800/70 leading-relaxed text-center">
-                ✨ 프로필 사진은 매치업 결과 카드와 랭킹 리스트에<br />
-                그대로 노출됩니다!
-              </p>
+            <div className="mt-4 rounded-2xl overflow-hidden border border-violet-100/50">
+              <div className="h-0.5 bg-gradient-to-r from-violet-400 to-fuchsia-400" />
+              <div className="px-4 py-3 bg-gradient-to-r from-violet-50/60 to-fuchsia-50/40">
+                <p className="text-[11px] text-fuchsia-800/65 leading-relaxed text-center">
+                  ✨ 프로필 사진은 매치업 결과 카드와 랭킹 리스트에<br />
+                  그대로 노출됩니다!
+                </p>
+              </div>
             </div>
+          </div>
           </div>
         </div>
       </div>
@@ -349,96 +367,102 @@ export function ProfileImageEditPage() {
             style={{ animation: 'fade-in-up 0.3s cubic-bezier(0.16,1,0.3,1) both' }}
           >
             <div
-              className="rounded-t-3xl px-4 pt-3 pb-8 shadow-2xl shadow-pink-200/35 border-t border-pink-100/60
-                bg-gradient-to-b from-white/98 via-rose-50/55 to-fuchsia-50/45"
+              className="rounded-t-3xl shadow-2xl shadow-pink-200/35 border-t border-pink-100/60
+                bg-gradient-to-b from-white/98 via-rose-50/55 to-fuchsia-50/45 overflow-hidden"
             >
-              {/* 핸들 */}
-              <div className="w-10 h-1 bg-pink-200/80 rounded-full mx-auto mb-5" />
-              <p className="text-sm font-black text-fuchsia-950 text-center mb-4">
-                {sheetView === 'camera' ? '카메라로 촬영' : '사진 선택'}
-              </p>
+              {/* 상단 컬러 라인 */}
+              <div className="h-1 bg-gradient-to-r from-pink-400 via-fuchsia-400 to-violet-400" />
 
-              {sheetView === 'camera' ? (
-                <div className="max-h-[min(72vh,560px)] space-y-3 overflow-y-auto pb-1">
-                  <button
-                    type="button"
-                    onClick={() => setSheetView('menu')}
-                    className="flex items-center gap-1 text-xs font-bold text-fuchsia-700 hover:text-fuchsia-900"
-                  >
-                    <ChevronLeft size={16} aria-hidden />
-                    다른 방법으로 선택
-                  </button>
-                  <SmartphoneCameraCapture
-                    quality={90}
-                    className="border-fuchsia-100/80 bg-white/80 shadow-none"
-                    onCapture={handleCameraCapture}
-                    onError={(msg) => showToast(msg, 'error')}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setSheetOpen(false)}
-                    className="w-full py-3.5 rounded-2xl text-sm font-black border-2 border-fuchsia-400/90 bg-white text-fuchsia-900 hover:bg-fuchsia-50 active:scale-[0.99] transition-all"
-                  >
-                    닫기
-                  </button>
-                </div>
-              ) : (
-              <div className="space-y-2">
-                {/* 앨범에서 선택 */}
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full flex items-center gap-4 px-5 py-4 bg-white/70 rounded-2xl border border-sky-100/60 hover:bg-sky-50/90 transition-colors"
-                >
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-sky-100 to-blue-100 flex items-center justify-center flex-shrink-0 border border-sky-200/50">
-                    <ImageIcon size={18} className="text-sky-600" />
-                  </div>
-                  <div className="text-left">
-                    <p className="text-sm font-bold text-fuchsia-950">앨범에서 선택</p>
-                    <p className="text-xs text-fuchsia-700/55">갤러리에서 사진을 선택해요</p>
-                  </div>
-                </button>
+              <div className="px-4 pt-3 pb-8">
+                {/* 핸들 */}
+                <div className="w-10 h-1 bg-pink-200/70 rounded-full mx-auto mb-5" />
 
-                {/* 카메라로 촬영 */}
-                <button
-                  type="button"
-                  onClick={() => setSheetView('camera')}
-                  className="w-full flex items-center gap-4 px-5 py-4 bg-white/70 rounded-2xl border border-emerald-100/70 hover:bg-emerald-50/90 transition-colors"
-                >
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-100 to-teal-100 flex items-center justify-center flex-shrink-0 border border-emerald-200/50">
-                    <Camera size={18} className="text-emerald-700" />
-                  </div>
-                  <div className="text-left">
-                    <p className="text-sm font-bold text-fuchsia-950">카메라로 촬영</p>
-                    <p className="text-xs text-fuchsia-700/55">촬영 후 미리보기에서 확인해요</p>
-                  </div>
-                </button>
+                <p className="text-sm font-black bg-gradient-to-r from-fuchsia-700 to-pink-600 bg-clip-text text-transparent text-center mb-4">
+                  {sheetView === 'camera' ? '카메라로 촬영' : '사진 선택'}
+                </p>
 
-                {/* 기본 이미지로 변경 */}
-                {currentImage && (
-                  <button
-                    onClick={resetAvatar}
-                    className="w-full flex items-center gap-4 px-5 py-4 bg-white/70 rounded-2xl border border-red-100/60 hover:bg-red-50/80 transition-colors"
-                  >
-                    <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0 border border-red-200/50">
-                      <X size={18} className="text-red-500" />
-                    </div>
-                    <div className="text-left">
-                      <p className="text-sm font-bold text-red-500">기본 이미지로 변경</p>
-                      <p className="text-xs text-fuchsia-700/50">프로필 사진을 초기화해요</p>
-                    </div>
-                  </button>
+                {sheetView === 'camera' ? (
+                  <div className="max-h-[min(72vh,560px)] space-y-3 overflow-y-auto pb-1">
+                    <button
+                      type="button"
+                      onClick={() => setSheetView('menu')}
+                      className="flex items-center gap-1.5 pl-2 pr-3 py-1.5 rounded-xl bg-fuchsia-50/80 border border-fuchsia-200/50 text-xs font-bold text-fuchsia-700 hover:bg-fuchsia-100 transition-all"
+                    >
+                      <ChevronLeft size={14} aria-hidden />
+                      다른 방법으로 선택
+                    </button>
+                    <SmartphoneCameraCapture
+                      quality={90}
+                      className="border-fuchsia-100/80 bg-white/80 shadow-none"
+                      onCapture={handleCameraCapture}
+                      onError={(msg) => showToast(msg, 'error')}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setSheetOpen(false)}
+                      className="w-full py-3.5 rounded-2xl text-sm font-black border-2 border-fuchsia-300/80 bg-white text-fuchsia-900 hover:bg-fuchsia-50 active:scale-[0.99] transition-all"
+                    >
+                      닫기
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {/* 앨범에서 선택 */}
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full flex items-center gap-4 px-5 py-4 bg-white/80 rounded-2xl border border-sky-100/70 hover:bg-sky-50/90 hover:border-sky-200/80 transition-all shadow-sm"
+                    >
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-sky-400 to-blue-500 flex items-center justify-center flex-shrink-0 shadow-md shadow-sky-300/40">
+                        <ImageIcon size={18} className="text-white" />
+                      </div>
+                      <div className="text-left">
+                        <p className="text-sm font-bold text-fuchsia-950">앨범에서 선택</p>
+                        <p className="text-xs text-fuchsia-700/50">갤러리에서 사진을 선택해요</p>
+                      </div>
+                    </button>
+
+                    {/* 카메라로 촬영 */}
+                    <button
+                      type="button"
+                      onClick={() => setSheetView('camera')}
+                      className="w-full flex items-center gap-4 px-5 py-4 bg-white/80 rounded-2xl border border-emerald-100/70 hover:bg-emerald-50/90 hover:border-emerald-200/80 transition-all shadow-sm"
+                    >
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0 shadow-md shadow-emerald-300/40">
+                        <Camera size={18} className="text-white" />
+                      </div>
+                      <div className="text-left">
+                        <p className="text-sm font-bold text-fuchsia-950">카메라로 촬영</p>
+                        <p className="text-xs text-fuchsia-700/50">촬영 후 미리보기에서 확인해요</p>
+                      </div>
+                    </button>
+
+                    {/* 기본 이미지로 변경 */}
+                    {currentImage && (
+                      <button
+                        onClick={resetAvatar}
+                        className="w-full flex items-center gap-4 px-5 py-4 bg-white/80 rounded-2xl border border-red-100/60 hover:bg-red-50/80 hover:border-red-200/70 transition-all shadow-sm"
+                      >
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-rose-400 to-red-500 flex items-center justify-center flex-shrink-0 shadow-md shadow-rose-300/40">
+                          <X size={18} className="text-white" />
+                        </div>
+                        <div className="text-left">
+                          <p className="text-sm font-bold text-red-500">기본 이미지로 변경</p>
+                          <p className="text-xs text-fuchsia-700/50">프로필 사진을 초기화해요</p>
+                        </div>
+                      </button>
+                    )}
+
+                    {/* 취소 */}
+                    <button
+                      type="button"
+                      onClick={() => setSheetOpen(false)}
+                      className="w-full mt-1 py-3.5 rounded-2xl text-sm font-black bg-gradient-to-r from-fuchsia-600 to-pink-500 text-white shadow-[0_4px_16px_-4px_rgba(192,38,211,0.45)] hover:brightness-105 active:scale-[0.99] transition-all"
+                    >
+                      취소
+                    </button>
+                  </div>
                 )}
-
-                {/* 취소 — 시트 닫기 (강조) */}
-                <button
-                  type="button"
-                  onClick={() => setSheetOpen(false)}
-                  className="w-full mt-1 py-3.5 rounded-2xl text-sm font-black border-2 border-fuchsia-400/90 bg-white text-fuchsia-900 shadow-[0_2px_12px_-2px_rgba(192,38,211,0.25)] hover:bg-fuchsia-50 hover:border-fuchsia-500 active:scale-[0.99] transition-all"
-                >
-                  취소
-                </button>
               </div>
-              )}
             </div>
           </div>
         </>

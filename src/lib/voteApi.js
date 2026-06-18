@@ -18,6 +18,8 @@ export async function voteViaApi(matchupId, side) {
   }
 
   try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 20_000)
     const res = await fetch(resolveSiteUrl('/api/vote'), {
       method: 'POST',
       headers: {
@@ -25,7 +27,9 @@ export async function voteViaApi(matchupId, side) {
         Authorization: `Bearer ${session.access_token}`,
       },
       body: JSON.stringify({ matchup_id: matchupId, side }),
+      signal: controller.signal,
     })
+    clearTimeout(timeoutId)
 
     const json = await res.json().catch(() => ({}))
     if (res.ok) return { ok: true }

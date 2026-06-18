@@ -114,7 +114,7 @@ export function MatchupCard({ matchup: initialMatchup, compact, onVoteUpdate }) 
       }))
       showToast('투표 완료! 매치업 종료 후 결과에 따라 포인트가 지급돼요', 'success')
       setVoteLocked(true)
-      setTimeout(() => fetchProfile(user.id), 800)
+      setTimeout(() => fetchProfile(user.id, { force: true }), 800)
       onVoteUpdate?.()
     } catch (err) {
       showToast(err?.message || '투표 중 오류가 발생했어요', 'error')

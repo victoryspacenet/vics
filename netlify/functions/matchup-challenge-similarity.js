@@ -223,7 +223,7 @@ exports.handler = withIpRateLimit(async (event) => {
     }
   }
 
-  const minSim = Math.max(0, Math.min(100, parseInt(process.env.MATCHUP_CHALLENGE_SIMILARITY_MIN || '32', 10)))
+  const minSim = Math.max(0, Math.min(100, parseInt(process.env.MATCHUP_CHALLENGE_SIMILARITY_MIN || '45', 10)))
   const failOpen = String(process.env.MATCHUP_SIMILARITY_FAIL_OPEN || '').trim() === '1'
   const requireAi = String(process.env.MATCHUP_SIMILARITY_REQUIRE_AI || '').trim() === '1'
 
@@ -252,16 +252,16 @@ exports.handler = withIpRateLimit(async (event) => {
     if (requireAi) {
       return json(502, { ok: false, error: '유사도 검사를 수행하지 못했어요. 잠시 후 다시 시도해 주세요.' })
     }
-    if (failOpen) {
-      return json(200, { ok: true, skipped: true, reason: 'ai_error_fail_open' })
-    }
-    return json(502, { ok: false, error: '유사도 검사를 수행하지 못했어요. 잠시 후 다시 시도해 주세요.' })
+    // OpenAI 타임아웃·오류는 콘텐츠 문제가 아니므로 fail_open 여부와 무관하게 skip 처리
+    // (fail_open 미설정 시 업로드가 막히는 문제 방지)
+    return json(200, { ok: true, skipped: true, reason: 'ai_error_fail_open' })
   }
 
   if (!scored) {
     if (requireAi) {
       return json(503, { ok: false, error: 'AI 유사도 검사가 설정되지 않았어요. 관리자에게 문의해 주세요.' })
     }
+    // OPENAI_API_KEY 미설정 → 검사 생략 (MATCHUP_SIMILARITY_REQUIRE_AI=1 설정 시 차단)
     return json(200, { ok: true, skipped: true, reason: 'no_openai_key' })
   }
 

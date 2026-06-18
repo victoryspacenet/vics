@@ -9,7 +9,9 @@ import { safeMediaUrl } from '../lib/sanitize'
 import { cn } from '../lib/utils'
 
 const PAGE_BG =
-  'bg-gradient-to-br from-rose-50/98 via-fuchsia-50/35 to-cyan-50/50 min-h-[70vh]'
+  'bg-gradient-to-br from-rose-50/98 via-fuchsia-50/35 to-cyan-50/50 min-h-screen'
+const HEADER_GLASS =
+  'sticky top-0 z-30 bg-gradient-to-b from-white/90 via-rose-50/40 to-fuchsia-50/20 backdrop-blur-md border-b border-pink-100/55'
 
 // ── 기간 한글 레이블 ────────────────────────────────────────────────
 function periodLabel(p) {
@@ -356,16 +358,29 @@ export function RankingGalleryPage() {
 
   if (!user) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 gap-4">
-        <p className="text-2xl">🔒</p>
-        <p className="text-gray-500 font-bold">로그인이 필요합니다</p>
+      <div className={cn('flex flex-col items-center justify-center py-24 gap-4', PAGE_BG)}>
+        <p className="text-4xl">🔒</p>
+        <p className="text-base font-black text-slate-600">로그인이 필요해요</p>
+        <button
+          type="button"
+          onClick={() => navigate('/login')}
+          className="mt-2 rounded-2xl bg-gradient-to-r from-fuchsia-600 to-pink-500 px-6 py-2.5 text-sm font-black text-white shadow-md hover:brightness-105 transition-all"
+        >
+          로그인
+        </button>
       </div>
     )
   }
 
   return (
     <div className={cn(PAGE_BG)}>
-      <div className="mx-auto max-w-[520px] px-0 pb-20 pt-0">
+      {/* 앰비언트 배경 */}
+      <div className="pointer-events-none fixed inset-0 z-0">
+        <div className="absolute -top-24 -left-20 w-80 h-80 rounded-full bg-[radial-gradient(circle,_rgba(217,70,239,0.10)_0%,_transparent_70%)] blur-3xl" />
+        <div className="absolute top-1/3 -right-16 w-64 h-64 rounded-full bg-[radial-gradient(circle,_rgba(139,92,246,0.09)_0%,_transparent_70%)] blur-3xl" />
+        <div className="absolute bottom-24 left-1/4 w-56 h-56 rounded-full bg-[radial-gradient(circle,_rgba(6,182,212,0.07)_0%,_transparent_70%)] blur-3xl" />
+      </div>
+
       <style>{`
         @keyframes card-in {
           from { opacity:0; transform:translateY(16px); }
@@ -373,178 +388,193 @@ export function RankingGalleryPage() {
         }
       `}</style>
 
-      {/* 헤더 */}
-      <div className="flex items-center justify-between px-4 pb-3 pt-4">
-        <button
-          type="button"
-          onClick={() => navigate(-1)}
-          className="flex items-center gap-1.5 rounded-2xl border border-pink-100/80 bg-white/90 px-2.5 py-2 text-sm font-black text-fuchsia-950 shadow-sm shadow-pink-100/40 transition hover:bg-white hover:shadow-md"
-        >
-          <ArrowLeft size={18} strokeWidth={2.25} />
-        </button>
-        <h1 className="bg-gradient-to-r from-fuchsia-700 via-violet-600 to-cyan-600 bg-clip-text text-center text-[17px] font-black tracking-tight text-transparent">
-          나의 랭킹 히스토리
-        </h1>
-        <div className="w-10" aria-hidden />
-      </div>
+      <div className="mx-auto max-w-[520px] relative z-10 pb-20">
 
-      {/* ── 나의 최고 기록 ── */}
-      {best && bestTier && (
-        <div style={{ margin:'0 16px 20px', animation:'card-in 0.4s ease both' }}>
-          <div style={{
-            borderRadius: 20, overflow: 'hidden',
-            background: bestTier.bg,
-            boxShadow: `0 4px 24px ${bestTier.color}33`,
-          }}>
-            <div style={{ padding:'14px 18px' }}>
-              <p style={{ color:'rgba(255,255,255,0.55)',fontSize:10,fontWeight:900,
-                letterSpacing:'0.15em',textTransform:'uppercase',margin:'0 0 6px' }}>
-                🏆 나의 최고 기록
-              </p>
-              <div style={{ display:'flex', alignItems:'center', gap:14 }}>
-                {/* 썸네일 */}
-                <div style={{
-                  width:52, aspectRatio:'9/16', borderRadius:8, overflow:'hidden', flexShrink:0,
-                  boxShadow:'0 0 0 2px rgba(255,255,255,0.3)',
-                }}>
-                  {best.thumbnail
-                    ? <img src={safeMediaUrl(best.thumbnail)} alt="" style={{ width:'100%',height:'100%',objectFit:'cover' }} />
-                    : <div style={{ width:'100%',height:'100%',background:'rgba(0,0,0,0.3)',
-                        display:'flex',alignItems:'center',justifyContent:'center' }}>
-                        <span style={{ fontSize:18 }}>{bestTier.emoji}</span>
-                      </div>
-                  }
-                </div>
-                <div style={{ flex:1 }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:3 }}>
-                    <span style={{ fontSize:20 }}>{bestTier.emoji}</span>
-                    <p style={{ color:'#fff', fontWeight:900, fontSize:18, margin:0 }}>{bestTier.name}</p>
-                  </div>
-                  <p style={{ color:'rgba(255,255,255,0.6)', fontSize:12, margin:'0 0 2px' }}>
-                    {formatSavedDate(best.savedAt)} · {periodLabel(best.period)} 랭킹
-                  </p>
-                  <p style={{ color:'rgba(255,255,255,0.5)', fontSize:11, margin:0 }}>
-                    &quot;{getPercentile(best.rank)} 기록 보유 중!&quot;
-                  </p>
-                </div>
-                <div style={{ textAlign:'center', flexShrink:0 }}>
-                  <p style={{ color:'rgba(255,255,255,0.5)', fontSize:9, fontWeight:900, margin:'0 0 2px' }}>BEST</p>
-                  <p style={{ color:'#fff', fontWeight:900, fontSize:22, margin:0 }}>#{best.rank}</p>
-                </div>
-              </div>
-            </div>
+        {/* ── 스티키 헤더 ── */}
+        <div className={cn(HEADER_GLASS, 'flex items-center gap-2.5 h-14 px-4')}>
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            className="flex items-center gap-1 pl-2 pr-3 py-2 -ml-1 rounded-xl bg-gradient-to-r from-pink-50 to-fuchsia-50 border border-pink-200/60 hover:from-pink-100 hover:to-fuchsia-100 transition-all shrink-0 shadow-sm"
+          >
+            <ArrowLeft size={15} className="text-fuchsia-700" />
+            <span className="text-xs font-bold text-fuchsia-700">뒤로</span>
+          </button>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-fuchsia-500 via-violet-500 to-cyan-500 shadow-md shadow-fuchsia-300/40">
+              <Trophy size={13} className="text-white" />
+            </span>
+            <h1 className="text-base font-black bg-gradient-to-r from-fuchsia-700 via-violet-600 to-cyan-600 bg-clip-text text-transparent truncate">
+              나의 랭킹 히스토리
+            </h1>
           </div>
         </div>
-      )}
 
-      {/* ── 저장된 카드 섹션 ── */}
-      <div style={{ padding:'0 16px' }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
-          <p style={{ color:'#22282E', fontWeight:900, fontSize:15, margin:0 }}>
-            📸 저장된 랭킹 카드 <span style={{ color:'#9ca3af', fontWeight:700, fontSize:12 }}>({cards.length})</span>
-          </p>
+        <div className="px-4 pt-5 space-y-4">
 
-          {/* 정렬 버튼 */}
-          {cards.length > 1 && (
-            <div style={{ display:'flex', gap:6 }}>
-              {[{ id:'date', label:'최신순' }, { id:'tier', label:'티어순' }].map(s => (
-                <button key={s.id} onClick={() => { setSortBy(s.id); setGalleryPage(0) }} style={{
-                  padding:'5px 12px', borderRadius:20,
-                  background: sortBy === s.id ? '#22282E' : '#f3f4f6',
-                  color: sortBy === s.id ? '#fff' : '#6b7280',
-                  border: 'none', cursor:'pointer', fontWeight:700, fontSize:11,
-                  transition:'background 0.15s, color 0.15s',
-                }}>
-                  {s.label}
-                </button>
-              ))}
+          {/* ── 나의 최고 기록 ── */}
+          {best && bestTier && (
+            <div className="rounded-2xl overflow-hidden shadow-lg" style={{ boxShadow: `0 4px 28px ${bestTier.color}30`, animation: 'card-in 0.4s ease both' }}>
+              <div style={{ background: bestTier.bg }} className="p-4">
+                <p className="text-[10px] font-black uppercase tracking-widest text-white/50 mb-3 flex items-center gap-1.5">
+                  <Crown size={11} className="text-white/60" />
+                  나의 최고 기록
+                </p>
+                <div className="flex items-center gap-4">
+                  {/* 썸네일 */}
+                  <div className="w-14 shrink-0 rounded-xl overflow-hidden shadow-md" style={{ aspectRatio: '9/16', boxShadow: '0 0 0 2px rgba(255,255,255,0.25)' }}>
+                    {best.thumbnail
+                      ? <img src={safeMediaUrl(best.thumbnail)} alt="" className="w-full h-full object-cover" />
+                      : <div className="w-full h-full bg-black/30 flex items-center justify-center">
+                          <span className="text-xl">{bestTier.emoji}</span>
+                        </div>
+                    }
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xl">{bestTier.emoji}</span>
+                      <p className="text-white font-black text-lg leading-tight">{bestTier.name}</p>
+                    </div>
+                    <p className="text-white/55 text-xs mb-0.5">{formatSavedDate(best.savedAt)} · {periodLabel(best.period)} 랭킹</p>
+                    <p className="text-white/40 text-[11px]">&quot;{getPercentile(best.rank)} 기록 보유 중!&quot;</p>
+                  </div>
+                  <div className="text-center shrink-0">
+                    <p className="text-white/40 text-[9px] font-black mb-0.5 uppercase tracking-wider">BEST</p>
+                    <p className="text-white font-black text-2xl leading-none">#{best.rank}</p>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
-        </div>
 
-        {/* 빈 상태 */}
-        {cards.length === 0 && (
-          <div className="flex flex-col items-center rounded-[20px] border-2 border-dashed border-slate-200 bg-slate-50/80 px-6 py-12 text-center">
-            <p className="mb-3 text-[40px] leading-none">🏆</p>
-            <p className="text-[15px] font-black text-slate-700">아직 저장된 카드가 없어요</p>
-            <p className="mt-1.5 text-[13px] font-medium text-slate-400">
-              랭킹 TOP 10에 들면 카드 에디터에서 저장할 수 있어요.
-            </p>
-            <button
-              type="button"
-              onClick={() => navigate('/ranking')}
-              className="mt-5 inline-flex items-center justify-center whitespace-nowrap rounded-xl bg-[#22282E] px-6 py-2.5 text-[13px] font-black text-white transition hover:brightness-110"
-            >
-              랭킹 확인하러 가기 →
-            </button>
-          </div>
-        )}
+          {/* ── 저장된 카드 섹션 ── */}
+          <div className="rounded-2xl overflow-hidden border border-pink-100/50 bg-white/90 shadow-[0_4px_24px_-10px_rgba(244,114,182,0.18)] backdrop-blur-sm">
+            <div className="h-0.5 bg-gradient-to-r from-fuchsia-400 via-violet-400 to-cyan-400" />
+            <div className="p-4">
 
-        {/* 2컬럼 그리드 */}
-        {pagedCards.length > 0 && (
-          <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 12,
-          }}>
-            {pagedCards.map((card, i) => (
-              <div key={card.id} style={{ animation: `card-in 0.3s ${i * 0.05}s ease both` }}>
-                <CardThumbnail card={card} onClick={() => setSelected(card)} />
-              </div>
-            ))}
-          </div>
-        )}
+              {/* 섹션 헤더 */}
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2.5">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-fuchsia-500 to-violet-600 shadow-sm">
+                    <SortDesc size={13} className="text-white" />
+                  </span>
+                  <div>
+                    <p className="text-sm font-black bg-gradient-to-r from-fuchsia-700 to-violet-700 bg-clip-text text-transparent leading-none">
+                      저장된 랭킹 카드
+                    </p>
+                    <p className="text-[11px] text-slate-400 font-semibold mt-0.5">총 {cards.length}장</p>
+                  </div>
+                </div>
 
-        {/* 페이지네이션 (카드 10개 초과 시) */}
-        {totalGalleryPages > 1 && (
-          <div className="flex items-center justify-center gap-1.5 mt-5 flex-wrap">
-            <button
-              onClick={() => { setGalleryPage(p => p - 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
-              disabled={galleryPage === 0}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold border border-fuchsia-200 bg-white text-fuchsia-700 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-fuchsia-50 transition-colors"
-            >
-              ← 이전
-            </button>
-            {Array.from({ length: totalGalleryPages }, (_, i) => i).map((p) => (
-              <button
-                key={p}
-                onClick={() => { setGalleryPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
-                className={cn(
-                  'w-8 h-8 rounded-xl text-xs font-black border transition-colors',
-                  p === galleryPage
-                    ? 'bg-gradient-to-r from-fuchsia-200 via-violet-200 to-pink-200 border-fuchsia-300 text-fuchsia-900 shadow-sm'
-                    : 'border-fuchsia-100 bg-white text-gray-600 hover:bg-fuchsia-50'
+                {/* 정렬 버튼 */}
+                {cards.length > 1 && (
+                  <div className="flex gap-1.5">
+                    {[{ id: 'date', label: '최신순' }, { id: 'tier', label: '티어순' }].map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => { setSortBy(s.id); setGalleryPage(0) }}
+                        className={cn(
+                          'px-3 py-1.5 rounded-xl text-[11px] font-black transition-all',
+                          sortBy === s.id
+                            ? 'bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white shadow-sm shadow-fuchsia-300/30'
+                            : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                        )}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
                 )}
-              >
-                {p + 1}
-              </button>
-            ))}
-            <button
-              onClick={() => { setGalleryPage(p => p + 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
-              disabled={galleryPage >= totalGalleryPages - 1}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold border border-fuchsia-200 bg-white text-fuchsia-700 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-fuchsia-50 transition-colors"
-            >
-              다음 →
-            </button>
-          </div>
-        )}
+              </div>
 
-        {/* 활용 팁 */}
-        {cards.length > 0 && (
-          <div style={{
-            marginTop:20, padding:'14px 16px',
-            background:'linear-gradient(135deg,rgba(139,92,246,0.08),rgba(236,72,153,0.08))',
-            borderRadius:16, border:'1px solid rgba(139,92,246,0.15)',
-          }}>
-            <p style={{ color:'#7c3aed', fontWeight:900, fontSize:12, margin:'0 0 6px' }}>
-              <Sparkles size={12} style={{ display:'inline',verticalAlign:'middle',marginRight:4 }} />
-              랭킹 카드를 활용해보세요!
-            </p>
-            <p style={{ color:'#6b7280', fontSize:11, margin:0, lineHeight:1.6 }}>
-              카드를 클릭해 다시 공유하거나 고화질로 저장할 수 있어요.
-              <br />
-              인스타그램 스토리에 공유하면 친구들의 투표를 유도할 수 있어요!
-            </p>
+              {/* 빈 상태 */}
+              {cards.length === 0 && (
+                <div className="flex flex-col items-center rounded-2xl border-2 border-dashed border-fuchsia-200/50 bg-fuchsia-50/30 px-6 py-12 text-center">
+                  <p className="mb-3 text-5xl leading-none">🏆</p>
+                  <p className="text-base font-black text-slate-700">아직 저장된 카드가 없어요</p>
+                  <p className="mt-1.5 text-sm font-medium text-slate-400 leading-relaxed">
+                    랭킹 TOP 10에 들면 카드 에디터에서 저장할 수 있어요.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/ranking')}
+                    className="mt-5 inline-flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-fuchsia-600 to-violet-600 px-6 py-2.5 text-sm font-black text-white shadow-md shadow-fuchsia-300/35 hover:brightness-105 hover:scale-[1.02] transition-all"
+                  >
+                    <Trophy size={14} />
+                    랭킹 확인하러 가기
+                  </button>
+                </div>
+              )}
+
+              {/* 2컬럼 그리드 */}
+              {pagedCards.length > 0 && (
+                <div className="grid grid-cols-2 gap-3">
+                  {pagedCards.map((card, i) => (
+                    <div key={card.id} style={{ animation: `card-in 0.3s ${i * 0.05}s ease both` }}>
+                      <CardThumbnail card={card} onClick={() => setSelected(card)} />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 페이지네이션 */}
+              {totalGalleryPages > 1 && (
+                <div className="flex items-center justify-center gap-1.5 mt-5 flex-wrap">
+                  <button
+                    onClick={() => { setGalleryPage(p => p - 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+                    disabled={galleryPage === 0}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-fuchsia-50 to-violet-50 border border-fuchsia-200/60 text-fuchsia-700 disabled:opacity-30 disabled:cursor-not-allowed hover:from-fuchsia-100 hover:to-violet-100 transition-all shadow-sm"
+                  >
+                    ← 이전
+                  </button>
+                  {Array.from({ length: totalGalleryPages }, (_, i) => i).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => { setGalleryPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+                      className={cn(
+                        'w-8 h-8 rounded-xl text-xs font-black border transition-all',
+                        p === galleryPage
+                          ? 'bg-gradient-to-r from-fuchsia-600 to-violet-600 border-fuchsia-400 text-white shadow-md shadow-fuchsia-300/30'
+                          : 'border-fuchsia-100 bg-white text-slate-500 hover:bg-fuchsia-50'
+                      )}
+                    >
+                      {p + 1}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => { setGalleryPage(p => p + 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+                    disabled={galleryPage >= totalGalleryPages - 1}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-fuchsia-50 to-violet-50 border border-fuchsia-200/60 text-fuchsia-700 disabled:opacity-30 disabled:cursor-not-allowed hover:from-fuchsia-100 hover:to-violet-100 transition-all shadow-sm"
+                  >
+                    다음 →
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-        )}
+
+          {/* 활용 팁 */}
+          {cards.length > 0 && (
+            <div className="rounded-2xl overflow-hidden border border-violet-100/60 bg-white/80 shadow-sm">
+              <div className="h-0.5 bg-gradient-to-r from-violet-400 via-fuchsia-400 to-pink-400" />
+              <div className="px-4 py-3.5 flex items-start gap-3">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 shadow-sm mt-0.5">
+                  <Sparkles size={13} className="text-white" />
+                </span>
+                <div>
+                  <p className="text-sm font-black bg-gradient-to-r from-violet-700 to-fuchsia-700 bg-clip-text text-transparent mb-1">
+                    랭킹 카드를 활용해보세요!
+                  </p>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    카드를 클릭해 다시 공유하거나 고화질로 저장할 수 있어요.<br />
+                    인스타그램 스토리에 공유하면 친구들의 투표를 유도할 수 있어요!
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
       </div>
 
       {/* 상세 모달 */}
@@ -555,7 +585,6 @@ export function RankingGalleryPage() {
           onDelete={(id) => { handleDelete(id); setSelected(null) }}
         />
       )}
-      </div>
     </div>
   )
 }

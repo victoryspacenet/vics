@@ -9,6 +9,8 @@ import { FandomMilestoneModal } from './FandomMilestoneModal'
 import { FandomDiamondLegendModal } from './FandomDiamondLegendModal'
 
 const SKIP_PREFIXES = ['/login', '/signup', '/admin', '/goodbye', '/dev']
+/** 라우트 전환마다 clap stats·마일스톤 DB 조회하지 않도록 */
+const MILESTONE_CHECK_TTL_MS = 90_000
 
 function shouldSkipPath(pathname) {
   return SKIP_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))
@@ -16,6 +18,9 @@ function shouldSkipPath(pathname) {
 
 export function FandomMilestoneGate() {
   const location = useLocation()
+  const pathnameRef = useRef(location.pathname)
+  pathnameRef.current = location.pathname
+
   const user = useAuthStore((s) => s.user)
   const profile = useAuthStore((s) => s.profile) // fandom_points 갱신 시 마일스톤 재평가
   const fetchProfile = useAuthStore((s) => s.fetchProfile)
@@ -23,14 +28,28 @@ export function FandomMilestoneGate() {
 
   const [milestone, setMilestone] = useState(null)
   const busyRef = useRef(false)
+  const lastCheckAtRef = useRef(0)
+  const lastCheckFpRef = useRef('')
+  const profileFpRef = useRef('')
+  profileFpRef.current = `${profile?.fandom_points ?? ''}:${profile?.updated_at ?? ''}`
 
   const check = useCallback(async () => {
-    if (!user?.id || shouldSkipPath(location.pathname)) {
+    if (!user?.id || shouldSkipPath(pathnameRef.current)) {
       setMilestone(null)
+      return
+    }
+    const fp = profileFpRef.current
+    const now = Date.now()
+    if (
+      now - lastCheckAtRef.current < MILESTONE_CHECK_TTL_MS &&
+      lastCheckFpRef.current === fp
+    ) {
       return
     }
     if (busyRef.current) return
     busyRef.current = true
+    lastCheckAtRef.current = now
+    lastCheckFpRef.current = fp
     try {
       const { total: rawTotal, error } = await fetchVcardClapStats(user.id)
       if (error) return
@@ -53,7 +72,7 @@ export function FandomMilestoneGate() {
     } finally {
       busyRef.current = false
     }
-  }, [user?.id, location.pathname])
+  }, [user?.id])
 
   useEffect(() => {
     const t = window.setTimeout(() => void check(), 400)
@@ -70,7 +89,7 @@ export function FandomMilestoneGate() {
   const onClaimed = useCallback(async () => {
     if (user?.id) {
       sessionStorage.removeItem(`vics:fandom-snooze-${user.id}-${milestone}`)
-      await fetchProfile(user.id)
+      await fetchProfile(user.id, { force: true })
     }
     showToast('달성을 기록했어요! 내 팬덤에서 배지와 F-Point를 확인해 보세요 ✨', 'success')
     setMilestone(null)

@@ -178,7 +178,7 @@ export function RankingCelebrationModal({
         const isFreshPay = !d.already_claimed && amt > 0
         if (isFreshPay) {
           showToast(`랭킹 축하 보너스 ${amt.toLocaleString('ko-KR')}P가 지급됐어요!`, 'success')
-          await useAuthStore.getState().fetchProfile(userId)
+          await useAuthStore.getState().fetchProfile(userId, { force: true })
         }
       } finally {
         if (seq === claimSeqRef.current) setBonusLoading(false)

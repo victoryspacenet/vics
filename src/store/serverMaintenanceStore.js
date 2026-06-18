@@ -7,7 +7,7 @@ import {
 } from '../lib/serverMaintenance'
 
 /** 평상시: 설정만 갱신 (헬스 프로브 없음) */
-const POLL_MS_IDLE = 120_000
+const POLL_MS_IDLE = 180_000
 /** 점검·다운 의심·긴급 점검 */
 const POLL_MS_ACTIVE = 45_000
 const POLL_MS_EMERGENCY = 12_000
@@ -17,6 +17,9 @@ let pollMsActive = POLL_MS_IDLE
 let onVisible = null
 let onOnline = null
 let onSettingsUpdated = null
+let maintenanceRefreshPromise = null
+let lastMaintenanceRefreshAt = 0
+const MIN_MAINTENANCE_REFRESH_MS = 2_500
 
 function readNavigatorOnline() {
   if (typeof navigator === 'undefined') return true
@@ -39,47 +42,63 @@ export const useServerMaintenanceStore = create((set, get) => ({
 
   setForceDemo: (on) => set({ forceDemo: Boolean(on) }),
 
-  refresh: async ({ probe = true } = {}) => {
-    set({ checking: true })
-    try {
-      const wasReady = get().ready
-      const prevReachable = get().serverReachable
-      const nextConfig = await fetchServerMaintenanceConfig()
-      let serverReachable = prevReachable
-      const runProbe =
-        probe &&
-        readNavigatorOnline() &&
-        (!wasReady || shouldProbeServerHealth(nextConfig, prevReachable))
-      if (runProbe) {
-        serverReachable = await probeServerHealth({
-          light: !nextConfig.enabled,
-        })
-      } else if (!probe) {
-        serverReachable = prevReachable
-      } else {
-        serverReachable = true
-      }
-      set({ config: nextConfig, serverReachable, ready: true, checking: false })
-      if (pollTimer != null && onVisible) {
-        const ms =
-          nextConfig.mode === 'emergency'
-            ? POLL_MS_EMERGENCY
-            : nextConfig.enabled || !serverReachable
-              ? POLL_MS_ACTIVE
-              : POLL_MS_IDLE
-        if (ms !== pollMsActive) {
-          pollMsActive = ms
-          window.clearInterval(pollTimer)
-          pollTimer = window.setInterval(onVisible, ms)
+  refresh: async ({ probe = true, force = false } = {}) => {
+    const now = Date.now()
+    if (!force && maintenanceRefreshPromise) return maintenanceRefreshPromise
+    if (!force && now - lastMaintenanceRefreshAt < MIN_MAINTENANCE_REFRESH_MS) {
+      return
+    }
+
+    maintenanceRefreshPromise = (async () => {
+      set({ checking: true })
+      try {
+        const wasReady = get().ready
+        const prevReachable = get().serverReachable
+        const nextConfig = await fetchServerMaintenanceConfig()
+        let serverReachable = prevReachable
+        const runProbe =
+          probe &&
+          readNavigatorOnline() &&
+          (!wasReady || shouldProbeServerHealth(nextConfig, prevReachable))
+        if (runProbe) {
+          serverReachable = await probeServerHealth({
+            light: !nextConfig.enabled,
+          })
+        } else if (!probe) {
+          serverReachable = prevReachable
+        } else {
+          serverReachable = true
         }
+        set({ config: nextConfig, serverReachable, ready: true, checking: false })
+        lastMaintenanceRefreshAt = Date.now()
+        if (pollTimer != null && onVisible) {
+          const ms =
+            nextConfig.mode === 'emergency'
+              ? POLL_MS_EMERGENCY
+              : nextConfig.enabled || !serverReachable
+                ? POLL_MS_ACTIVE
+                : POLL_MS_IDLE
+          if (ms !== pollMsActive) {
+            pollMsActive = ms
+            window.clearInterval(pollTimer)
+            pollTimer = window.setInterval(onVisible, ms)
+          }
+        }
+      } catch {
+        set((s) => ({ ready: true, checking: false, serverReachable: s.serverReachable }))
+        lastMaintenanceRefreshAt = Date.now()
       }
-    } catch {
-      set((s) => ({ ready: true, checking: false, serverReachable: s.serverReachable }))
+    })()
+
+    try {
+      await maintenanceRefreshPromise
+    } finally {
+      maintenanceRefreshPromise = null
     }
   },
 
   startPolling: () => {
-    if (pollTimer != null) return
+    get().stopPolling()
     const tick = () => {
       if (document.visibilityState !== 'visible') return
       const { config, serverReachable } = get()

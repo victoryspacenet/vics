@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Upload, X, Image, Video, Type, AlertCircle, AlertTriangle, CheckCircle, Hash, Zap, Share2, Link2 } from 'lucide-react'
+import { Upload, X, Image, Video, Type, AlertCircle, AlertTriangle, CheckCircle, Hash, Zap, Share2, Link2, Camera } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
@@ -33,7 +33,9 @@ import {
   validateMatchupVideoUpload,
 } from '../../lib/uploadMediaValidation'
 import { captureVideoPosterJpegFile } from '../../lib/videoPoster'
-import { uploadMatchupMediaValidated } from '../../lib/matchupMediaBucketUpload'
+import { cameraPhotoToFile } from '../../lib/cameraPhotoToFile'
+import { uploadMatchupMediaValidated, warmupMatchupMediaUploadSession } from '../../lib/matchupMediaBucketUpload'
+import { SmartphoneCameraCapture } from '../mobile/SmartphoneCameraCapture'
 import { checkMatchupChallengeSimilarity } from '../../lib/matchupChallengeSimilarityApi'
 import {
   assertMatchupSideTypeEquals,
@@ -359,6 +361,9 @@ export function ChallengeDrawer() {
 
     setUploading(true)
     try {
+      setUploadStep('로그인 확인 중...')
+      await warmupMatchupMediaUploadSession(supabase)
+
       let rightUrl = null
       let rightThumbnail = null
       if (rightContent?.file) {
@@ -392,6 +397,25 @@ export function ChallengeDrawer() {
 
       setUploadStep(isEditRun ? '수정 저장 중...' : '매치업 완성 중...')
 
+      // 업로드 후 세션 재확인 (영상 등 긴 업로드 후 토큰 만료 대비)
+      await warmupMatchupMediaUploadSession(supabase)
+
+      if (!isEditRun) {
+        // 업로드 중 다른 사용자가 먼저 도전했는지 확인
+        const { data: freshRow } = await supabase
+          .from('matchups')
+          .select('right_type, user_id')
+          .eq('id', challengeMatchup.id)
+          .maybeSingle()
+
+        if (freshRow?.user_id === user.id) {
+          throw new Error('본인이 만든 매치업에는 도전할 수 없어요.')
+        }
+        if (freshRow?.right_type != null) {
+          throw new Error('이미 다른 도전자가 참여한 매치업이에요. 다른 매치업에 도전해보세요!')
+        }
+      }
+
       const basePayload = {
         right_description: rightDescription.trim() || null,
         right_type: rightContent.type,
@@ -401,22 +425,62 @@ export function ChallengeDrawer() {
         updated_at: new Date().toISOString(),
       }
 
+      // 도전 완료 시 투표 기간을 현재 시각 기준으로 리셋
+      // (A가 매치업을 오래전에 만들었을 경우 expires_at이 과거일 수 있음)
+      let freshExpiresAt = null
+      if (!isEditRun) {
+        const origCreated = challengeMatchup?.created_at
+        const origExpires = challengeMatchup?.expires_at
+        if (origCreated && origExpires) {
+          const durationMs = new Date(origExpires) - new Date(origCreated)
+          // 최소 24h, 최대 48h 범위로 클램프
+          const clampedMs = Math.max(24 * 3600000, Math.min(48 * 3600000, durationMs))
+          freshExpiresAt = new Date(Date.now() + clampedMs).toISOString()
+        } else {
+          freshExpiresAt = new Date(Date.now() + 24 * 3600000).toISOString()
+        }
+      }
+
       const insertChallengerFields = isEditRun
         ? {}
         : {
             right_label: profile?.nickname || 'B',
             right_user_id: user.id,
             is_complete: true,
+            ...(freshExpiresAt ? { expires_at: freshExpiresAt } : {}),
           }
 
-      const { error } = await supabase
+      let updateResult = await supabase
         .from('matchups')
         .update({ ...basePayload, ...insertChallengerFields })
         .eq('id', challengeMatchup.id)
+        .select('id')
+
+      // right_description 컬럼이 없는 DB(마이그레이션 미적용)를 위한 폴백
+      if (updateResult.error && /column.*right_description/i.test(updateResult.error.message)) {
+        const { right_description: _rd, ...payloadWithoutDesc } = basePayload
+        updateResult = await supabase
+          .from('matchups')
+          .update({ ...payloadWithoutDesc, ...insertChallengerFields })
+          .eq('id', challengeMatchup.id)
+          .select('id')
+      }
+
+      const { data: updatedRows, error } = updateResult
 
       if (error) {
-        if (error.code === '42501') throw new Error('권한이 없어요. 작성자 본인이나 도전자만 참여 가능해요.')
-        throw new Error(error.message)
+        if (error.code === '42501') {
+          throw new Error('권한이 없어요. 로그인 상태를 확인하거나 페이지를 새로고침해 주세요.')
+        }
+        throw new Error(error.message || '저장 중 오류가 발생했어요.')
+      }
+
+      // RLS가 조용히 차단(0행 업데이트)되는 경우 감지
+      if (!updatedRows || updatedRows.length === 0) {
+        if (isEditRun) {
+          throw new Error('수정 권한이 없거나 이미 변경된 매치업이에요.')
+        }
+        throw new Error('도전 등록에 실패했어요. 이미 다른 사람이 먼저 도전했을 수 있어요. 페이지를 새로고침해 주세요.')
       }
 
       clearChallengeDraft(challengeMatchup.id, user.id)
@@ -477,10 +541,10 @@ export function ChallengeDrawer() {
               <SectionLabel emoji="📌" text="경쟁 제목 · 도전 설명" hint="제목은 A 고정 · B는 설명만" />
 
               <div className="flex flex-col items-center gap-2 px-2 text-center">
-                <p className="text-base sm:text-lg font-black text-[#22282E] leading-snug">
+                <p className="text-base sm:text-lg font-black bg-gradient-to-r from-emerald-700 via-teal-700 to-cyan-600 bg-clip-text text-transparent leading-snug">
                   {matchup.title || '—'}
                 </p>
-                <p className="text-[10px] font-semibold text-gray-400">
+                <p className="text-[10px] font-semibold text-teal-500/70">
                   User A · {matchup.profiles?.nickname || '작성자'}가 정한 경쟁 제목
                 </p>
                 <VsBadge size="md" variant="inline" />
@@ -489,12 +553,12 @@ export function ChallengeDrawer() {
               <div className="grid grid-cols-[1fr_44px_1fr] gap-2 items-stretch">
                 <div className="space-y-2 min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] font-black bg-gray-200 text-gray-600 px-2 py-0.5 rounded-md shrink-0">
+                    <span className="text-[11px] font-black bg-gradient-to-r from-amber-100 to-orange-100 text-amber-700 border border-amber-200/70 px-2 py-0.5 rounded-md shrink-0">
                       User A
                     </span>
                     <Avatar src={matchup.profiles?.avatar_url} alt={matchup.profiles?.nickname} size="xs" />
                   </div>
-                  <p className="text-[10px] font-semibold text-gray-500">경쟁 설명</p>
+                  <p className="text-[10px] font-semibold text-amber-600/70">경쟁 설명</p>
                   <div
                     className={cn(
                       MZ_READONLY,
@@ -511,10 +575,10 @@ export function ChallengeDrawer() {
                 </div>
 
                 <div className="space-y-2 min-w-0">
-                  <span className="text-[11px] font-black bg-[#22282E] text-white px-2 py-0.5 rounded-md inline-block">
-                    MY SHOT (B)
+                  <span className="text-[11px] font-black bg-gradient-to-r from-emerald-500 to-teal-500 text-white px-2 py-0.5 rounded-md inline-block shadow-[0_2px_8px_-2px_rgba(20,184,166,0.5)]">
+                    MY SHOT ⚔️
                   </span>
-                  <p className="text-[10px] font-semibold text-gray-500">도전 설명 (선택)</p>
+                  <p className="text-[10px] font-semibold text-emerald-600/70">도전 설명 (선택)</p>
                   <textarea
                     value={rightDescription}
                     onChange={(e) => setRightDescription(e.target.value)}
@@ -530,20 +594,20 @@ export function ChallengeDrawer() {
 
             {/* 임시 저장 복원 안내 */}
             {showRestorePrompt && (
-              <div className="flex items-center justify-between gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl">
-                <p className="text-sm font-semibold text-amber-800">임시 저장된 내용이 있어요</p>
+              <div className="flex items-center justify-between gap-3 px-4 py-3 bg-gradient-to-r from-amber-50 to-yellow-50/70 border border-amber-200/80 rounded-xl shadow-sm">
+                <p className="text-sm font-bold text-amber-800">💾 임시 저장된 내용이 있어요</p>
                 <div className="flex gap-2 shrink-0">
                   <button
                     type="button"
                     onClick={handleDiscardDraft}
-                    className="px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 rounded-lg transition-colors"
+                    className="px-3 py-1.5 text-xs font-bold text-amber-600 hover:bg-amber-100 rounded-lg transition-colors border border-amber-200/70"
                   >
                     버리기
                   </button>
                   <button
                     type="button"
                     onClick={handleRestoreDraft}
-                    className="px-3 py-1.5 text-xs font-bold bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors"
+                    className="px-3 py-1.5 text-xs font-black bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg shadow-sm hover:from-amber-600 hover:to-orange-600 transition-all"
                   >
                     복원하기
                   </button>
@@ -559,8 +623,8 @@ export function ChallengeDrawer() {
                 {/* User A 콘텐츠 (읽기 전용) */}
                 <div className="space-y-1.5">
                   <div className="flex items-center">
-                    <span className="text-[11px] font-black bg-gray-200 text-gray-600 px-2 py-0.5 rounded-md">
-                      User A (고정)
+                    <span className="text-[11px] font-black bg-gradient-to-r from-amber-100 to-orange-100 text-amber-700 border border-amber-200/70 px-2 py-0.5 rounded-md">
+                      🔒 A (고정)
                     </span>
                   </div>
                   <UserAPreview matchup={matchup} />
@@ -578,8 +642,8 @@ export function ChallengeDrawer() {
                 {/* User B 업로드 */}
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] font-black bg-[#22282E] text-white px-2 py-0.5 rounded-md">
-                      MY SHOT
+                    <span className="text-[11px] font-black bg-gradient-to-r from-emerald-500 to-teal-500 text-white px-2 py-0.5 rounded-md shadow-[0_2px_8px_-2px_rgba(20,184,166,0.5)]">
+                      ⚔️ MY SHOT
                     </span>
                   </div>
                   <UserBUploadBox
@@ -598,17 +662,17 @@ export function ChallengeDrawer() {
               </div>
 
               {isMatchupSideType(requiredSideType) && (
-                <p className="text-[11px] text-center text-violet-700 font-semibold">
+                <p className="text-[11px] text-center text-teal-700 font-bold bg-teal-50/60 border border-teal-200/50 rounded-lg px-3 py-1.5">
                   A측과 동일하게{' '}
-                  <span className="text-[#22282E]">{matchupSideTypeLabel(requiredSideType)}</span>
+                  <span className="text-emerald-700 font-black">{matchupSideTypeLabel(requiredSideType)}</span>
                   형식으로만 도전할 수 있어요
                 </p>
               )}
 
               {/* 경고 안내 */}
-              <div className="flex items-start gap-2 px-3 py-2.5 bg-red-50 border border-red-100 rounded-xl">
+              <div className="flex items-start gap-2 px-3 py-2.5 bg-gradient-to-r from-rose-50/80 to-orange-50/60 border border-rose-200/60 rounded-xl shadow-sm">
                 <span className="text-sm shrink-0 mt-0.5">📢</span>
-                <p className="text-[11px] text-red-700 leading-relaxed">
+                <p className="text-[11px] text-rose-700 leading-relaxed">
                   {challengeMatchupEdit ? (
                     <>
                       <span className="font-bold">저장</span>하면 B 측 도전 설명·콘텐츠만 갱신돼요. (경쟁 제목·A 쪽은 수정할 수
@@ -632,7 +696,7 @@ export function ChallengeDrawer() {
                   {matchup.tags.map((tag) => (
                     <span
                       key={tag}
-                      className="flex items-center gap-1 text-xs font-semibold bg-gray-100 text-gray-500 px-2.5 py-1 rounded-full"
+                      className="flex items-center gap-1 text-xs font-bold bg-gradient-to-r from-teal-50 to-cyan-50 text-teal-700 border border-teal-200/60 px-2.5 py-1 rounded-full"
                     >
                       <Hash size={10} />
                       {tag}
@@ -644,9 +708,9 @@ export function ChallengeDrawer() {
 
             {/* ── 업로드 진행 상태 ── */}
             {uploading && uploadStep && (
-              <div className="flex items-center gap-3 px-4 py-3 bg-gray-50 rounded-xl">
-                <span className="w-4 h-4 border-2 border-gray-300 border-t-[#22282E] rounded-full animate-spin shrink-0" />
-                <span className="text-sm text-gray-600">{uploadStep}</span>
+              <div className="flex items-center gap-3 px-4 py-3.5 bg-gradient-to-r from-emerald-50/90 via-teal-50/70 to-cyan-50/60 border border-emerald-200/60 rounded-xl shadow-sm">
+                <span className="w-4 h-4 border-2 border-emerald-200 border-t-emerald-600 rounded-full animate-spin shrink-0" />
+                <span className="text-sm font-bold text-emerald-700/90">{uploadStep}</span>
               </div>
             )}
 
@@ -656,7 +720,7 @@ export function ChallengeDrawer() {
                 type="button"
                 onClick={handleClose}
                 disabled={uploading}
-                className="w-full py-4 rounded-2xl text-sm font-bold text-violet-800 bg-violet-100/60 hover:bg-violet-200/50 transition-colors disabled:opacity-50"
+                className="w-full py-4 rounded-2xl text-sm font-bold text-teal-800 bg-gradient-to-r from-teal-100/70 to-emerald-100/60 border border-teal-200/50 hover:from-teal-200/80 hover:to-emerald-200/70 transition-colors disabled:opacity-50"
               >
                 닫기
               </button>
@@ -668,7 +732,7 @@ export function ChallengeDrawer() {
                 className={cn(
                   'w-full py-4 rounded-2xl text-sm font-black tracking-wide transition-all duration-300',
                   canSubmitChallenge && !uploading
-                    ? 'bg-[#22282E] text-white shadow-[0_0_24px_rgba(34,40,46,0.45)] hover:shadow-[0_0_40px_rgba(34,40,46,0.65)] hover:scale-[1.01] active:scale-[0.99]'
+                    ? 'bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-white shadow-[0_4px_22px_-4px_rgba(20,184,166,0.6)] hover:shadow-[0_6px_32px_-4px_rgba(20,184,166,0.75)] hover:scale-[1.02] active:scale-[0.99] hover:from-emerald-400 hover:via-teal-400 hover:to-cyan-400'
                     : 'bg-gray-100 text-gray-400 cursor-not-allowed',
                 )}
               >
@@ -737,7 +801,7 @@ export function ChallengeDrawer() {
               type="button"
               onClick={handleConfirmEditSubmit}
               disabled={uploading}
-              className="flex-1 py-3 rounded-2xl text-sm font-black tracking-wide bg-[#22282E] text-white shadow-[0_0_20px_rgba(34,40,46,0.35)] hover:shadow-[0_0_28px_rgba(34,40,46,0.5)] hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-40 disabled:hover:scale-100"
+              className="flex-1 py-3 rounded-2xl text-sm font-black tracking-wide bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-white shadow-[0_4px_18px_-4px_rgba(20,184,166,0.5)] hover:shadow-[0_6px_24px_-4px_rgba(20,184,166,0.65)] hover:scale-[1.01] active:scale-[0.99] hover:from-emerald-400 hover:via-teal-400 hover:to-cyan-400 transition-all disabled:opacity-40 disabled:hover:scale-100"
             >
               저장하기
             </button>
@@ -747,28 +811,30 @@ export function ChallengeDrawer() {
 
       {shareModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={handleGoWithoutShare} />
-          <div className="relative bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl z-10 text-center space-y-4">
+          <div className="absolute inset-0 bg-black/55 backdrop-blur-sm" onClick={handleGoWithoutShare} />
+          <div className="relative bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl z-10 text-center space-y-4 overflow-hidden">
+            {/* 상단 그라디언트 바 */}
+            <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-emerald-400 via-teal-500 to-cyan-400 rounded-t-3xl" />
             {/* 이모지 */}
-            <div className="text-5xl">🎉</div>
+            <div className="text-5xl mt-2">🎉</div>
             <div>
-              <h3 className="text-lg font-black text-[#22282E]">경쟁이 시작됐어요!</h3>
+              <h3 className="text-lg font-black bg-gradient-to-r from-emerald-700 via-teal-700 to-cyan-600 bg-clip-text text-transparent">경쟁이 시작됐어요!</h3>
               <p className="text-sm text-gray-500 mt-1.5 leading-relaxed">
-                당신의 경쟁이 시작되었습니다!<br />
+                당신의 도전이 성공적으로 등록됐어요!<br />
                 친구들에게 투표를 부탁해보세요.
               </p>
             </div>
 
             {/* 매치업 제목 미리보기 */}
-            <div className="px-3 py-2 bg-gray-50 rounded-xl">
-              <p className="text-sm font-semibold text-[#22282E] line-clamp-1">"{shareModal.matchupTitle}"</p>
+            <div className="px-3 py-2 bg-gradient-to-r from-emerald-50/80 to-teal-50/60 border border-emerald-100/70 rounded-xl">
+              <p className="text-sm font-bold text-emerald-800 line-clamp-1">⚔️ "{shareModal.matchupTitle}"</p>
             </div>
 
             <div className="space-y-2 pt-1">
               {/* 링크 복사 + 이동 */}
               <button
                 onClick={handleShareAndGo}
-                className="w-full flex items-center justify-center gap-2 py-3.5 bg-[#22282E] text-white rounded-2xl text-sm font-bold hover:bg-[#363d46] transition-colors"
+                className="w-full flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-white rounded-2xl text-sm font-bold shadow-[0_4px_18px_-4px_rgba(20,184,166,0.55)] hover:shadow-[0_6px_24px_-4px_rgba(20,184,166,0.7)] hover:-translate-y-0.5 transition-all"
               >
                 <Link2 size={16} />
                 링크 복사하고 경쟁 보기
@@ -777,7 +843,7 @@ export function ChallengeDrawer() {
               {/* 바로 이동 */}
               <button
                 onClick={handleGoWithoutShare}
-                className="w-full py-3 text-sm text-gray-400 hover:text-[#22282E] transition-colors font-medium"
+                className="w-full py-3 text-sm text-teal-500/70 hover:text-teal-700 transition-colors font-semibold"
               >
                 공유 없이 경쟁 보기
               </button>
@@ -792,10 +858,10 @@ export function ChallengeDrawer() {
 // ── SectionLabel ──────────────────────────────────────────────────
 function SectionLabel({ emoji, text, hint }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-base">{emoji}</span>
-      <span className="text-sm font-bold text-[#22282E]">{text}</span>
-      {hint && <span className="text-xs text-gray-400 ml-auto">{hint}</span>}
+    <div className="flex items-center gap-2.5">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 shadow-[0_3px_12px_-2px_rgba(20,184,166,0.5)] text-sm">{emoji}</span>
+      <span className="text-sm font-black bg-gradient-to-r from-emerald-700 via-teal-700 to-cyan-700 bg-clip-text text-transparent">{text}</span>
+      {hint && <span className="text-xs text-teal-500/70 ml-auto font-semibold">{hint}</span>}
     </div>
   )
 }
@@ -805,24 +871,22 @@ function UserAPreview({ matchup }) {
   const src = matchup.left_thumbnail_url || matchup.left_url
 
   return (
-    <div className="relative aspect-square rounded-xl overflow-hidden bg-gray-100 border border-gray-200">
-      <span className="absolute top-2 left-2 z-10 text-[11px] font-black bg-[#22282E]/80 text-white px-1.5 py-0.5 rounded-md">
+    <div className="relative aspect-square rounded-xl overflow-hidden bg-amber-50/50 border border-amber-200/50">
+      <span className="absolute top-2 left-2 z-10 text-[11px] font-black bg-gradient-to-r from-amber-500 to-orange-500 text-white px-1.5 py-0.5 rounded-md shadow-sm">
         {matchup.left_label || 'A'}
       </span>
       {matchup.left_type === 'image' && src && (
-        <img src={safeMediaUrl(src)} alt="A" className="w-full h-full object-cover" />
+        <img src={safeMediaUrl(src)} alt="A" className="absolute inset-0 w-full h-full object-cover" />
       )}
       {matchup.left_type === 'video' && src && (
-        <img src={safeMediaUrl(src)} alt="A" className="w-full h-full object-cover" />
+        <img src={safeMediaUrl(src)} alt="A" className="absolute inset-0 w-full h-full object-cover" />
       )}
       {matchup.left_type === 'text' && (
-        <div className="w-full h-full flex items-center justify-center p-3 bg-gray-50">
-          <p className="text-xs font-medium text-center text-[#22282E] line-clamp-4">{matchup.left_text}</p>
+        <div className="absolute inset-0 flex items-center justify-center p-3 bg-gradient-to-br from-amber-950/90 via-orange-900/80 to-rose-950/85">
+          <p className="text-xs font-bold text-center text-white/90 line-clamp-4">{matchup.left_text}</p>
         </div>
       )}
-      {/* 잠금 오버레이 */}
-      <div className="absolute inset-0 bg-transparent" />
-      <div className="absolute bottom-2 right-2 z-10 bg-black/50 text-white text-[10px] px-1.5 py-0.5 rounded-md font-semibold">
+      <div className="absolute bottom-2 right-2 z-10 bg-amber-500/80 text-white text-[10px] px-1.5 py-0.5 rounded-md font-bold">
         🔒 고정
       </div>
     </div>
@@ -840,6 +904,7 @@ function UserBUploadBox({ content, onChange, disabled, requiredSideType = null, 
   const [textInput, setTextInput] = useState(() => (typeof initialText === 'string' ? initialText : ''))
   const [sizeError, setSizeError] = useState('')
   const [processingLabel, setProcessingLabel] = useState('')
+  const [showCamera, setShowCamera] = useState(false)
   const mediaBusy = Boolean(processingLabel)
 
   useEffect(() => {
@@ -947,10 +1012,22 @@ function UserBUploadBox({ content, onChange, disabled, requiredSideType = null, 
     { id: 'text',  icon: Type  },
   ]
 
+  const handleCameraCapture = async (photo) => {
+    setSizeError('')
+    try {
+      const file = await cameraPhotoToFile(photo, 'matchup-b.jpg')
+      await validateAndSet(file)
+      setShowCamera(false)
+    } catch (err) {
+      setSizeError(err?.message ? String(err.message) : '카메라 사진을 불러오지 못했어요')
+    }
+  }
+
   const switchType = (t) => {
     if (isMatchupSideType(requiredSideType)) return
     setContentType(t)
     setSizeError('')
+    setShowCamera(false)
     onChange(null)
     setTextInput('')
   }
@@ -967,18 +1044,21 @@ function UserBUploadBox({ content, onChange, disabled, requiredSideType = null, 
               onClick={() => switchType(id)}
               disabled={disabled}
               className={cn(
-                'p-1 rounded transition-colors',
-                contentType === id ? 'bg-[#22282E] text-white' : 'text-gray-300 hover:text-gray-500',
+                'flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold rounded-lg transition-all',
+                contentType === id
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-[0_2px_8px_-2px_rgba(20,184,166,0.5)]'
+                  : 'text-emerald-500/70 hover:text-emerald-800 hover:bg-emerald-50/60 border border-emerald-100/60',
                 disabled && 'opacity-40 cursor-not-allowed',
               )}
             >
-              <Icon size={11} />
+              <Icon size={10} />
+              {id === 'image' ? '이미지' : id === 'video' ? '영상' : '텍스트'}
             </button>
           ))}
         </div>
       ) : (
-        <p className="text-[10px] font-semibold text-gray-500 mb-0.5">
-          {matchupSideTypeLabel(effectiveType)}로 올려주세요
+        <p className="text-[10px] font-bold text-emerald-600/80 mb-0.5">
+          {effectiveType === 'image' ? '🖼️ ' : effectiveType === 'video' ? '🎬 ' : '✏️ '}{matchupSideTypeLabel(effectiveType)}로 올려주세요
         </p>
       )}
 
@@ -994,7 +1074,7 @@ function UserBUploadBox({ content, onChange, disabled, requiredSideType = null, 
           rows={6}
           maxLength={200}
           disabled={disabled}
-          className="w-full px-3 py-3 text-xs bg-gray-50 border border-gray-200 rounded-xl outline-none focus:border-[#22282E] resize-none text-center disabled:opacity-60"
+          className="w-full px-3 py-3 text-xs bg-gradient-to-br from-emerald-50/90 via-teal-50/60 to-cyan-50/40 border border-emerald-200/60 rounded-xl outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-300/30 resize-none text-center text-emerald-900/80 placeholder:text-emerald-500/60 disabled:opacity-60"
         />
       ) : (
         /* 파일 드롭 박스 */
@@ -1020,17 +1100,31 @@ function UserBUploadBox({ content, onChange, disabled, requiredSideType = null, 
             await validateAndSet(file)
           }}
           className={cn(
-            'relative aspect-square rounded-xl border-2 border-dashed transition-all overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-[#22282E]/25',
+            'relative aspect-square rounded-xl border-2 border-dashed transition-all overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/30',
             disabled || mediaBusy ? 'opacity-60 cursor-not-allowed' :
-            dragging ? 'border-[#22282E] bg-gray-100 scale-[1.02]' :
-            content ? 'border-[#22282E] cursor-default' :
-            'border-gray-200 bg-gray-50 hover:border-[#22282E]/50 hover:bg-gray-100 cursor-default active:scale-[0.98]'
+            dragging ? 'border-emerald-500 bg-emerald-50/80 scale-[1.02]' :
+            content ? 'border-emerald-400 cursor-default' :
+            'border-emerald-200/60 bg-gradient-to-br from-emerald-50/50 via-teal-50/30 to-cyan-50/40 hover:border-emerald-300 hover:from-emerald-50/80 hover:via-teal-50/60 cursor-default active:scale-[0.98]'
           )}
         >
           {content ? (
             <>
-              {content.type === 'image' && <img src={safeMediaUrl(content.preview)} alt="" className="w-full h-full object-cover" />}
-              {content.type === 'video' && <video src={safeMediaUrl(content.preview)} className="w-full h-full object-cover" muted />}
+              {content.type === 'image' && (
+                <img
+                  src={safeMediaUrl(content.preview)}
+                  alt=""
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+              )}
+              {content.type === 'video' && (
+                <video
+                  src={safeMediaUrl(content.preview)}
+                  className="absolute inset-0 w-full h-full object-cover"
+                  muted
+                  playsInline
+                  preload="metadata"
+                />
+              )}
               {!disabled && (
                 <button
                   type="button"
@@ -1048,26 +1142,24 @@ function UserBUploadBox({ content, onChange, disabled, requiredSideType = null, 
               </div>
             </>
           ) : (
-            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-3 pb-10 text-gray-400">
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-3 pb-10">
               {mediaBusy ? (
                 <>
-                  <span className="w-5 h-5 border-2 border-gray-300 border-t-[#22282E] rounded-full animate-spin" />
-                  <p className="text-[10px] font-medium text-gray-500">{processingLabel}</p>
+                  <span className="w-5 h-5 border-2 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" />
+                  <p className="text-[10px] font-bold text-emerald-600">{processingLabel}</p>
                 </>
               ) : (
                 <>
-                  <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
-                    <Upload size={18} className="text-gray-400" />
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-[0_4px_14px_-3px_rgba(20,184,166,0.5)]">
+                    <Upload size={18} className="text-white" strokeWidth={2.5} />
                   </div>
                   <div className="text-center">
-                    <p className="text-xs font-semibold text-gray-500">드롭 또는 붙여넣기</p>
-                    <p className="text-[10px] mt-0.5 text-gray-400 leading-snug">
-                      {effectiveType === 'video'
-                        ? '영상을 복사한 뒤 박스를 눌러 포커스 후 '
-                        : '이미지를 복사한 뒤 박스를 눌러 포커스 후 '}
-                      <span className="font-bold text-gray-500">Ctrl+V</span>
+                    <p className="text-xs font-bold text-emerald-700/80">드롭 또는 붙여넣기</p>
+                    <p className="text-[10px] mt-0.5 text-emerald-600/55 leading-snug">
+                      {effectiveType === 'video' ? '영상 복사 후 박스 클릭 → ' : '이미지 복사 후 박스 클릭 → '}
+                      <span className="font-black text-emerald-700/80">Ctrl+V</span>
                     </p>
-                    <p className="text-[10px] mt-0.5 text-gray-300">
+                    <p className="text-[10px] mt-0.5 text-emerald-500/45">
                       {effectiveType === 'image' ? `JPG, PNG (${MAX_IMAGE_MB}MB)` : `MP4, MOV (${MAX_VIDEO_MB}MB, 15초)`}
                     </p>
                   </div>
@@ -1083,7 +1175,7 @@ function UserBUploadBox({ content, onChange, disabled, requiredSideType = null, 
                 e.stopPropagation()
                 fileRef.current?.click()
               }}
-              className="pointer-events-auto absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-[11px] font-bold text-gray-700 shadow-sm transition hover:bg-gray-50"
+              className="pointer-events-auto absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-full border border-emerald-300/70 bg-gradient-to-r from-emerald-50 to-teal-50 px-4 py-1.5 text-[11px] font-bold text-emerald-700 shadow-sm transition hover:from-emerald-100 hover:to-teal-100 hover:shadow-[0_2px_10px_-3px_rgba(20,184,166,0.4)]"
             >
               파일에서 선택
             </button>
@@ -1094,6 +1186,44 @@ function UserBUploadBox({ content, onChange, disabled, requiredSideType = null, 
       {sizeError && (
         <div className="flex items-center gap-1 text-[11px] text-red-500">
           <AlertCircle size={11} />{sizeError}
+        </div>
+      )}
+
+      {/* 카메라 촬영 — 이미지 타입이고 콘텐츠 없을 때만 표시 */}
+      {effectiveType === 'image' && !content && (
+        <div className="space-y-2">
+          {!showCamera ? (
+            <button
+              type="button"
+              disabled={disabled || mediaBusy}
+              onClick={() => setShowCamera(true)}
+              className={cn(
+                'flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200/70 bg-gradient-to-r from-emerald-50/95 to-teal-50/80 py-2.5 text-[11px] font-bold text-emerald-900 transition-colors',
+                'hover:border-emerald-300 hover:from-emerald-50 hover:to-teal-50',
+                (disabled || mediaBusy) && 'cursor-not-allowed opacity-45'
+              )}
+            >
+              <Camera size={14} className="shrink-0" aria-hidden />
+              카메라로 촬영
+            </button>
+          ) : (
+            <div className="space-y-2 rounded-xl border border-emerald-100 bg-white/95 p-2 shadow-sm">
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => { setShowCamera(false); setSizeError('') }}
+                className="text-[10px] font-bold text-emerald-800 hover:text-emerald-950"
+              >
+                ← 파일 선택으로 돌아가기
+              </button>
+              <SmartphoneCameraCapture
+                quality={88}
+                className="border-0 p-2 shadow-none"
+                onCapture={handleCameraCapture}
+                onError={(m) => setSizeError(m)}
+              />
+            </div>
+          )}
         </div>
       )}
 

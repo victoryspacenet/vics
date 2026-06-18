@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, Navigate } from 'react-router-dom'
 import { fetchMainMatchupsQuick, enrichMainFeedCreatorRanks } from '../lib/mainFeed'
+import { runWhenIdle } from '../lib/runDeferred'
 import {
   MainMatchupCard,
   MainFeedCardSkeleton,
@@ -31,7 +32,10 @@ export function MainFeedPage() {
   const validVariant = ['best', 'hot', 'new'].includes(variant) ? variant : null
   if (!validVariant) return <Navigate to="/feed/best" replace />
 
+  const loadSeqRef = useRef(0)
+
   const load = useCallback(async () => {
+    const seq = ++loadSeqRef.current
     const d = dataRef.current
     const hadAnyFeed =
       (d.best?.length ?? 0) + (d.hot?.length ?? 0) + (d.new?.length ?? 0) > 0
@@ -40,22 +44,33 @@ export function MainFeedPage() {
     let quick = { best: [], hot: [], new: [] }
     try {
       quick = await fetchMainMatchupsQuick()
+      if (seq !== loadSeqRef.current) return
       setData(quick)
     } catch (err) {
       console.error(err)
-      setData({ best: [], hot: [], new: [] })
-      quick = { best: [], hot: [], new: [] }
+      if (seq === loadSeqRef.current) {
+        setData({ best: [], hot: [], new: [] })
+        quick = { best: [], hot: [], new: [] }
+      }
     } finally {
-      setQuickLoading(false)
+      if (seq === loadSeqRef.current) setQuickLoading(false)
     }
-    setEnriching(true)
-    try {
-      setData(await enrichMainFeedCreatorRanks(quick))
-    } catch (e) {
-      console.warn('[MainFeedPage] creator rank enrich failed', e)
-    } finally {
-      setEnriching(false)
-    }
+    if (seq !== loadSeqRef.current) return
+    runWhenIdle(() => {
+      void (async () => {
+        if (seq !== loadSeqRef.current) return
+        setEnriching(true)
+        try {
+          const enriched = await enrichMainFeedCreatorRanks(quick)
+          if (seq !== loadSeqRef.current) return
+          setData(enriched)
+        } catch (e) {
+          console.warn('[MainFeedPage] creator rank enrich failed', e)
+        } finally {
+          if (seq === loadSeqRef.current) setEnriching(false)
+        }
+      })()
+    }, { timeoutMs: 1200 })
   }, [])
 
   useEffect(() => {

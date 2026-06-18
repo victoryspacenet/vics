@@ -2,6 +2,10 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { exec } from 'node:child_process'
 import os from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
 /** 개발 서버 기동 후 추가 브라우저 탭으로 URL 열기 (Windows / macOS / Linux) */
 function openBrowserUrl(url) {
@@ -19,6 +23,12 @@ function openBrowserUrl(url) {
 
 // https://vite.dev/config/
 export default defineConfig({
+  resolve: {
+    alias: {
+      /** 실수로 클라이언트에서 import 하면 빌드/런타임에서 즉시 차단 */
+      'firebase-admin': path.resolve(rootDir, 'src/lib/stubs/firebase-admin-stub.js'),
+    },
+  },
   build: {
     rollupOptions: {
       output: {

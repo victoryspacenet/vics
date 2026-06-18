@@ -5,12 +5,54 @@ import {
   fetchCreatorRankMapForIds,
 } from './creatorRankSnapshot'
 
-const MATCHUP_EMBED = `*, profiles:user_id(${MATCHUP_CREATOR_PROFILE_FIELDS}), right_profiles:right_user_id(${MATCHUP_CREATOR_PROFILE_FIELDS})`
-
 /** 메인 홈 캐러셀(베스트·추천·NEW) 섹션당 최대 노출 개수 */
 export const MAIN_FEED_BEST_LIMIT = 7
 export const MAIN_FEED_HOT_LIMIT = 7
 export const MAIN_FEED_NEW_LIMIT = 7
+/** HOT 백빙 선별용 후보 풀 (전체 행 embed 대신 id·표만 먼저 조회) */
+export const MAIN_FEED_HOT_POOL_LIMIT = 36
+
+const MAIN_FEED_MATCHUP_COLUMNS = [
+  'id',
+  'user_id',
+  'right_user_id',
+  'title',
+  'left_type',
+  'right_type',
+  'left_url',
+  'right_url',
+  'left_text',
+  'right_text',
+  'left_thumbnail_url',
+  'right_thumbnail_url',
+  'left_label',
+  'right_label',
+  'left_votes',
+  'right_votes',
+  'total_votes',
+  'tags',
+  'status',
+  'created_at',
+  'is_demo',
+  'feed_banner_highlight_until',
+  'expires_at',
+  'comments_count',
+  'likes_count',
+  'category',
+].join(', ')
+
+const MATCHUP_EMBED = `${MAIN_FEED_MATCHUP_COLUMNS}, profiles:user_id(${MATCHUP_CREATOR_PROFILE_FIELDS})`
+
+/** `/matchups` 피드 카드용 (작성자 embed만 — right_profiles 조인 생략) */
+export const HOME_FEED_MATCHUP_SELECT = MATCHUP_EMBED
+
+const HOT_POOL_SELECT = 'id, left_votes, right_votes, total_votes, created_at'
+
+function orderMatchupsByIds(rows, ids) {
+  if (!ids?.length || !rows?.length) return []
+  const byId = new Map(rows.map((r) => [r.id, r]))
+  return ids.map((id) => byId.get(id)).filter(Boolean)
+}
 
 function attachEmptyCreatorRank(matchups) {
   return (matchups || []).map((m) => ({
@@ -54,13 +96,13 @@ export async function fetchMainMatchupsQuick() {
       .limit(MAIN_FEED_BEST_LIMIT),
     supabase
       .from('matchups')
-      .select(MATCHUP_EMBED)
+      .select(HOT_POOL_SELECT)
       .eq('status', 'active')
       .not('right_type', 'is', null)
       .gt('total_votes', 0)
       .order('total_votes', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false })
-      .limit(80),
+      .limit(MAIN_FEED_HOT_POOL_LIMIT),
     supabase
       .from('matchups')
       .select(MATCHUP_EMBED)
@@ -70,7 +112,21 @@ export async function fetchMainMatchupsQuick() {
       .limit(MAIN_FEED_NEW_LIMIT + 1),
   ])
 
-  const hotPicked = pickHotFromVotePool(hotPool || [], MAIN_FEED_HOT_LIMIT)
+  const hotPickedLean = pickHotFromVotePool(hotPool || [], MAIN_FEED_HOT_LIMIT)
+  const hotIds = hotPickedLean.map((m) => m.id).filter(Boolean)
+  let hotPicked = []
+  if (hotIds.length > 0) {
+    const { data: hotFullRows, error: hotFullErr } = await supabase
+      .from('matchups')
+      .select(MATCHUP_EMBED)
+      .in('id', hotIds)
+    if (hotFullErr) {
+      console.warn('[mainFeed] hot full rows:', hotFullErr.message)
+    } else {
+      hotPicked = orderMatchupsByIds(hotFullRows || [], hotIds)
+    }
+  }
+
   const bestPicked = (bestRows || []).slice(0, MAIN_FEED_BEST_LIMIT)
   const newRows = newPool || []
   const newPicked = newRows.slice(0, MAIN_FEED_NEW_LIMIT)
@@ -101,12 +157,63 @@ export function featuredListBadgeRoleByIdFromQuick(quick) {
 }
 
 /**
- * `/matchups` 활성 목록 필터용: 허용 id + 각 id의 피드 뱃지 역할 (`fetchMainMatchupsQuick` 1회).
+ * `/matchups` 활성 목록 필터용: 허용 id + 각 id의 피드 뱃지 역할.
+ * 메인 퀵 피드 전체(fetchMainMatchupsQuick) 없이 베스트·추천 id만 조회합니다.
  */
+const FEATURED_RESTRICTION_CACHE_MS = 60_000
+let featuredRestrictionCache = null
+let featuredRestrictionCacheAt = 0
+
+export function invalidateMainFeaturedFeedCache() {
+  featuredRestrictionCache = null
+  featuredRestrictionCacheAt = 0
+}
+
+function normalizeFeaturedMatchupId(id) {
+  const key = String(id ?? '').trim().toLowerCase()
+  return UUID_HEX_RE.test(key) ? key : null
+}
+
 export async function fetchMainFeaturedFeedRestriction() {
-  const quick = await fetchMainMatchupsQuick()
-  const roleById = featuredListBadgeRoleByIdFromQuick(quick)
-  return { ids: Object.keys(roleById), roleById }
+  const now = Date.now()
+  if (featuredRestrictionCache && now - featuredRestrictionCacheAt < FEATURED_RESTRICTION_CACHE_MS) {
+    return featuredRestrictionCache
+  }
+
+  const [{ data: bestRows }, { data: hotPool }] = await Promise.all([
+    supabase
+      .from('matchups')
+      .select('id')
+      .eq('status', 'active')
+      .not('right_type', 'is', null)
+      .order('total_votes', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false })
+      .limit(MAIN_FEED_BEST_LIMIT),
+    supabase
+      .from('matchups')
+      .select(HOT_POOL_SELECT)
+      .eq('status', 'active')
+      .not('right_type', 'is', null)
+      .gt('total_votes', 0)
+      .order('total_votes', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false })
+      .limit(MAIN_FEED_HOT_POOL_LIMIT),
+  ])
+
+  const roleById = {}
+  for (const m of bestRows || []) {
+    const id = normalizeFeaturedMatchupId(m?.id)
+    if (id) roleById[id] = 'best'
+  }
+  for (const m of pickHotFromVotePool(hotPool || [], MAIN_FEED_HOT_LIMIT)) {
+    const id = normalizeFeaturedMatchupId(m?.id)
+    if (id && !roleById[id]) roleById[id] = 'hot'
+  }
+
+  const result = { ids: Object.keys(roleById), roleById }
+  featuredRestrictionCache = result
+  featuredRestrictionCacheAt = now
+  return result
 }
 
 /**

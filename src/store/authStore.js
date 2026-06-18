@@ -172,6 +172,34 @@ async function ensureProfile(user) {
 
 /** initialize()가 여러 번 호출돼도 리스너가 중복 등록되지 않도록 */
 let authStateSubscription = null
+let authInitPromise = null
+let authInitGeneration = 0
+let profileFetchSeq = 0
+
+/** 페이지 전환마다 profiles 재조회하지 않도록 (포인트·구매 직후는 force) */
+const PROFILE_FETCH_TTL_MS = 45_000
+let profileLastFetchedAt = 0
+let profileLastFetchedUserId = null
+/** @type {Promise<void> | null} */
+let profileFetchInFlight = null
+let profileFetchInFlightUserId = null
+
+function invalidateProfileFetchCache() {
+  profileLastFetchedAt = 0
+  profileLastFetchedUserId = null
+}
+
+function markProfileFetched(userId) {
+  profileLastFetchedAt = Date.now()
+  profileLastFetchedUserId = userId
+}
+
+function teardownAuthSubscription() {
+  if (authStateSubscription) {
+    authStateSubscription.unsubscribe()
+    authStateSubscription = null
+  }
+}
 
 // user/profile은 Supabase 세션(+ getSession / onAuthStateChange)만 소스로 둡니다.
 // zustand persist로 user를 localStorage에 두면 hydrate merge가 initialize·로그아웃 이후에
@@ -186,74 +214,121 @@ export const useAuthStore = create((set, get) => ({
       setLoading: (loading) => set({ loading }),
 
       initialize: async () => {
-        set({ loading: true })
-        try {
-          if (authStateSubscription) {
-            authStateSubscription.unsubscribe()
-            authStateSubscription = null
-          }
-          const { data: { session } } = await supabase.auth.getSession()
-          if (session?.user) {
-            set({ user: session.user })
-            void useAdminPermissionStore.getState().load(session.user)
-            if (!skipHeavyAuthHooksOnResetPasswordPage()) {
-              await ensureProfile(session.user)
-              await get().fetchProfile(session.user.id)
-              runWhenIdle(() => {
-                void import('../lib/pushNotifications').then((m) =>
-                  m.registerPushForCurrentUser().then((r) => {
-                    if (r?.error && !r?.skipped) console.warn('[Auth] push register:', r.error)
-                  }),
-                )
-              })
-            }
-          } else {
-            // Supabase에 세션이 없으면 UI도 비로그인으로 맞춤
-            set({ user: null, profile: null })
-          }
-        } catch (err) {
-          console.error('[Auth] initialize error:', err)
-        } finally {
-          set({ loading: false })
-        }
+        if (authInitPromise) return authInitPromise
 
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-          console.log('[Auth] onAuthStateChange:', event, session?.user?.id)
+        const gen = ++authInitGeneration
+        authInitPromise = (async () => {
           try {
-            if (session?.user) {
-              set({ user: session.user })
-              void useAdminPermissionStore.getState().load(session.user)
-              if (skipHeavyAuthHooksOnResetPasswordPage()) {
-                return
+            teardownAuthSubscription()
+            set({ loading: true })
+
+            /**
+             * INITIAL_SESSION 이벤트가 도착하면 resolve되는 신호.
+             * getSession()보다 먼저 리스너를 등록해 두고 INITIAL_SESSION을
+             * 인증 초기 상태의 유일한 소스로 삼는다.
+             * — getSession()만 믿으면 토큰 갱신 중 null 반환 → user: null 설정 →
+             *   인증 판단 오류가 발생하는 경쟁 조건을 피한다.
+             */
+            let resolveInitialSession
+            const initialSessionDone = new Promise((r) => { resolveInitialSession = r })
+
+            // ── 리스너를 먼저 등록 ──
+            const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+              if (gen !== authInitGeneration) return
+              console.log('[Auth] onAuthStateChange:', event, session?.user?.id)
+              try {
+                if (session?.user) {
+                  set({ user: session.user })
+                  void useAdminPermissionStore.getState().load(session.user)
+                  if (skipHeavyAuthHooksOnResetPasswordPage()) return
+                  if (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'INITIAL_SESSION') {
+                    await ensureProfile(session.user)
+                  }
+                  if (gen !== authInitGeneration) return
+                  if (event !== 'TOKEN_REFRESHED') {
+                    const forceProfile =
+                      event === 'INITIAL_SESSION' ||
+                      event === 'SIGNED_IN' ||
+                      event === 'USER_UPDATED'
+                    await get().fetchProfile(session.user.id, { force: forceProfile })
+                  }
+                  // 페이지 새로고침(INITIAL_SESSION) 포함, 로그인 시 푸시 재등록
+                  if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+                    runWhenIdle(() => {
+                      void import('../lib/pushNotifications').then((m) =>
+                        m.registerPushForCurrentUser().then((r) => {
+                          if (r?.error && !r?.skipped) console.warn('[Auth] push register:', r.error)
+                        }),
+                      )
+                    })
+                  }
+                } else {
+                  useAdminPermissionStore.getState().reset()
+                  invalidateProfileFetchCache()
+                  profileFetchInFlight = null
+                  profileFetchInFlightUserId = null
+                  set({ user: null, profile: null })
+                }
+              } catch (err) {
+                console.error('[Auth] onAuthStateChange error:', err)
+              } finally {
+                // INITIAL_SESSION 완료 후 loading 해제 (성공·실패 무관)
+                if (event === 'INITIAL_SESSION') {
+                  if (gen === authInitGeneration) set({ loading: false })
+                  resolveInitialSession()
+                }
               }
-              if (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'INITIAL_SESSION') {
-                await ensureProfile(session.user)
-              }
-              if (event !== 'TOKEN_REFRESHED') {
-                await get().fetchProfile(session.user.id)
-              }
-              if (event === 'SIGNED_IN') {
-                runWhenIdle(() => {
-                  void import('../lib/pushNotifications').then((m) =>
-                    m.registerPushForCurrentUser().then((r) => {
-                      if (r?.error && !r?.skipped) console.warn('[Auth] push register:', r.error)
-                    }),
-                  )
-                })
-              }
-            } else {
-              // SIGNED_OUT뿐 아니라 INITIAL_SESSION(null) 등 세션 없음 모두 동기화
-              useAdminPermissionStore.getState().reset()
-              set({ user: null, profile: null })
+            })
+
+            if (gen !== authInitGeneration) {
+              subscription.unsubscribe()
+              return
             }
-          } catch (err) {
-            console.error('[Auth] onAuthStateChange error:', err)
+            authStateSubscription = subscription
+
+            // INITIAL_SESSION을 기다린다 (최대 8초 — 네트워크 이상 시 폴백)
+            await Promise.race([
+              initialSessionDone,
+              new Promise((r) => setTimeout(r, 8000)),
+            ])
+
+            // 타임아웃으로 INITIAL_SESSION이 오지 않았으면 loading 강제 해제
+            if (gen === authInitGeneration && get().loading) {
+              console.warn('[Auth] INITIAL_SESSION 타임아웃 — loading 강제 해제')
+              set({ loading: false })
+            }
+
+          } finally {
+            authInitPromise = null
           }
-        })
-        authStateSubscription = subscription
+        })()
+
+        return authInitPromise
       },
 
-      fetchProfile: async (userId) => {
+      fetchProfile: async (userId, { force = false } = {}) => {
+        if (!userId) return
+        if (
+          !force &&
+          profileFetchInFlight &&
+          profileFetchInFlightUserId === userId
+        ) {
+          return profileFetchInFlight
+        }
+        if (!force) {
+          const { user, profile } = get()
+          if (
+            user?.id === userId &&
+            profile?.id === userId &&
+            profileLastFetchedUserId === userId &&
+            Date.now() - profileLastFetchedAt < PROFILE_FETCH_TTL_MS
+          ) {
+            return
+          }
+        }
+
+        const seq = ++profileFetchSeq
+        const run = (async () => {
         try {
           const { data, error } = await supabase
             .from('profiles')
@@ -293,8 +368,9 @@ export const useAuthStore = create((set, get) => ({
           }
 
           const u = get().user
-          if (!u || u.id !== userId) return
+          if (!u || u.id !== userId || seq !== profileFetchSeq) return
           set({ profile })
+          markProfileFetched(userId)
 
           const skipTierMilestoneGrant = isDevTestAccountUiReset(profile)
 
@@ -330,7 +406,10 @@ export const useAuthStore = create((set, get) => ({
                       new CustomEvent('vics:matchup-tier-milestone-bonus', { detail: tierBonus })
                     )
                     const u2 = get().user
-                    if (u2 && u2.id === userId) set({ profile: nextProfile })
+                    if (u2 && u2.id === userId && seq === profileFetchSeq) {
+                      set({ profile: nextProfile })
+                      markProfileFetched(userId)
+                    }
                   }
                 }
               } catch (e) {
@@ -340,6 +419,18 @@ export const useAuthStore = create((set, get) => ({
           })
         } catch (err) {
           console.error('[fetchProfile] 예상치 못한 오류:', err)
+        }
+        })()
+
+        profileFetchInFlight = run
+        profileFetchInFlightUserId = userId
+        try {
+          await run
+        } finally {
+          if (profileFetchInFlight === run) {
+            profileFetchInFlight = null
+            profileFetchInFlightUserId = null
+          }
         }
       },
 
@@ -363,7 +454,10 @@ export const useAuthStore = create((set, get) => ({
             .eq('id', user.id)
             .select('*')
             .single()
-          if (data) set({ profile: data })
+          if (data) {
+            set({ profile: data })
+            markProfileFetched(user.id)
+          }
           return { data, error }
         } catch (err) {
           return { error: err }
@@ -371,6 +465,12 @@ export const useAuthStore = create((set, get) => ({
       },
 
       signOut: async () => {
+        authInitGeneration += 1
+        teardownAuthSubscription()
+        profileFetchSeq += 1
+        invalidateProfileFetchCache()
+        profileFetchInFlight = null
+        profileFetchInFlightUserId = null
         const uid = get().user?.id
         clearTierMilestoneGrantThrottle()
         useAdminPermissionStore.getState().reset()

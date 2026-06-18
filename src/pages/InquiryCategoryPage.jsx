@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link, useNavigate, useParams, useLocation } from 'react-router-dom'
-import { ArrowLeft, ChevronRight, Loader2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, MessageCircle } from 'lucide-react'
 import {
   listCategoryHelpItems,
   INQUIRY_CATEGORY_HELP_LS_REV_KEY,
@@ -120,10 +120,11 @@ export function InquiryCategoryPage() {
     return (
       <div className={cn('min-h-screen flex items-center justify-center px-4', PAGE_BG)}>
         <div className={cn(SECTION_CARD, 'text-center px-8 py-10 max-w-sm w-full')}>
-          <p className="text-sm font-medium text-fuchsia-800/75 mb-4">존재하지 않는 카테고리예요.</p>
+          <div className="text-3xl mb-3">🔍</div>
+          <p className="text-sm font-bold text-fuchsia-800/75 mb-5">존재하지 않는 카테고리예요.</p>
           <Link
             to="/inquiry"
-            className="text-sm font-black text-fuchsia-700 hover:text-fuchsia-900 underline decoration-fuchsia-300/80 underline-offset-2"
+            className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-2xl bg-gradient-to-r from-fuchsia-600 to-pink-500 text-white text-sm font-black shadow-md shadow-fuchsia-300/40 hover:scale-[1.02] active:scale-[0.98] transition-all"
           >
             문의하기 메인으로
           </Link>
@@ -134,8 +135,9 @@ export function InquiryCategoryPage() {
 
   if (categoryOk !== true || !categoryLabel) {
     return (
-      <div className={cn('min-h-screen flex items-center justify-center', PAGE_BG)}>
-        <Loader2 className="h-9 w-9 animate-spin text-fuchsia-300" />
+      <div className={cn('min-h-screen flex flex-col items-center justify-center gap-3', PAGE_BG)}>
+        <Loader2 className="h-8 w-8 animate-spin text-fuchsia-400" />
+        <p className="text-sm font-bold text-fuchsia-700/60 animate-pulse">불러오는 중...</p>
       </div>
     )
   }
@@ -143,83 +145,103 @@ export function InquiryCategoryPage() {
   const { Icon, color } = getHelpCategoryPresentation(slug)
 
   return (
-    <div className={cn('min-h-screen', PAGE_BG)}>
-      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto')}>
-        <div className={cn('sticky top-0 z-10 px-4 py-3 flex items-center gap-3', HEADER_GLASS)}>
+    <div className={cn('min-h-screen relative overflow-hidden', PAGE_BG)}>
+      {/* 앰비언트 배경 */}
+      <div className="pointer-events-none fixed inset-0 z-0">
+        <div className="absolute -top-32 -left-32 w-80 h-80 rounded-full bg-gradient-radial from-fuchsia-300/20 to-transparent blur-3xl" />
+        <div className="absolute top-1/3 -right-20 w-64 h-64 rounded-full bg-gradient-radial from-pink-300/15 to-transparent blur-3xl" />
+        <div className="absolute bottom-20 left-1/4 w-56 h-56 rounded-full bg-gradient-radial from-rose-300/12 to-transparent blur-3xl" />
+      </div>
+
+      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto relative z-10')}>
+        {/* 헤더 */}
+        <div className={cn('sticky top-0 z-10 px-4 py-3 flex items-center gap-2.5', HEADER_GLASS)}>
           <button
             type="button"
             onClick={() => navigate(-1)}
-            className="p-2 -ml-2 rounded-xl hover:bg-pink-100/60 transition-colors"
+            className="flex items-center gap-1 pl-2 pr-3 py-2 -ml-1 rounded-xl bg-gradient-to-r from-fuchsia-50 to-pink-50 border border-pink-200/60 hover:from-fuchsia-100 hover:to-pink-100 transition-all shrink-0 shadow-sm"
             aria-label="뒤로"
           >
-            <ArrowLeft size={20} className="text-fuchsia-900" />
+            <ChevronLeft size={16} className="text-fuchsia-700" />
+            <span className="text-xs font-bold text-fuchsia-700">뒤로</span>
           </button>
-          <h1 className="text-lg font-black text-fuchsia-950 flex-1 tracking-tight">{categoryLabel}</h1>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <span className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br shadow-md', color)}>
+              <Icon size={14} className="text-white" />
+            </span>
+            <h1 className="text-base font-black bg-gradient-to-r from-fuchsia-700 via-pink-600 to-rose-600 bg-clip-text text-transparent tracking-tight truncate">{categoryLabel}</h1>
+          </div>
         </div>
 
         <div className="px-4 py-6">
-          <div className="flex items-center gap-4 mb-6">
-            <div
-              className={cn(
-                'w-14 h-14 rounded-2xl bg-gradient-to-br flex items-center justify-center shadow-lg ring-2 ring-white/70',
-                color
-              )}
-            >
-              <Icon size={28} className="text-white drop-shadow-sm" />
-            </div>
-            <div>
-              <p className="text-xs font-black text-fuchsia-500/90 uppercase tracking-wider">카테고리별 도움말</p>
-              <p className="text-sm font-bold text-fuchsia-900/80 mt-0.5">
-                자주 묻는 질문을 골라 보세요
-              </p>
+          {/* 카테고리 히어로 배너 */}
+          <div className="rounded-2xl overflow-hidden mb-6 border border-pink-100/60 shadow-[0_4px_24px_-10px_rgba(244,114,182,0.2)]">
+            <div className="h-1 bg-gradient-to-r from-fuchsia-500 via-pink-500 to-rose-400" />
+            <div className="flex items-center gap-4 p-5 bg-gradient-to-br from-white/95 via-fuchsia-50/40 to-pink-50/30">
+              <div className={cn('w-14 h-14 rounded-2xl bg-gradient-to-br flex items-center justify-center shadow-lg ring-2 ring-white/80 shrink-0', color)}>
+                <Icon size={28} className="text-white drop-shadow-sm" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black bg-gradient-to-r from-fuchsia-600 to-pink-600 bg-clip-text text-transparent uppercase tracking-widest mb-0.5">카테고리별 도움말</p>
+                <p className="text-sm font-bold text-fuchsia-900/75">자주 묻는 질문을 골라 보세요</p>
+              </div>
             </div>
           </div>
 
           {listLoading ? (
-            <div className="flex justify-center py-16">
-              <Loader2 className="h-8 w-8 animate-spin text-fuchsia-300" />
+            <div className="flex flex-col items-center justify-center gap-3 py-16">
+              <Loader2 className="h-8 w-8 animate-spin text-fuchsia-400" />
+              <p className="text-sm font-bold text-fuchsia-700/60 animate-pulse">불러오는 중...</p>
             </div>
           ) : items.length === 0 ? (
-            <div className={cn(SECTION_CARD, 'px-5 py-10 text-center')}>
-              <p className="text-sm font-medium text-fuchsia-800/80">
-                이 카테고리에 등록된 도움말이 아직 없어요.
-              </p>
-              <p className="mt-2 text-xs text-fuchsia-600/80">운영에서 항목을 등록하면 여기에 표시돼요.</p>
+            <div className="rounded-2xl overflow-hidden border border-pink-100/70 bg-white/92 shadow-sm text-center px-5 py-10">
+              <div className="text-3xl mb-3">📂</div>
+              <p className="text-sm font-bold text-fuchsia-800/80">이 카테고리에 등록된 도움말이 아직 없어요.</p>
+              <p className="mt-1.5 text-xs text-fuchsia-600/65">운영에서 항목을 등록하면 여기에 표시돼요.</p>
             </div>
           ) : (
             <div className="space-y-2.5">
-              {items.map((item) => (
+              {items.map((item, i) => (
                 <Link
                   key={item.id}
                   to={`/inquiry/category/${slug}/help/${item.id}`}
                   className={cn(
-                    SECTION_CARD,
-                    'flex items-center justify-between gap-3 p-4 border-pink-100/70',
-                    'hover:border-fuchsia-300/60 hover:shadow-[0_8px_28px_-12px_rgba(192,38,211,0.22)] hover:-translate-y-0.5',
+                    'relative flex items-center justify-between gap-3 p-4 rounded-2xl overflow-hidden',
+                    'border border-pink-100/70 bg-white/92 shadow-[0_4px_20px_-10px_rgba(244,114,182,0.15)] backdrop-blur-[2px]',
+                    'hover:border-fuchsia-300/60 hover:shadow-[0_8px_28px_-10px_rgba(192,38,211,0.25)] hover:-translate-y-0.5',
                     'transition-all duration-200 group'
                   )}
                 >
-                  <span className="text-sm font-bold text-fuchsia-950 group-hover:text-fuchsia-800">
+                  {/* 좌측 액센트 바 */}
+                  <div className={cn('absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl bg-gradient-to-b opacity-50 group-hover:opacity-100 transition-opacity', color)} />
+                  {/* 번호 배지 */}
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-100 to-pink-100 text-xs font-black text-fuchsia-700 ml-1">
+                    {i + 1}
+                  </span>
+                  <span className="flex-1 text-sm font-bold text-fuchsia-950 group-hover:text-fuchsia-800 transition-colors">
                     {item.title}
                   </span>
-                  <div className="w-8 h-8 rounded-xl bg-fuchsia-50/90 border border-pink-100/60 group-hover:bg-fuchsia-100 flex items-center justify-center shrink-0 transition-colors">
-                    <ChevronRight
-                      size={18}
-                      className="text-fuchsia-400 group-hover:text-fuchsia-600 group-hover:translate-x-0.5 transition-all"
-                    />
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-fuchsia-50 to-pink-50 border border-pink-100/60 group-hover:from-fuchsia-100 group-hover:to-pink-100 flex items-center justify-center shrink-0 transition-all">
+                    <ChevronRight size={16} className="text-fuchsia-400 group-hover:text-fuchsia-600 group-hover:translate-x-0.5 transition-all" />
                   </div>
                 </Link>
               ))}
             </div>
           )}
 
-          <div className="flex justify-center mt-8 py-2">
-            <Link
-              to="/inquiry/form"
-              className="inline-flex flex-row items-center text-sm font-black text-fuchsia-700 hover:text-fuchsia-900 underline decoration-fuchsia-300/70 underline-offset-2 whitespace-nowrap [word-break:keep-all]"
-            >
-              궁금한 점이 더 있으신가요? 1:1 문의하기 →
-            </Link>
+          {/* 1:1 문의 CTA */}
+          <div className="mt-8 rounded-2xl overflow-hidden border border-emerald-200/50 shadow-sm">
+            <div className="h-0.5 bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400" />
+            <div className="flex items-center justify-between gap-3 px-5 py-4 bg-gradient-to-br from-emerald-50/80 via-teal-50/50 to-cyan-50/30">
+              <p className="text-sm font-bold text-emerald-900/80">원하는 답변을 못 찾으셨나요?</p>
+              <Link
+                to="/inquiry/form"
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-white text-sm font-black shadow-[0_4px_14px_-4px_rgba(16,185,129,0.5)] hover:scale-[1.02] active:scale-[0.98] transition-all shrink-0"
+              >
+                <MessageCircle size={15} />
+                1:1 문의
+              </Link>
+            </div>
           </div>
         </div>
       </div>

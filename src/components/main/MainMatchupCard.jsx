@@ -30,9 +30,12 @@ function MatchupSidePreview({ side, matchup: m, eagerMedia = false }) {
   const safeUrl = safeMediaUrl(url || '')
 
   if (type === 'text') {
+    const textGrad = isLeft
+      ? 'from-amber-950/90 via-orange-900/80 to-rose-950/85'
+      : 'from-violet-950/90 via-fuchsia-900/80 to-indigo-950/85'
     return (
-      <div className="flex h-full min-h-[4rem] w-full items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 p-2">
-        <p className="line-clamp-4 text-center text-[10px] font-semibold leading-relaxed text-[#22282E]">
+      <div className={`flex h-full min-h-[4rem] w-full items-center justify-center bg-gradient-to-br ${textGrad} p-3`}>
+        <p className="line-clamp-4 text-center text-[10px] font-bold leading-relaxed text-white/90 drop-shadow-sm">
           {text || label || '—'}
         </p>
       </div>
@@ -122,11 +125,11 @@ function MatchupSidePreview({ side, matchup: m, eagerMedia = false }) {
 
 const VARIANT_CARD = {
   best:
-    'border-amber-200/85 ring-1 ring-amber-100/55 shadow-md shadow-amber-200/30 bg-gradient-to-br from-slate-50 via-amber-50/30 to-orange-50/40 hover:border-amber-300/80 hover:shadow-lg hover:shadow-amber-300/35 hover:via-amber-50/35',
+    'border-amber-300/70 ring-1 ring-amber-200/50 shadow-[0_6px_28px_-6px_rgba(251,146,60,0.28)] bg-gradient-to-br from-white via-amber-50/60 to-orange-100/50 hover:border-amber-400/70 hover:shadow-[0_8px_32px_-6px_rgba(251,146,60,0.4)] hover:via-amber-50/75 hover:-translate-y-0.5',
   hot:
-    'border-fuchsia-200/80 ring-1 ring-violet-100/50 shadow-md shadow-fuchsia-200/25 bg-gradient-to-br from-slate-50 via-violet-50/30 to-fuchsia-50/35 hover:border-fuchsia-300/75 hover:shadow-lg hover:shadow-fuchsia-200/35 hover:via-violet-50/38',
+    'border-fuchsia-300/65 ring-1 ring-violet-200/45 shadow-[0_6px_28px_-6px_rgba(168,85,247,0.24)] bg-gradient-to-br from-white via-violet-50/55 to-fuchsia-100/45 hover:border-fuchsia-400/65 hover:shadow-[0_8px_32px_-6px_rgba(168,85,247,0.38)] hover:via-violet-50/72 hover:-translate-y-0.5',
   new:
-    'border-emerald-200/80 ring-1 ring-teal-100/50 shadow-md shadow-emerald-200/28 bg-gradient-to-br from-slate-50 via-emerald-50/28 to-cyan-50/32 hover:border-emerald-300/75 hover:shadow-lg hover:shadow-teal-200/35 hover:via-emerald-50/34',
+    'border-emerald-300/65 ring-1 ring-teal-200/45 shadow-[0_6px_28px_-6px_rgba(20,184,166,0.22)] bg-gradient-to-br from-white via-emerald-50/55 to-cyan-100/42 hover:border-emerald-400/65 hover:shadow-[0_8px_32px_-6px_rgba(20,184,166,0.36)] hover:via-emerald-50/70 hover:-translate-y-0.5',
 }
 
 export function MainMatchupCard({ matchup: m, variant, rank, eagerMedia = false }) {
@@ -151,7 +154,7 @@ export function MainMatchupCard({ matchup: m, variant, rank, eagerMedia = false 
   return (
     <div
       className={cn(
-        'relative block shrink-0 overflow-hidden rounded-2xl border transition-all',
+        'relative block shrink-0 overflow-hidden rounded-2xl border transition-all duration-300',
         bannerGlow
           ? 'vics-feed-banner-highlight shadow-none'
           : VARIANT_CARD[variant] ??
@@ -159,14 +162,25 @@ export function MainMatchupCard({ matchup: m, variant, rank, eagerMedia = false 
         vipFrame && VIP_MATCHUP_SURFACE_CLASS,
       )}
     >
+      {/* 카드 상단 컬러 라인 */}
+      {variant === 'best' && !bannerGlow && (
+        <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-amber-400 via-orange-500 to-rose-400" />
+      )}
+      {variant === 'hot' && !bannerGlow && (
+        <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-violet-500 via-fuchsia-500 to-pink-400" />
+      )}
+      {variant === 'new' && !bannerGlow && (
+        <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-emerald-400 via-teal-500 to-cyan-400" />
+      )}
+
       {variant === 'best' && (
-        <span className="absolute right-2.5 top-2.5 z-10 rounded-md bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.12em] text-white shadow-md shadow-amber-500/35 ring-1 ring-white/60">
-          TOP
+        <span className="absolute right-2.5 top-3.5 z-10 rounded-full bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] text-white shadow-[0_2px_10px_rgba(251,146,60,0.55)] ring-1 ring-white/60">
+          🔥 TOP
         </span>
       )}
       {variant === 'hot' && (
-        <span className="absolute right-2.5 top-2.5 z-10 rounded-md bg-gradient-to-r from-violet-500 via-fuchsia-500 to-purple-600 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.12em] text-white shadow-md shadow-fuchsia-500/40 ring-1 ring-white/60">
-          HOT
+        <span className="absolute right-2.5 top-3.5 z-10 rounded-full bg-gradient-to-r from-violet-500 via-fuchsia-500 to-pink-500 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] text-white shadow-[0_2px_10px_rgba(168,85,247,0.55)] ring-1 ring-white/60">
+          ✨ HOT
         </span>
       )}
       {creator?.fandom_tier === 'diamond' && (
@@ -241,9 +255,10 @@ export function MainMatchupCard({ matchup: m, variant, rank, eagerMedia = false 
           </div>
           <MatchupThumbFrame side="right" className="aspect-square w-full min-h-0">
             {showNewRightPlaceholder ? (
-              <div className="flex h-full w-full flex-col items-center justify-center gap-0.5 text-gray-400">
-                <span className="text-[10px] font-bold">도전자 대기</span>
-                <span className="text-[9px]">나중에 채워요</span>
+              <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 bg-gradient-to-br from-emerald-950/80 via-teal-950/70 to-cyan-950/75">
+                <span className="text-xl">⚔️</span>
+                <span className="text-[10px] font-black text-emerald-300 tracking-wide">도전자 모집 중</span>
+                <span className="text-[9px] font-semibold text-teal-400/80">먼저 도전해보세요!</span>
               </div>
             ) : (
               <MatchupMediaOpenButton
@@ -277,42 +292,53 @@ export function MainMatchupCard({ matchup: m, variant, rank, eagerMedia = false 
               />
               {variant === 'hot' && (m.total_votes || 0) > 0 ? (
                 <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-                  <span className="bg-gradient-to-r from-fuchsia-600 to-pink-600 bg-clip-text text-xl font-black tabular-nums leading-none text-transparent sm:text-2xl">
+                  <span className="bg-gradient-to-r from-fuchsia-500 to-pink-500 bg-clip-text text-2xl font-black tabular-nums leading-none text-transparent drop-shadow-sm">
                     {left}%
                   </span>
-                  <span className="text-xs font-black text-gray-400">VS</span>
-                  <span className="bg-gradient-to-r from-sky-600 to-indigo-600 bg-clip-text text-xl font-black tabular-nums leading-none text-transparent sm:text-2xl">
+                  <span className="rounded bg-gradient-to-r from-violet-500 to-fuchsia-500 px-1 py-0.5 text-[8px] font-black text-white">VS</span>
+                  <span className="bg-gradient-to-r from-sky-500 to-indigo-500 bg-clip-text text-2xl font-black tabular-nums leading-none text-transparent drop-shadow-sm">
                     {right}%
                   </span>
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-violet-500">박빙</span>
                 </div>
               ) : variant === 'best' ? (
-                <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-                  <span className="text-[11px] font-semibold text-gray-500">총 투표</span>
-                  <span className="bg-gradient-to-r from-amber-600 to-orange-600 bg-clip-text text-xl font-black tabular-nums leading-none text-transparent sm:text-2xl">
+                <div className="flex min-w-0 flex-wrap items-baseline gap-x-1 gap-y-0.5">
+                  <span className="bg-gradient-to-r from-amber-500 to-orange-500 bg-clip-text text-2xl font-black tabular-nums leading-none text-transparent drop-shadow-sm">
                     {formatNumber(m.total_votes || 0)}
                   </span>
-                  <span className="text-xs font-bold text-gray-600">명 참여</span>
+                  <span className="text-[10px] font-bold text-amber-700/80">명 참여</span>
                 </div>
               ) : (
                 <span className="text-xs text-gray-500">{formatNumber(m.total_votes || 0)}명 참여 중</span>
               )}
             </div>
           )}
-          <span className="text-xs font-bold text-emerald-600">
-            {variant === 'new' ? '상세 →' : '상세/투표 →'}
+          <span className={cn(
+            'rounded-full px-2.5 py-0.5 text-[10px] font-black tracking-wide',
+            variant === 'best'
+              ? 'bg-amber-50 text-amber-600 border border-amber-200/80'
+              : variant === 'hot'
+                ? 'bg-violet-50 text-violet-600 border border-violet-200/80'
+                : 'bg-emerald-50 text-emerald-600 border border-emerald-200/80',
+          )}>
+            {variant === 'new' ? '상세 →' : '투표 →'}
           </span>
         </div>
 
         {variant === 'hot' && (m.total_votes || 0) > 0 && (
-          <p className="mt-2 text-[10px] text-violet-600/90">
-            ✨ 님과 안목이 비슷한 80%가 참여
-          </p>
+          <div className="mt-2 flex items-center gap-1">
+            <div className="h-1 flex-1 overflow-hidden rounded-full bg-gradient-to-r from-fuchsia-100 to-violet-100">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-fuchsia-400 to-violet-500 transition-all duration-700"
+                style={{ width: `${left}%` }}
+              />
+            </div>
+            <span className="text-[9px] font-bold text-fuchsia-500">{left}%</span>
+          </div>
         )}
 
         {variant === 'new' && (
-          <p className="mt-2 text-[10px] text-emerald-600/90">
-            🆕 {formatDate(m.created_at)} 생성됨
+          <p className="mt-2 text-[10px] font-semibold text-emerald-600/90">
+            🆕 {formatDate(m.created_at)} 등록
           </p>
         )}
         </Link>

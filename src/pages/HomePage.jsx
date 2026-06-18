@@ -4,12 +4,12 @@ import {
   ChevronLeft, ChevronRight, Plus, ChevronDown,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { fetchMainFeaturedFeedRestriction } from '../lib/mainFeed'
+import { fetchMainFeaturedFeedRestriction, HOME_FEED_MATCHUP_SELECT, invalidateMainFeaturedFeedCache } from '../lib/mainFeed'
 import {
-  MATCHUP_CREATOR_PROFILE_FIELDS,
   EMPTY_TIER_RANK_INFO,
   enrichMatchupsWithCreatorRankInfo,
 } from '../lib/creatorRankSnapshot'
+import { runWhenIdle } from '../lib/runDeferred'
 import { useUIStore } from '../store/uiStore'
 import { useAuthStore } from '../store/authStore'
 import { FeedCard } from '../components/matchup/FeedCard'
@@ -59,15 +59,15 @@ function readInitialMatchupsCategory() {
   return 'all'
 }
 
-/** 매치업 목록 LNB·드로어 — 바탕 흰색 */
+/** 매치업 목록 LNB·드로어 */
 const MZ_SB =
-  'rounded-2xl border border-gray-100 bg-white shadow-sm'
+  'rounded-2xl border border-fuchsia-100/70 bg-gradient-to-b from-white via-fuchsia-50/30 to-pink-50/20 shadow-[0_4px_24px_-8px_rgba(217,70,239,0.12)]'
 
-/** LNB 행 — 비선택은 차가운 회색 대신 로즈·퓨시아 계열 */
+/** LNB 행 */
 const LNB_ROW_ON =
-  'bg-gradient-to-r from-pink-200/90 via-fuchsia-200/85 to-violet-200/90 text-fuchsia-950 font-black shadow-sm shadow-pink-200/30 border border-white/70'
+  'bg-gradient-to-r from-pink-500 via-fuchsia-500 to-violet-500 text-white font-black shadow-[0_4px_14px_-2px_rgba(168,85,247,0.4)] ring-1 ring-white/30'
 const LNB_ROW_OFF =
-  'text-pink-700/90 hover:text-fuchsia-800 hover:bg-pink-50/90 hover:shadow-sm'
+  'text-fuchsia-800/80 hover:text-fuchsia-900 hover:bg-fuchsia-50/80 hover:shadow-sm'
 
 export function HomePage({ refreshRef }) {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -83,8 +83,14 @@ export function HomePage({ refreshRef }) {
   const [page,       setPage]       = useState(1)
   const [lnbOpen,    setLnbOpen]    = useState(false)
   const [catNavTick, setCatNavTick] = useState(0)
+  const fetchSeqRef = useRef(0)
   const { openCreateDrawer, openLoginModal } = useUIStore()
   const { user } = useAuthStore()
+
+  const dataRef = useRef(data)
+  useEffect(() => {
+    dataRef.current = data
+  }, [data])
 
   const feedCategories = useMemo(() => {
     void catNavTick
@@ -141,9 +147,10 @@ export function HomePage({ refreshRef }) {
   useEffect(() => { setPage(1); window.scrollTo({ top: 0, behavior: 'smooth' }) }, [category, filter, sortBy])
 
   const fetchMatchups = async () => {
-    setLoading(true)
+    const seq = ++fetchSeqRef.current
+    const hadRows = dataRef.current?.length > 0
+    if (!hadRows) setLoading(true)
     let rows = []
-    /** enrich 단계까지 유지합니다. 빈 객체로 시작해 이전 요청 상태가 남지 않게 합니다 */
     let rowsForEnrich = []
     try {
       /** 비로그인 시 URL에 filter=mine 이 있어도 목록은 진행 중 매치업 기준으로 조회 */
@@ -158,6 +165,7 @@ export function HomePage({ refreshRef }) {
         featuredIds = fed.ids
         featuredRoleById = fed.roleById
         if (!featuredIds.length) {
+          if (seq !== fetchSeqRef.current) return
           setTotalCount(0)
           setData([])
           setLoading(false)
@@ -165,10 +173,9 @@ export function HomePage({ refreshRef }) {
         }
       }
 
-      const embed = `*, profiles:user_id(${MATCHUP_CREATOR_PROFILE_FIELDS}), right_profiles:right_user_id(${MATCHUP_CREATOR_PROFILE_FIELDS})`
       let q = supabase
         .from('matchups')
-        .select(embed, { count: 'exact' })
+        .select(HOME_FEED_MATCHUP_SELECT, { count: 'exact' })
         .not('right_type', 'is', null)
 
       if (featuredIds?.length) {
@@ -200,6 +207,7 @@ export function HomePage({ refreshRef }) {
       const from = (page - 1) * PAGE_SIZE
       const to = from + PAGE_SIZE - 1
       const { data: base, error, count } = await q.range(from, to)
+      if (seq !== fetchSeqRef.current) return
       if (error) throw error
       setTotalCount(typeof count === 'number' ? count : 0)
       rows = base || []
@@ -215,20 +223,26 @@ export function HomePage({ refreshRef }) {
       }))
       setData(rowsForEnrich)
     } catch (err) {
+      if (seq !== fetchSeqRef.current) return
       console.error(err)
       setData([])
       setTotalCount(0)
       rows = []
       rowsForEnrich = []
     } finally {
-      setLoading(false)
+      if (seq === fetchSeqRef.current) setLoading(false)
     }
-    if (!rows.length) return
-    try {
-      setData(await enrichMatchupsWithCreatorRankInfo(rowsForEnrich))
-    } catch (e) {
-      console.warn('[HomePage] creator rank enrich failed', e)
-    }
+    if (seq !== fetchSeqRef.current || !rows.length) return
+    runWhenIdle(() => {
+      void (async () => {
+        if (seq !== fetchSeqRef.current) return
+        try {
+          setData(await enrichMatchupsWithCreatorRankInfo(rowsForEnrich))
+        } catch (e) {
+          console.warn('[HomePage] creator rank enrich failed', e)
+        }
+      })()
+    }, { timeoutMs: 1200 })
   }
 
   const fetchMatchupsRef = useRef(fetchMatchups)
@@ -236,6 +250,7 @@ export function HomePage({ refreshRef }) {
 
   useEffect(() => {
     const on = () => {
+      invalidateMainFeaturedFeedCache()
       void fetchMatchupsRef.current()
     }
     window.addEventListener('vics:matchup-banner-highlight:updated', on)
@@ -255,7 +270,7 @@ export function HomePage({ refreshRef }) {
   const LNBContent = () => (
     <div className="space-y-1">
       <div className="px-3 py-2 mb-1">
-        <p className="text-[10px] font-black text-pink-400 uppercase tracking-widest">🌐 카테고리</p>
+        <p className="text-[10px] font-black bg-gradient-to-r from-fuchsia-500 to-violet-500 bg-clip-text text-transparent uppercase tracking-widest">🌐 카테고리</p>
       </div>
       {feedCategories.map((c) => (
         <button
@@ -281,7 +296,7 @@ export function HomePage({ refreshRef }) {
         </button>
       ))}
       <div className="pt-4 mt-4 border-t border-pink-100/60">
-        <p className="px-3 py-2 text-[10px] font-black text-pink-400 uppercase tracking-widest">📍 필터</p>
+        <p className="px-3 py-2 text-[10px] font-black bg-gradient-to-r from-pink-500 to-rose-500 bg-clip-text text-transparent uppercase tracking-widest">📍 필터</p>
         {FILTERS.map((f) => (
           <button
             key={f.id}
@@ -315,10 +330,23 @@ export function HomePage({ refreshRef }) {
   )
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-5 items-start">
+    <div className="relative grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-5 items-start">
+      {/* ── 앰비언트 배경 오라 ── */}
+      <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden" aria-hidden>
+        <div className="absolute top-0 right-0 h-[440px] w-[440px] rounded-full bg-gradient-radial from-fuchsia-300/10 via-violet-200/5 to-transparent blur-3xl" />
+        <div className="absolute top-1/2 -left-20 h-[360px] w-[360px] rounded-full bg-gradient-radial from-pink-300/8 via-rose-200/4 to-transparent blur-3xl" />
+        <div className="absolute bottom-20 right-1/4 h-[320px] w-[320px] rounded-full bg-gradient-radial from-cyan-300/7 via-teal-200/3 to-transparent blur-3xl" />
+      </div>
+
       {/* ══ LNB (데스크탑) ══ */}
       <aside className="hidden lg:block">
         <div className={`sticky top-24 p-3 ${MZ_SB}`}>
+          {/* LNB 상단 헤더 */}
+          <div className="px-3 pt-2 pb-3 mb-2 border-b border-fuchsia-100/60">
+            <p className="text-xs font-black bg-gradient-to-r from-fuchsia-600 via-pink-500 to-violet-600 bg-clip-text text-transparent uppercase tracking-widest">
+              ⚔️ MATCHUP LIST
+            </p>
+          </div>
           <LNBContent />
         </div>
       </aside>
@@ -326,12 +354,15 @@ export function HomePage({ refreshRef }) {
       {/* ══ 메인 콘텐츠 ══ */}
       <div className="min-w-0">
         {/* 데스크탑: 제목(중앙) + 최신순/인기순(우측) */}
-        <div className="relative hidden lg:block mb-5 min-h-[2.75rem]">
-          <h2 className="text-lg font-black tracking-tight text-[#22282E] text-center w-full px-4 -translate-x-2">
-            지금 뜨는 1VS1 매치업
-          </h2>
+        <div className="relative hidden lg:block mb-6 min-h-[3rem]">
+          <div className="flex flex-col items-center">
+            <h2 className="text-xl font-black leading-none bg-gradient-to-r from-fuchsia-600 via-violet-500 to-pink-500 bg-clip-text text-transparent tracking-tight">
+              지금 뜨는 1VS1 매치업
+            </h2>
+            <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.2em] text-fuchsia-400/80">LIVE BATTLES</p>
+          </div>
           <div
-            className="absolute right-0 top-1/2 z-10 -translate-y-1/2 inline-flex rounded-2xl p-1 border border-violet-200/55 bg-gradient-to-br from-white/90 to-fuchsia-50/80 shadow-sm shadow-violet-200/15"
+            className="absolute right-0 top-1/2 z-10 -translate-y-1/2 inline-flex rounded-2xl p-1 border border-fuchsia-200/55 bg-gradient-to-br from-white/90 to-fuchsia-50/80 shadow-sm shadow-fuchsia-200/20"
             role="tablist"
             aria-label="정렬"
           >
@@ -345,8 +376,8 @@ export function HomePage({ refreshRef }) {
                 className={cn(
                   'flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold transition-all',
                   sortBy === s.id
-                    ? 'bg-[#22282E] text-white shadow-md'
-                    : 'text-violet-900/75 hover:bg-white/50'
+                    ? 'bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white shadow-md shadow-fuchsia-300/40'
+                    : 'text-fuchsia-800/75 hover:bg-fuchsia-50/80'
                 )}
               >
                 <span aria-hidden>{s.icon}</span>
@@ -357,42 +388,60 @@ export function HomePage({ refreshRef }) {
         </div>
 
         {/* 모바일: 카테고리 토글 + 제목 + 정렬 */}
-        <div className="lg:hidden flex items-center gap-2 mb-4 flex-wrap">
-          <button
-            onClick={() => setLnbOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-violet-200/55 bg-gradient-to-br from-white/90 to-violet-50/85 text-sm font-bold text-violet-900/80 shadow-sm shadow-violet-200/20"
-          >
-            <span className="max-w-[42vw] truncate sm:max-w-none" title={activeCategoryLabel}>
-              🌐 {activeCategoryLabel}
-            </span>{' '}
-            <ChevronDown size={14} className="shrink-0" />
-          </button>
-          <span className="flex-1 text-center text-sm font-bold text-[#22282E]">지금 뜨는 1VS1 매치업</span>
-          <div className="relative ml-auto">
+        <div className="lg:hidden mb-4">
+          {/* 모바일 페이지 타이틀 */}
+          <div className="mb-3 flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-fuchsia-500 via-violet-500 to-pink-500 shadow-[0_3px_12px_-2px_rgba(168,85,247,0.5)]">
+              <span className="text-sm">⚔️</span>
+            </span>
+            <div>
+              <h2 className="text-sm font-black leading-none bg-gradient-to-r from-fuchsia-600 via-violet-500 to-pink-500 bg-clip-text text-transparent">
+                지금 뜨는 1VS1 매치업
+              </h2>
+              <p className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-fuchsia-400/80">LIVE BATTLES</p>
+            </div>
+          </div>
+          {/* 필터 + 정렬 툴바 */}
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setSortOpen((o) => !o)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-violet-200/55 bg-gradient-to-br from-white/90 to-fuchsia-50/80 text-sm font-bold text-violet-900/80 shadow-sm shadow-fuchsia-200/15"
+              onClick={() => setLnbOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-fuchsia-200/60 bg-gradient-to-br from-white to-fuchsia-50/80 text-xs font-bold text-fuchsia-800/85 shadow-sm"
             >
-              {SORT_OPTIONS.find((s) => s.id === sortBy)?.icon} {SORT_OPTIONS.find((s) => s.id === sortBy)?.label} <ChevronDown size={14} className={sortOpen ? 'rotate-180' : ''} />
+              <span className="max-w-[38vw] truncate sm:max-w-none" title={activeCategoryLabel}>
+                🌐 {activeCategoryLabel}
+              </span>
+              <ChevronDown size={12} className="shrink-0" />
             </button>
-            {sortOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setSortOpen(false)} />
-                <div className="absolute right-0 top-full mt-1 z-20 py-1 rounded-xl border border-violet-200/50 bg-gradient-to-b from-violet-50/98 to-fuchsia-50/90 shadow-lg shadow-violet-200/25 min-w-[120px]">
-                  {SORT_OPTIONS.map((s) => (
-                    <button
-                      key={s.id}
-                      onClick={() => { setPage(1); setSortBy(s.id); setSortOpen(false) }}
-                      className={`w-full flex items-center gap-2 px-4 py-2.5 text-sm font-bold transition-colors ${
-                        sortBy === s.id ? 'bg-[#22282E] text-white' : 'text-violet-900/75 hover:bg-white/50'
-                      }`}
-                    >
-                      {s.icon} {s.label}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
+            <div className="relative ml-auto">
+              <button
+                onClick={() => setSortOpen((o) => !o)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-fuchsia-200/55 bg-gradient-to-br from-white to-fuchsia-50/80 text-xs font-bold text-fuchsia-800/80 shadow-sm"
+              >
+                {SORT_OPTIONS.find((s) => s.id === sortBy)?.icon} {SORT_OPTIONS.find((s) => s.id === sortBy)?.label}
+                <ChevronDown size={12} className={cn('transition-transform', sortOpen && 'rotate-180')} />
+              </button>
+              {sortOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setSortOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-20 py-1 rounded-xl border border-fuchsia-200/50 bg-gradient-to-b from-white to-fuchsia-50/90 shadow-lg shadow-fuchsia-200/30 min-w-[120px]">
+                    {SORT_OPTIONS.map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => { setPage(1); setSortBy(s.id); setSortOpen(false) }}
+                        className={cn(
+                          'w-full flex items-center gap-2 px-4 py-2.5 text-sm font-bold transition-colors',
+                          sortBy === s.id
+                            ? 'bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white'
+                            : 'text-fuchsia-800/75 hover:bg-fuchsia-50/80'
+                        )}
+                      >
+                        {s.icon} {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -431,10 +480,10 @@ export function HomePage({ refreshRef }) {
           </div>
         </MatchupEngagementProvider>
 
-        {/* ── 3-5. 하단 페이지네이션 (원형 버튼) ── */}
+        {/* ── 3-5. 하단 페이지네이션 ── */}
         {!loading && data.length > 0 && (
           <div className="mt-8 pb-24 sm:pb-8 flex justify-center">
-            <div className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl border border-gray-100 bg-white/90 shadow-sm">
+            <div className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl border border-fuchsia-100/70 bg-gradient-to-br from-white to-fuchsia-50/40 shadow-[0_2px_12px_-4px_rgba(168,85,247,0.15)]">
               <Pagination current={page} total={totalPages} onPage={goPage} />
             </div>
           </div>
@@ -451,8 +500,8 @@ export function HomePage({ refreshRef }) {
           />
           <div className={`fixed top-0 left-0 bottom-0 z-50 w-[min(18rem,90vw)] max-w-[18rem] shadow-xl shadow-gray-200/40 overflow-y-auto p-4 ${MZ_SB} rounded-none rounded-r-2xl`}>
             <div className="flex justify-between items-center mb-4">
-              <p className="font-black text-fuchsia-600">🌐 카테고리 & 필터</p>
-              <button type="button" onClick={() => setLnbOpen(false)} className="p-2 rounded-xl text-pink-400 hover:bg-white/80 transition-colors">✕</button>
+              <p className="font-black bg-gradient-to-r from-fuchsia-600 to-violet-600 bg-clip-text text-transparent">🌐 카테고리 & 필터</p>
+              <button type="button" onClick={() => setLnbOpen(false)} className="p-2 rounded-xl text-fuchsia-400 hover:bg-fuchsia-50 transition-colors font-bold">✕</button>
             </div>
             <LNBContent />
           </div>
@@ -464,20 +513,20 @@ export function HomePage({ refreshRef }) {
 
 // ── 빈 피드 ───────────────────────────────────────────────────────────
 function EmptyFeed({ onCreateClick }) {
-  const emoji = '🆕'
-  const title = '매치업이 없어요.'
-  const desc = '아직 매치업을 만들지 않으셨나요?\n지금 당신의 경쟁을 만들어보세요!'
-  const cta = '매치업 만들어보기 ✨'
   return (
-    <div className="py-16 text-center rounded-2xl border border-gray-100 bg-white/90">
-      <p className="text-5xl mb-3">{emoji}</p>
-      <p className="text-base font-black text-[#22282E] mb-1">{title}</p>
-      <p className="text-sm text-gray-400 whitespace-pre-line mb-6">{desc}</p>
+    <div className="py-16 text-center rounded-2xl border border-fuchsia-100/60 bg-gradient-to-br from-white via-fuchsia-50/30 to-violet-50/20 shadow-[0_4px_24px_-8px_rgba(168,85,247,0.1)]">
+      <p className="text-5xl mb-3">⚔️</p>
+      <p className="text-base font-black bg-gradient-to-r from-fuchsia-700 to-violet-600 bg-clip-text text-transparent mb-1">
+        매치업이 없어요.
+      </p>
+      <p className="text-sm text-fuchsia-400/80 whitespace-pre-line mb-6">
+        {'아직 매치업을 만들지 않으셨나요?\n지금 당신의 경쟁을 만들어보세요!'}
+      </p>
       <button
         onClick={onCreateClick}
-        className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-lime-400 to-emerald-400 text-[#0f1f0f] text-sm font-black rounded-xl shadow-md shadow-emerald-100 hover:shadow-lg hover:-translate-y-0.5 active:scale-95 transition-all"
+        className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-fuchsia-500 via-violet-500 to-pink-500 text-white text-sm font-black rounded-xl shadow-[0_4px_16px_-4px_rgba(168,85,247,0.5)] hover:shadow-[0_6px_20px_-4px_rgba(168,85,247,0.6)] hover:-translate-y-0.5 active:scale-95 transition-all"
       >
-        <Plus size={15} strokeWidth={2.5} /> {cta}
+        <Plus size={15} strokeWidth={2.5} /> 매치업 만들어보기 ✨
       </button>
     </div>
   )
@@ -497,7 +546,7 @@ function Pagination({ current, total, onPage }) {
       <button
         onClick={() => onPage(current - 1)}
         disabled={current === 1}
-        className="w-10 h-10 flex items-center justify-center rounded-full border-2 border-gray-200 text-gray-400 hover:border-[#22282E] hover:text-[#22282E] disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+        className="w-10 h-10 flex items-center justify-center rounded-full border-2 border-fuchsia-100 text-fuchsia-600/70 hover:border-fuchsia-400 hover:text-fuchsia-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
       >
         <ChevronLeft size={18} />
       </button>
@@ -517,7 +566,7 @@ function Pagination({ current, total, onPage }) {
       <button
         onClick={() => onPage(current + 1)}
         disabled={current === total}
-        className="w-10 h-10 flex items-center justify-center rounded-full border-2 border-gray-200 text-gray-400 hover:border-[#22282E] hover:text-[#22282E] disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+        className="w-10 h-10 flex items-center justify-center rounded-full border-2 border-fuchsia-100 text-fuchsia-600/70 hover:border-fuchsia-400 hover:text-fuchsia-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
       >
         <ChevronRight size={18} />
       </button>
@@ -531,7 +580,9 @@ function PaginationBtn({ page, current, onClick }) {
     <button
       onClick={() => onClick(page)}
       className={`w-10 h-10 flex items-center justify-center rounded-full text-sm font-black transition-all ${
-        active ? 'bg-[#22282E] text-white shadow-lg scale-110' : 'border-2 border-gray-200 text-gray-500 hover:border-[#22282E] hover:text-[#22282E]'
+        active
+          ? 'bg-gradient-to-br from-fuchsia-600 to-violet-600 text-white shadow-[0_4px_14px_-2px_rgba(168,85,247,0.5)] scale-110'
+          : 'border-2 border-fuchsia-100 text-fuchsia-700/70 hover:border-fuchsia-400 hover:text-fuchsia-700'
       }`}
     >
       {page}
@@ -542,18 +593,19 @@ function PaginationBtn({ page, current, onClick }) {
 // ── 스켈레톤 ─────────────────────────────────────────────────────────
 function FeedCardSkeleton() {
   return (
-    <div className="bg-white border border-gray-100 rounded-2xl lg:rounded-3xl p-4 lg:p-6 space-y-3 lg:space-y-4 animate-pulse max-w-full lg:max-w-[min(100%,52rem)] xl:max-w-[min(100%,56rem)] mx-auto">
+    <div className="relative border border-fuchsia-100/60 bg-gradient-to-br from-white via-fuchsia-50/30 to-white rounded-2xl lg:rounded-3xl p-4 lg:p-6 space-y-3 lg:space-y-4 animate-pulse max-w-full lg:max-w-[min(100%,52rem)] xl:max-w-[min(100%,56rem)] mx-auto overflow-hidden">
+      <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-fuchsia-200 via-violet-200 to-pink-200 rounded-t-2xl" />
       <div className="flex items-center gap-3">
-        <div className="w-10 lg:w-12 h-5 lg:h-6 bg-gray-100 rounded-lg" />
-        <div className="flex-1 h-4 lg:h-5 bg-gray-100 rounded" />
+        <div className="w-10 lg:w-12 h-5 lg:h-6 bg-fuchsia-100/80 rounded-lg" />
+        <div className="flex-1 h-4 lg:h-5 bg-fuchsia-100/60 rounded" />
       </div>
       <div className="grid grid-cols-2 gap-2 lg:gap-4">
-        <div className="aspect-square bg-gray-100 rounded-xl lg:rounded-2xl" />
-        <div className="aspect-square bg-gray-100 rounded-xl lg:rounded-2xl" />
+        <div className="aspect-square bg-fuchsia-100/60 rounded-xl lg:rounded-2xl" />
+        <div className="aspect-square bg-violet-100/60 rounded-xl lg:rounded-2xl" />
       </div>
       <div className="flex items-center justify-between pt-1">
-        <div className="w-24 lg:w-32 h-4 lg:h-5 bg-gray-100 rounded" />
-        <div className="w-20 lg:w-24 h-7 lg:h-9 bg-gray-100 rounded-xl" />
+        <div className="w-24 lg:w-32 h-4 lg:h-5 bg-fuchsia-100/60 rounded" />
+        <div className="w-20 lg:w-24 h-7 lg:h-9 bg-fuchsia-100/80 rounded-xl" />
       </div>
     </div>
   )

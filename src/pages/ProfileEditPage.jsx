@@ -20,9 +20,11 @@ import { FandomGoldExclusiveEmojiBar } from '../components/fandom/FandomGoldExcl
 const PAGE_BG =
   'bg-gradient-to-br from-rose-50/98 via-fuchsia-50/35 to-cyan-50/50'
 const SECTION_CARD =
-  'rounded-2xl border border-pink-100/50 bg-white/92 shadow-[0_4px_28px_-10px_rgba(244,114,182,0.18)] backdrop-blur-[2px]'
+  'rounded-2xl border border-pink-100/50 bg-white/95 shadow-[0_4px_28px_-10px_rgba(244,114,182,0.18)] backdrop-blur-[2px] overflow-hidden'
 const HEADER_GLASS =
   'bg-gradient-to-b from-white/90 via-rose-50/40 to-fuchsia-50/20 backdrop-blur-md border-b border-pink-100/55'
+
+const SECTION_COLOR_BAR = 'h-0.5 bg-gradient-to-r'
 
 const ALL_BADGES = [...ACTIVITY_BADGES]
 
@@ -397,7 +399,7 @@ export function ProfileEditPage() {
         if (data) setProfile(data)
         showToast('대표 배지가 저장되었습니다! ✓', 'success')
         navigate('/mypage')
-        void fetchProfile(user.id)
+        void fetchProfile(user.id, { force: true })
         return
       }
 
@@ -418,7 +420,7 @@ export function ProfileEditPage() {
       }
       showToast('프로필이 업데이트되었습니다! ✓', 'success')
       navigate('/mypage')
-      void fetchProfile(user.id)
+      void fetchProfile(user.id, { force: true })
     } catch {
       showToast('저장 중 오류가 발생했어요', 'error')
     } finally {
@@ -448,18 +450,26 @@ export function ProfileEditPage() {
     <div className={cn('max-w-screen-sm mx-auto min-h-screen', PAGE_BG)}>
 
       {/* ── 상단 바 ── */}
-      <div className={cn('sticky top-0 z-30 flex items-center justify-between h-14 px-4', HEADER_GLASS)}>
+      <div className={cn('sticky top-0 z-30 flex items-center gap-2.5 h-14 px-4', HEADER_GLASS)}>
         <button
           onClick={() => navigate('/mypage')}
-          className="p-2 -ml-2 rounded-xl hover:bg-pink-100/60 transition-colors"
+          className="flex items-center gap-1 pl-2 pr-3 py-2 -ml-1 rounded-xl bg-gradient-to-r from-pink-50 to-fuchsia-50 border border-pink-200/60 hover:from-pink-100 hover:to-fuchsia-100 transition-all shrink-0 shadow-sm"
         >
-          <ArrowLeft size={20} className="text-fuchsia-900" />
+          <ArrowLeft size={15} className="text-fuchsia-700" />
+          <span className="text-xs font-bold text-fuchsia-700">뒤로</span>
         </button>
-        <h1 className="text-base font-black text-fuchsia-950">프로필 편집</h1>
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-fuchsia-500 to-pink-500 shadow-md shadow-fuchsia-300/40">
+            <Pencil size={13} className="text-white" />
+          </span>
+          <h1 className="text-base font-black bg-gradient-to-r from-fuchsia-700 to-pink-600 bg-clip-text text-transparent truncate">
+            프로필 편집
+          </h1>
+        </div>
         <button
           onClick={handleSave}
           disabled={!hasChanges() || saving}
-          className={`px-4 py-1.5 text-sm font-black rounded-full transition-all ${
+          className={`px-4 py-1.5 text-sm font-black rounded-full transition-all shrink-0 ${
             hasChanges() && !saving
               ? 'bg-gradient-to-r from-fuchsia-600 to-pink-500 text-white hover:brightness-105 active:scale-95 shadow-md shadow-fuchsia-300/35'
               : 'bg-fuchsia-100/60 text-fuchsia-400/80 cursor-not-allowed'
@@ -474,11 +484,13 @@ export function ProfileEditPage() {
         {/* ── 아바타 영역 → 사진 수정 페이지로 이동 ── */}
         <div
           className={cn(
-            `${SECTION_CARD} p-5 flex flex-col items-center gap-3`,
+            SECTION_CARD,
             goldProfileGlow && 'vics-fandom-gold-profile-header',
             silverProfileGlow && 'vics-fandom-silver-profile-header',
           )}
         >
+          <div className={cn(SECTION_COLOR_BAR, 'from-pink-400 via-fuchsia-400 to-violet-400')} />
+          <div className="p-5 flex flex-col items-center gap-3">
           <div
             className="relative w-fit max-w-full cursor-pointer group"
             onClick={() => navigate('/mypage/edit/image')}
@@ -535,13 +547,17 @@ export function ProfileEditPage() {
             </div>
           </div>
           <p className="text-xs text-fuchsia-700/55">사진을 탭하면 이미지 수정 화면으로 이동해요</p>
+          </div>
         </div>
 
         {/* ── 닉네임 수정 ── */}
-        <div className={`${SECTION_CARD} overflow-hidden`}>
-          <div className="flex items-center gap-2 px-5 pt-4 pb-2">
-            <Pencil size={14} className="text-fuchsia-500" />
-            <span className="text-sm font-black text-fuchsia-950">닉네임 수정</span>
+        <div className={SECTION_CARD}>
+          <div className={cn(SECTION_COLOR_BAR, 'from-fuchsia-400 via-violet-400 to-indigo-400')} />
+          <div className="flex items-center gap-2.5 px-5 pt-4 pb-2">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-fuchsia-500 to-violet-600 shadow-sm">
+              <Pencil size={12} className="text-white" />
+            </span>
+            <span className="text-sm font-black bg-gradient-to-r from-fuchsia-700 to-violet-700 bg-clip-text text-transparent">닉네임 수정</span>
           </div>
           <div className="px-4 pb-4">
             {nickLockedThisSeason && (
@@ -581,10 +597,13 @@ export function ProfileEditPage() {
         </div>
 
         {/* ── 한 줄 소개 ── */}
-        <div className={`${SECTION_CARD} overflow-hidden`}>
-          <div className="flex items-center gap-2 px-5 pt-4 pb-2">
-            <span className="text-sm">💬</span>
-            <span className="text-sm font-black text-fuchsia-950">한 줄 소개</span>
+        <div className={SECTION_CARD}>
+          <div className={cn(SECTION_COLOR_BAR, 'from-pink-400 via-rose-400 to-orange-300')} />
+          <div className="flex items-center gap-2.5 px-5 pt-4 pb-2">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-pink-500 to-rose-500 shadow-sm text-sm">
+              💬
+            </span>
+            <span className="text-sm font-black bg-gradient-to-r from-pink-700 to-rose-600 bg-clip-text text-transparent">한 줄 소개</span>
           </div>
           <div className="space-y-2 px-4 pb-4">
             <div className="relative">
@@ -613,10 +632,13 @@ export function ProfileEditPage() {
         </div>
 
         {/* ── 대표 배지 설정 ── */}
-        <div className={`${SECTION_CARD} overflow-hidden`}>
-          <div className="flex items-center gap-2 px-5 pt-4 pb-2">
-            <Award size={14} className="text-amber-500" />
-            <span className="text-sm font-black text-fuchsia-950">대표 배지 설정</span>
+        <div className={SECTION_CARD}>
+          <div className={cn(SECTION_COLOR_BAR, 'from-amber-400 via-orange-400 to-yellow-300')} />
+          <div className="flex items-center gap-2.5 px-5 pt-4 pb-2">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 shadow-sm">
+              <Award size={13} className="text-white" />
+            </span>
+            <span className="text-sm font-black bg-gradient-to-r from-amber-700 to-orange-600 bg-clip-text text-transparent">대표 배지 설정</span>
           </div>
           <button
             type="button"
@@ -656,24 +678,30 @@ export function ProfileEditPage() {
         </div>
 
         {/* ── 계정 이메일 ── */}
-        <div className={`${SECTION_CARD} px-5 py-4`}>
-          <div className="flex items-center gap-2 mb-2">
-            <Shield size={14} className="text-sky-500" />
-            <span className="text-sm font-black text-fuchsia-950">계정 이메일</span>
+        <div className={SECTION_CARD}>
+          <div className={cn(SECTION_COLOR_BAR, 'from-sky-400 via-blue-400 to-indigo-400')} />
+          <div className="px-5 py-4">
+            <div className="flex items-center gap-2.5 mb-2.5">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-sky-400 to-blue-500 shadow-sm">
+                <Shield size={13} className="text-white" />
+              </span>
+              <span className="text-sm font-black bg-gradient-to-r from-sky-700 to-blue-700 bg-clip-text text-transparent">계정 이메일</span>
+            </div>
+            <p className="text-sm text-fuchsia-900/70 pl-1">{user?.email}</p>
+            {user?.app_metadata?.provider !== 'email' && (
+              <p className="text-xs text-fuchsia-700/50 mt-1 pl-1">소셜 로그인 계정은 이메일을 변경할 수 없어요</p>
+            )}
           </div>
-          <p className="text-sm text-fuchsia-900/70 pl-1">{user?.email}</p>
-          {user?.app_metadata?.provider !== 'email' && (
-            <p className="text-xs text-fuchsia-700/50 mt-1 pl-1">소셜 로그인 계정은 이메일을 변경할 수 없어요</p>
-          )}
         </div>
 
         {/* ── 로그아웃 / 회원탈퇴 ── */}
-        <div className={`${SECTION_CARD} overflow-hidden`}>
+        <div className={SECTION_CARD}>
+          <div className={cn(SECTION_COLOR_BAR, 'from-rose-400 via-red-400 to-orange-300')} />
           <button
             onClick={() => setLogoutModal(true)}
-            className="w-full flex items-center gap-3 px-5 py-4 hover:bg-rose-50/50 transition-colors"
+            className="w-full flex items-center gap-3 px-5 py-4 hover:bg-rose-50/60 transition-colors"
           >
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-rose-100 to-pink-100 flex items-center justify-center border border-pink-200/50">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-rose-100 to-pink-100 flex items-center justify-center border border-pink-200/50 shadow-sm">
               <LogOut size={15} className="text-rose-500" />
             </div>
             <span className="text-sm font-bold text-fuchsia-900/85">로그아웃</span>
@@ -683,7 +711,7 @@ export function ProfileEditPage() {
             onClick={() => navigate('/mypage/delete')}
             className="w-full flex items-center gap-3 px-5 py-4 hover:bg-red-50 transition-colors"
           >
-            <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center shadow-sm">
               <Trash2 size={15} className="text-red-500" />
             </div>
             <span className="text-sm font-bold text-red-500">회원 탈퇴</span>
@@ -691,7 +719,7 @@ export function ProfileEditPage() {
           </button>
         </div>
 
-        <p className="text-[10px] text-fuchsia-300/80 text-center py-2">VICS v1.0.0</p>
+        <p className="text-[10px] text-fuchsia-300/70 text-center py-2">VICS v1.0.0</p>
       </div>
 
       <BadgeSheet

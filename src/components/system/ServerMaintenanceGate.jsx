@@ -17,8 +17,6 @@ export function ServerMaintenanceGate({ children }) {
   const showAdminNav = useCanAccessAdmin()
   const ready = useServerMaintenanceStore((s) => s.ready)
   const isActive = useServerMaintenanceStore(selectServerMaintenanceActive)
-  const refresh = useServerMaintenanceStore((s) => s.refresh)
-  const startPolling = useServerMaintenanceStore((s) => s.startPolling)
   const setForceDemo = useServerMaintenanceStore((s) => s.setForceDemo)
 
   const maintenanceDemo = import.meta.env.DEV && searchParams.get('maintenanceDemo') === '1'
@@ -34,10 +32,10 @@ export function ServerMaintenanceGate({ children }) {
   }, [maintenanceDemo, setForceDemo])
 
   useEffect(() => {
-    void refresh({ probe: true })
-    startPolling()
+    void useServerMaintenanceStore.getState().refresh({ probe: true, force: true })
+    useServerMaintenanceStore.getState().startPolling()
     return () => useServerMaintenanceStore.getState().stopPolling()
-  }, [refresh, startPolling])
+  }, [])
 
   if (!ready && !maintenanceDemo) {
     return children

@@ -415,7 +415,7 @@ function SpotlightSlide({ matchup: m, remainingSec }) {
         window.dispatchEvent(new CustomEvent('vics:header:points-pulse'))
       }
       window.dispatchEvent(new CustomEvent('vics:spotlight-self-voted'))
-      if (user?.id) void fetchProfile(user.id)
+      if (user?.id) void fetchProfile(user.id, { force: true })
     } finally {
       setSubmitting(false)
     }

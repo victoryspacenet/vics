@@ -65,9 +65,9 @@ const ATTENDANCE_STREAK_BONUS = 70 // 7일 연속 출석 시(매 7일마다) 보
 
 /** 섹션 카드 (MZ 파스텔) — 네온 테마 시에도 본문 카드는 가독성 위해 유지 */
 const SECTION_CARD =
-  'rounded-2xl border border-pink-100/50 bg-white/92 shadow-[0_4px_28px_-10px_rgba(244,114,182,0.18)] backdrop-blur-[2px]'
+  'rounded-2xl border border-pink-200/55 bg-white/93 shadow-[0_6px_32px_-12px_rgba(244,114,182,0.25)] backdrop-blur-[2px]'
 const LIST_CARD =
-  'rounded-2xl border border-pink-100/45 bg-white/95 shadow-sm shadow-pink-100/15'
+  'rounded-2xl border border-pink-100/45 bg-white/95 shadow-sm shadow-pink-100/20'
 
 export function MyPage() {
   const { user, profile, fetchProfile, loading: authLoading } = useAuthStore()
@@ -133,7 +133,7 @@ export function MyPage() {
       if (data?.ok) {
         setAttendanceChecked(true)
         setAttendanceConsecutive(data.consecutive || 1)
-        fetchProfile(user.id)
+        fetchProfile(user.id, { force: true })
         showToast(`출석 완료! +${data.points || ATTENDANCE_POINTS}P 획득 🎉`, 'success')
       } else {
         showToast(data?.error || '출석 체크에 실패했어요', 'error')
@@ -512,7 +512,12 @@ export function MyPage() {
         ) : (
         <>
         <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-          <h2 className="text-base font-black text-[#22282E]">My 등급</h2>
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 via-orange-500 to-rose-500 shadow-[0_3px_12px_-2px_rgba(251,146,60,0.5)] shrink-0">
+              <Trophy size={14} className="text-white" strokeWidth={2.5} />
+            </span>
+            <h2 className="text-base font-black leading-none bg-gradient-to-r from-amber-600 via-orange-500 to-rose-500 bg-clip-text text-transparent">My 등급</h2>
+          </div>
           <div className="flex items-center gap-2">
             <TierBadge profile={profile} rankInfo={tierRankSnapshot} variant="compact" />
             <VipPromoButton />
@@ -584,28 +589,33 @@ export function MyPage() {
       {/* ══ 출석 체크 ══ */}
       <div className={`${SECTION_CARD} p-5 mb-6`}>
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-black text-[#22282E]">출석 체크</h3>
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 via-teal-500 to-cyan-500 shadow-[0_2px_8px_-2px_rgba(20,184,166,0.5)] shrink-0">
+              <CalendarCheck size={13} className="text-white" strokeWidth={2.5} />
+            </span>
+            <h3 className="text-sm font-black bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 bg-clip-text text-transparent">출석 체크</h3>
+          </div>
           <span className="text-xs text-gray-400">일 1회 · +{ATTENDANCE_POINTS}P</span>
         </div>
         <div className="mt-3 flex items-center gap-3">
           {attendanceChecked ? (
-            <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-green-50 border border-green-100 text-green-700">
-              <CheckCircle2 size={18} className="text-green-500" />
-              <span className="text-sm font-bold">오늘 출석 완료!</span>
+            <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-gradient-to-r from-emerald-50 via-teal-50 to-cyan-50/70 border border-emerald-200/70 shadow-sm">
+              <CheckCircle2 size={18} className="text-emerald-500 shrink-0" />
+              <span className="text-sm font-bold text-emerald-700">오늘 출석 완료!</span>
               {attendanceConsecutive > 1 && (
-                <span className="text-xs font-semibold text-green-600">· {attendanceConsecutive}일 연속</span>
+                <span className="text-xs font-bold text-teal-600">· {attendanceConsecutive}일 연속 🔥</span>
               )}
             </div>
           ) : (
             <button
               onClick={handleCheckAttendance}
               disabled={attendanceLoading}
-              className="flex items-center gap-2 px-5 py-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-400 via-teal-500 to-cyan-500 hover:from-emerald-500 hover:via-teal-600 hover:to-cyan-600 text-white text-sm font-bold shadow-[0_4px_16px_-4px_rgba(20,184,166,0.55)] hover:shadow-[0_6px_20px_-4px_rgba(20,184,166,0.7)] transition-all disabled:opacity-60 disabled:cursor-not-allowed hover:-translate-y-0.5 active:translate-y-0"
             >
               {attendanceLoading ? (
                 <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
               ) : (
-                <span>✓</span>
+                <CalendarCheck size={16} strokeWidth={2.5} />
               )}
               출석 체크하고 +{ATTENDANCE_POINTS}P 받기
             </button>
@@ -616,7 +626,12 @@ export function MyPage() {
       {/* ══ 활동통계 물결그래프 ══ */}
       <div className={`${SECTION_CARD} p-5 mb-6`}>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-black text-[#22282E]">활동통계</h3>
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 via-fuchsia-500 to-pink-500 shadow-[0_2px_8px_-2px_rgba(168,85,247,0.45)] shrink-0">
+              <Zap size={13} className="text-white" strokeWidth={2.5} />
+            </span>
+            <h3 className="text-sm font-black bg-gradient-to-r from-violet-600 via-fuchsia-600 to-pink-600 bg-clip-text text-transparent">활동통계</h3>
+          </div>
           <div className="flex gap-1 bg-fuchsia-100/45 rounded-full p-1 border border-pink-100/40">
             {[
               { id: 'weekly', label: '주간' },
@@ -643,7 +658,7 @@ export function MyPage() {
         {/* ── 메인 컬럼 ── */}
         <div>
           {/* 탭 */}
-          <div className="flex bg-white/55 rounded-xl p-1 mb-5 min-w-0 border border-pink-100/50 shadow-inner shadow-pink-100/20">
+          <div className="flex bg-white/60 rounded-xl p-1 mb-5 min-w-0 border border-pink-200/50 shadow-[inset_0_2px_6px_rgba(244,114,182,0.1)]">
             {[
               { id: 'created', label: '내가 만든 매치업', count: createdMatchups.length },
               { id: 'voted',   label: '내가 투표한 매치업', count: votedMatchups.length },
@@ -653,14 +668,14 @@ export function MyPage() {
                 onClick={() => patchSearch({ tab: tab.id })}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs sm:text-sm font-bold rounded-lg transition-all min-w-0 ${
                   activeTab === tab.id
-                    ? 'bg-white text-fuchsia-950 shadow-sm border border-pink-100/60'
-                    : 'text-fuchsia-800/65 hover:text-fuchsia-950'
+                    ? 'bg-gradient-to-r from-fuchsia-600 to-pink-500 text-white shadow-[0_2px_10px_-3px_rgba(192,38,211,0.45)]'
+                    : 'text-fuchsia-700/65 hover:text-fuchsia-900'
                 }`}
               >
                 {tab.label}
                 {!loading && (
                   <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
-                    activeTab === tab.id ? 'bg-gradient-to-r from-fuchsia-600 to-pink-500 text-white' : 'bg-pink-100/70 text-fuchsia-700/80'
+                    activeTab === tab.id ? 'bg-white/25 text-white' : 'bg-pink-100/70 text-fuchsia-700/80'
                   }`}>
                     {tab.count}
                   </span>
@@ -674,13 +689,15 @@ export function MyPage() {
             <div ref={createdListRef}>
 
               {/* 요약 배너 */}
-              <div className="bg-gradient-to-r from-[#22282E] to-gray-700 rounded-2xl p-4 mb-4 text-white">
-                <p className="text-sm text-white/70 mb-0.5">{profile?.nickname || '사용자'}님은 지금까지</p>
-                <p className="text-lg font-black flex items-center gap-2">
-                  <Flame size={18} className="text-orange-400" />
+              <div className="relative bg-gradient-to-r from-fuchsia-600 via-pink-600 to-rose-500 rounded-2xl p-4 mb-4 text-white overflow-hidden">
+                <div className="absolute -right-8 -top-8 w-32 h-32 rounded-full bg-white/5" />
+                <div className="absolute -right-2 bottom-0 w-20 h-20 rounded-full bg-white/5" />
+                <p className="text-sm text-white/75 mb-0.5 relative z-10">{profile?.nickname || '사용자'}님은 지금까지</p>
+                <p className="text-lg font-black flex items-center gap-2 relative z-10">
+                  <Flame size={18} className="text-amber-300" />
                   {createdMatchups.length}개의 매치업을 이끌었습니다!
                 </p>
-                <div className="flex items-center gap-4 mt-3 text-xs text-white/60">
+                <div className="flex items-center gap-4 mt-3 text-xs text-white/70 relative z-10">
                   <span>진행 중 {createdMatchups.filter(m => m.status === 'active').length}개</span>
                   <span>·</span>
                   <span>종료됨 {createdMatchups.filter(m => m.status !== 'active').length}개</span>
@@ -961,20 +978,23 @@ function CreatedMatchupFullCard({ matchup: m }) {
 
   return (
     <div
-      className={`${LIST_CARD} overflow-hidden hover:shadow-md hover:shadow-pink-100/30 transition-all duration-200`}
+      className={`${LIST_CARD} overflow-hidden hover:shadow-[0_8px_28px_-8px_rgba(244,114,182,0.3)] hover:-translate-y-0.5 transition-all duration-200 relative`}
       style={{ scrollSnapAlign: 'start' }}
     >
+      {/* 상단 색상 바 */}
+      <div className={`h-[3px] w-full ${isActive ? 'bg-gradient-to-r from-emerald-400 via-teal-500 to-cyan-400' : 'bg-gradient-to-r from-fuchsia-400 via-pink-400 to-rose-400'}`} />
+
       {/* 카드 헤더: 상태 + 제목 */}
-      <div className="px-4 pt-4 pb-3 flex items-start justify-between gap-3">
+      <div className="px-4 pt-3.5 pb-3 flex items-start justify-between gap-3">
         <div className="flex items-center gap-2 flex-1 min-w-0">
           {/* 상태 배지 */}
           {isActive ? (
-            <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 text-[10px] font-black border border-emerald-100">
+            <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-emerald-50 to-teal-50 text-emerald-600 text-[10px] font-black border border-emerald-200/70 shadow-sm">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
               진행 중
             </span>
           ) : (
-            <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 text-[10px] font-black">
+            <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-slate-100 to-gray-100 text-gray-500 text-[10px] font-black border border-gray-200/70">
               ✓ 종료
             </span>
           )}
@@ -982,8 +1002,8 @@ function CreatedMatchupFullCard({ matchup: m }) {
         </div>
         {/* 도전자 대기 중 */}
         {!isComplete && (
-          <span className="shrink-0 text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100">
-            도전자 대기중
+          <span className="shrink-0 text-[10px] font-bold text-amber-600 bg-gradient-to-r from-amber-50 to-yellow-50 px-2 py-0.5 rounded-full border border-amber-200/70 shadow-sm">
+            ⏳ 대기중
           </span>
         )}
       </div>
@@ -995,8 +1015,8 @@ function CreatedMatchupFullCard({ matchup: m }) {
           <MatchupThumbFrame side="left" className="aspect-square w-full">
             {leftThumb
               ? <img src={safeMediaUrl(leftThumb)} alt="A" className="h-full w-full object-cover" />
-              : <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-3">
-                  <p className="line-clamp-4 text-center text-xs font-bold text-gray-600">{m.left_text}</p>
+              : <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-amber-950/90 via-orange-900/80 to-rose-950/85 p-3">
+                  <p className="line-clamp-4 text-center text-xs font-bold text-white/90">{m.left_text}</p>
                 </div>
             }
             {/* A 레이블 */}
@@ -1010,7 +1030,7 @@ function CreatedMatchupFullCard({ matchup: m }) {
             {/* A WIN 뱃지 */}
             {isComplete && hasVotes && !isActive && winner === 'left' && (
               <div className="absolute right-1.5 top-1.5 z-10">
-                <span className="inline-flex items-center gap-0.5 rounded-full bg-green-500 px-1.5 py-0.5 text-[10px] font-black text-white shadow-sm">
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 px-1.5 py-0.5 text-[10px] font-black text-white shadow-[0_2px_8px_rgba(16,185,129,0.5)]">
                   <CheckCircle2 size={9} /> WIN
                 </span>
               </div>
@@ -1027,12 +1047,12 @@ function CreatedMatchupFullCard({ matchup: m }) {
             {isComplete
               ? rightThumb
                 ? <img src={safeMediaUrl(rightThumb)} alt="B" className="h-full w-full object-cover" />
-                : <div className="flex h-full w-full items-center justify-center bg-gradient-to-bl from-pink-50 to-red-100 p-3">
-                    <p className="line-clamp-4 text-center text-xs font-bold text-gray-600">{m.right_text}</p>
+                : <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-violet-950/90 via-fuchsia-900/80 to-indigo-950/85 p-3">
+                    <p className="line-clamp-4 text-center text-xs font-bold text-white/90">{m.right_text}</p>
                   </div>
-              : <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-gray-50">
-                  <span className="text-2xl">⏳</span>
-                  <p className="px-2 text-center text-[10px] font-bold text-gray-400">도전자를 기다리는 중</p>
+              : <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-emerald-950/85 via-teal-950/75 to-cyan-950/80 border border-dashed border-emerald-400/30">
+                  <span className="text-2xl">⚔️</span>
+                  <p className="px-2 text-center text-[10px] font-black text-emerald-300">도전자 모집 중</p>
                 </div>
             }
             {/* B 레이블 */}
@@ -1046,7 +1066,7 @@ function CreatedMatchupFullCard({ matchup: m }) {
             {/* B WIN 뱃지 */}
             {isComplete && hasVotes && !isActive && winner === 'right' && (
               <div className="absolute left-1.5 top-1.5 z-10">
-                <span className="inline-flex items-center gap-0.5 rounded-full bg-green-500 px-1.5 py-0.5 text-[10px] font-black text-white shadow-sm">
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 px-1.5 py-0.5 text-[10px] font-black text-white shadow-[0_2px_8px_rgba(16,185,129,0.5)]">
                   <CheckCircle2 size={9} /> WIN
                 </span>
               </div>
@@ -1055,36 +1075,36 @@ function CreatedMatchupFullCard({ matchup: m }) {
         </div>
       </div>
 
-      {/* 투표 바 (진행 중일 때만) */}
+      {/* 투표 바 */}
       {hasVotes && isComplete && (
         <div className="px-4 pb-2">
           <div className="flex justify-between text-[10px] font-black mb-1">
-            <span className="text-blue-500">{m.left_label || 'A'} {left}%</span>
+            <span className="text-amber-600">{m.left_label || 'A'} {left}%</span>
             <span className="text-gray-400">{formatNumber(m.total_votes)}표</span>
-            <span className="text-red-400">{right}% {m.right_label || 'B'}</span>
+            <span className="text-violet-500">{right}% {m.right_label || 'B'}</span>
           </div>
-          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden flex">
-            <div className="bg-gradient-to-r from-blue-400 to-blue-500 h-full" style={{ width: `${left}%` }} />
-            <div className="bg-gradient-to-l from-red-400 to-red-300 h-full" style={{ width: `${right}%` }} />
+          <div className="h-2 bg-gray-100 rounded-full overflow-hidden flex">
+            <div className="bg-gradient-to-r from-amber-400 to-orange-500 h-full rounded-l-full" style={{ width: `${left}%` }} />
+            <div className="bg-gradient-to-l from-violet-500 to-fuchsia-400 h-full rounded-r-full" style={{ width: `${right}%` }} />
           </div>
         </div>
       )}
 
       {/* 카드 하단: 참여자 + CTA */}
-      <div className="px-4 py-3 border-t border-gray-50 flex items-center justify-between">
+      <div className="px-4 py-3 border-t border-pink-100/30 flex items-center justify-between">
         <div className="flex items-center gap-1.5 text-sm text-gray-500">
-          <Users size={13} className="text-gray-400" />
+          <Users size={13} className="text-fuchsia-400" />
           {isActive
-            ? <span><span className="font-black text-[#22282E]">{formatNumber(m.total_votes || 0)}명</span> 실시간 참여 중</span>
+            ? <span><span className="font-black text-fuchsia-700">{formatNumber(m.total_votes || 0)}명</span> 실시간 참여 중</span>
             : <span>최종 <span className="font-black text-[#22282E]">{formatNumber(m.total_votes || 0)}명</span> 참여</span>
           }
         </div>
         <Link
           to={`/matchup/${m.id}`}
-          className="inline-flex items-center gap-1 text-xs font-black text-[#22282E] hover:text-lime-600 transition-colors"
+          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-black text-white bg-gradient-to-r from-fuchsia-600 to-pink-500 rounded-full shadow-sm hover:shadow-[0_3px_12px_-3px_rgba(192,38,211,0.5)] hover:-translate-y-0.5 transition-all"
         >
           {isActive ? '현황 보기' : '결과 보기'}
-          <ArrowRight size={13} className="transition-transform group-hover:translate-x-0.5" />
+          <ArrowRight size={11} />
         </Link>
       </div>
     </div>
@@ -1104,26 +1124,26 @@ function CreatedPagination({ current, total, onPage }) {
     <div className="flex items-center justify-center gap-2 mt-6 mb-2">
       <button
         onClick={() => onPage(current - 1)} disabled={current === 1}
-        className="w-9 h-9 flex items-center justify-center rounded-full border border-gray-200 text-gray-400 hover:border-[#22282E] hover:text-[#22282E] disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+        className="w-9 h-9 flex items-center justify-center rounded-full border border-fuchsia-200/70 text-fuchsia-400 hover:border-fuchsia-400 hover:text-fuchsia-700 hover:bg-fuchsia-50/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
       >
         <ChevronLeft size={16} />
       </button>
       {start > 1 && (
         <>
           <PageBtn page={1} current={current} onClick={onPage} />
-          {start > 2 && <span className="text-gray-300 text-sm">…</span>}
+          {start > 2 && <span className="text-fuchsia-200 text-sm">…</span>}
         </>
       )}
       {pages.map((p) => <PageBtn key={p} page={p} current={current} onClick={onPage} />)}
       {end < total && (
         <>
-          {end < total - 1 && <span className="text-gray-300 text-sm">…</span>}
+          {end < total - 1 && <span className="text-fuchsia-200 text-sm">…</span>}
           <PageBtn page={total} current={current} onClick={onPage} />
         </>
       )}
       <button
         onClick={() => onPage(current + 1)} disabled={current === total}
-        className="w-9 h-9 flex items-center justify-center rounded-full border border-gray-200 text-gray-400 hover:border-[#22282E] hover:text-[#22282E] disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+        className="w-9 h-9 flex items-center justify-center rounded-full border border-fuchsia-200/70 text-fuchsia-400 hover:border-fuchsia-400 hover:text-fuchsia-700 hover:bg-fuchsia-50/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
       >
         <ChevronRight size={16} />
       </button>
@@ -1137,8 +1157,8 @@ function PageBtn({ page, current, onClick }) {
       onClick={() => onClick(page)}
       className={`w-9 h-9 flex items-center justify-center rounded-full text-sm font-bold transition-all ${
         page === current
-          ? 'bg-[#22282E] text-white shadow-sm scale-105'
-          : 'border border-gray-200 text-gray-500 hover:border-[#22282E] hover:text-[#22282E]'
+          ? 'bg-gradient-to-r from-fuchsia-600 to-pink-500 text-white shadow-[0_3px_12px_-3px_rgba(192,38,211,0.5)] scale-110'
+          : 'border border-fuchsia-200/65 text-fuchsia-500/80 hover:border-fuchsia-400 hover:text-fuchsia-700 hover:bg-fuchsia-50/40'
       }`}
     >
       {page}
@@ -1438,14 +1458,14 @@ function VotedMatchupRow({ vote, matchup: m }) {
   return (
     <Link
       to={`/matchup/${m.id}`}
-      className={`flex items-center gap-3 p-3.5 ${LIST_CARD} hover:shadow-md transition-all duration-200 group`}
+      className={`flex items-center gap-3 p-3.5 ${LIST_CARD} hover:shadow-[0_6px_20px_-6px_rgba(244,114,182,0.28)] hover:-translate-y-0.5 transition-all duration-200 group`}
     >
       {/* 썸네일 */}
-      <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100 shrink-0">
+      <div className="w-16 h-16 rounded-xl overflow-hidden bg-fuchsia-50 shrink-0 ring-2 ring-pink-100/60">
         {thumb
           ? <img src={safeMediaUrl(thumb)} alt={m.title} className="w-full h-full object-cover" />
-          : <div className="w-full h-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
-              <span className="text-[8px] text-gray-400 text-center px-1 line-clamp-3">{m.title}</span>
+          : <div className="w-full h-full bg-gradient-to-br from-fuchsia-100/60 to-violet-100/50 flex items-center justify-center">
+              <span className="text-[8px] text-fuchsia-400 text-center px-1 line-clamp-3">{m.title}</span>
             </div>
         }
       </div>
@@ -1453,28 +1473,28 @@ function VotedMatchupRow({ vote, matchup: m }) {
       {/* 정보 */}
       <div className="flex-1 min-w-0">
         {m.category && (
-          <p className="text-[10px] text-gray-400 font-semibold mb-0.5">{m.category}</p>
+          <p className="text-[10px] text-fuchsia-400/80 font-semibold mb-0.5">{m.category}</p>
         )}
         <p className="text-sm font-bold text-[#22282E] truncate">{m.title}</p>
         <div className="flex items-center gap-1.5 mt-1">
-          <span className="text-xs text-gray-500">나의 선택:</span>
-          <span className="text-xs font-black text-[#22282E]">{myLabel}</span>
+          <span className="text-xs text-gray-400">나의 선택:</span>
+          <span className="text-xs font-black text-fuchsia-700">{myLabel}</span>
           {!isActive && hasVotes && (
             isDraw
-              ? <span className="inline-flex items-center gap-0.5 text-[10px] font-black text-gray-500">
+              ? <span className="inline-flex items-center gap-0.5 text-[10px] font-black text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-full">
                   무승부
                 </span>
               : myWin
-              ? <span className="inline-flex items-center gap-0.5 text-[10px] font-black text-green-600">
-                  <CheckCircle2 size={10} /> 승리
+              ? <span className="inline-flex items-center gap-0.5 text-[10px] font-black text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full border border-emerald-200/60">
+                  <CheckCircle2 size={9} /> 승리
                 </span>
-              : <span className="inline-flex items-center gap-0.5 text-[10px] font-black text-red-500">
-                  <XCircle size={10} /> 패배
+              : <span className="inline-flex items-center gap-0.5 text-[10px] font-black text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded-full border border-rose-200/60">
+                  <XCircle size={9} /> 패배
                 </span>
           )}
           {isActive && (
-            <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-gray-400">
-              <Clock size={10} /> 진행중
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-teal-600 bg-teal-50 px-1.5 py-0.5 rounded-full border border-teal-200/60">
+              <Clock size={9} /> 진행중
             </span>
           )}
         </div>
@@ -1483,17 +1503,21 @@ function VotedMatchupRow({ vote, matchup: m }) {
       {/* 결과 뱃지 */}
       <div className="shrink-0">
         {!isActive && hasVotes ? (
-          <span className={`text-xs font-black px-2.5 py-1.5 rounded-xl ${
-            isDraw ? 'bg-gray-100 text-gray-600 border border-gray-200' : myWin ? 'bg-green-50 text-green-600 border border-green-100' : 'bg-red-50 text-red-500 border border-red-100'
+          <span className={`text-xs font-black px-2.5 py-1.5 rounded-xl shadow-sm ${
+            isDraw
+              ? 'bg-gradient-to-r from-slate-100 to-gray-100 text-slate-600 border border-slate-200/70'
+              : myWin
+              ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-[0_2px_8px_rgba(16,185,129,0.4)]'
+              : 'bg-gradient-to-r from-rose-400 to-pink-500 text-white shadow-[0_2px_8px_rgba(244,63,94,0.4)]'
           }`}>
             {isDraw ? '무승부' : myWin ? '✓ 승' : '✗ 패'}
           </span>
         ) : isActive ? (
-          <span className="text-[10px] font-semibold text-gray-400 bg-gray-50 px-2 py-1 rounded-lg border border-gray-100">
+          <span className="text-[10px] font-semibold text-teal-600 bg-teal-50 px-2 py-1 rounded-lg border border-teal-200/60">
             진행중
           </span>
         ) : (
-          <ChevronRight size={16} className="text-gray-300 group-hover:text-gray-500 transition-colors" />
+          <ChevronRight size={16} className="text-fuchsia-200 group-hover:text-fuchsia-500 transition-colors" />
         )}
       </div>
     </Link>
@@ -1639,10 +1663,10 @@ function SideStatBox({ variant = 'total', icon, label, value, color }) {
 
 function EmptyState({ emoji, title, desc }) {
   return (
-    <div className={`py-16 text-center ${SECTION_CARD}`}>
-      <p className="text-4xl mb-3">{emoji}</p>
-      <p className="text-sm font-bold text-fuchsia-950 mb-1">{title}</p>
-      <p className="text-xs text-fuchsia-700/60">{desc}</p>
+    <div className={`py-16 text-center ${SECTION_CARD} bg-gradient-to-br from-white via-fuchsia-50/40 to-pink-50/30`}>
+      <p className="text-5xl mb-3">{emoji}</p>
+      <p className="text-sm font-black bg-gradient-to-r from-fuchsia-600 to-pink-500 bg-clip-text text-transparent mb-1">{title}</p>
+      <p className="text-xs text-fuchsia-700/55">{desc}</p>
     </div>
   )
 }
@@ -1651,14 +1675,14 @@ function ProfileHeaderSkeleton() {
   return (
     <div className="flex w-full flex-col sm:flex-row items-center sm:items-start gap-6 animate-pulse">
       <div className="flex w-full shrink-0 justify-center sm:w-auto sm:justify-start">
-        <div className="h-24 w-24 shrink-0 rounded-full bg-gray-100 sm:h-28 sm:w-28" />
+        <div className="h-24 w-24 shrink-0 rounded-full bg-gradient-to-br from-fuchsia-100 to-pink-100 sm:h-28 sm:w-28" />
       </div>
       <div className="flex w-full min-w-0 flex-1 flex-col space-y-3 text-center sm:w-auto sm:text-left">
-        <div className="h-7 w-32 bg-gray-100 rounded mx-auto sm:mx-0" />
-        <div className="h-4 w-48 bg-gray-100 rounded mx-auto sm:mx-0" />
+        <div className="h-7 w-32 bg-gradient-to-r from-fuchsia-100 to-pink-100 rounded mx-auto sm:mx-0" />
+        <div className="h-4 w-48 bg-fuchsia-100/70 rounded mx-auto sm:mx-0" />
         <div className="flex flex-wrap justify-center sm:justify-start gap-2">
-          <div className="h-9 w-24 bg-gray-100 rounded-full" />
-          <div className="h-9 w-28 bg-gray-100 rounded-full" />
+          <div className="h-9 w-24 bg-pink-100/70 rounded-full" />
+          <div className="h-9 w-28 bg-violet-100/60 rounded-full" />
         </div>
       </div>
     </div>
@@ -1669,13 +1693,13 @@ function ProfileLevelSkeleton() {
   return (
     <div className="flex flex-col sm:flex-row items-center gap-6 animate-pulse">
       <div className="flex flex-col items-center shrink-0">
-        <div className="h-32 w-32 rounded-full bg-gray-100 ring-4 ring-gray-100" />
-        <div className="mt-3 h-4 w-24 rounded bg-gray-100" />
-        <div className="mt-2 h-3 w-20 rounded bg-gray-100" />
+        <div className="h-32 w-32 rounded-full bg-gradient-to-br from-amber-100 to-orange-100 ring-4 ring-amber-100/70" />
+        <div className="mt-3 h-4 w-24 rounded bg-amber-100/70" />
+        <div className="mt-2 h-3 w-20 rounded bg-pink-100/60" />
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 flex-1 w-full sm:w-auto">
         {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="h-16 bg-gray-100 rounded-xl" />
+          <div key={i} className="h-16 bg-gradient-to-br from-pink-50 to-fuchsia-50 rounded-xl border border-pink-100/50" />
         ))}
       </div>
     </div>
@@ -1698,18 +1722,18 @@ function FullCardSkeleton() {
   return (
     <div className={`${LIST_CARD} overflow-hidden animate-pulse`}>
       <div className="px-4 pt-4 pb-3 flex items-center gap-3">
-        <div className="w-14 h-5 bg-gray-100 rounded-full" />
-        <div className="flex-1 h-4 bg-gray-100 rounded" />
+        <div className="w-14 h-5 bg-fuchsia-100/70 rounded-full" />
+        <div className="flex-1 h-4 bg-pink-100/60 rounded" />
       </div>
       <div className="px-4 pb-3">
         <div className="grid grid-cols-2 gap-2">
-          <div className="aspect-square bg-gray-100 rounded-xl" />
-          <div className="aspect-square bg-gray-100 rounded-xl" />
+          <div className="aspect-square bg-gradient-to-br from-pink-100/70 to-rose-100/50 rounded-xl" />
+          <div className="aspect-square bg-gradient-to-br from-violet-100/60 to-fuchsia-100/50 rounded-xl" />
         </div>
       </div>
-      <div className="px-4 py-3 border-t border-gray-50 flex justify-between">
-        <div className="w-24 h-4 bg-gray-100 rounded" />
-        <div className="w-16 h-4 bg-gray-100 rounded" />
+      <div className="px-4 py-3 border-t border-pink-100/30 flex justify-between">
+        <div className="w-24 h-4 bg-fuchsia-100/60 rounded" />
+        <div className="w-16 h-4 bg-pink-100/60 rounded" />
       </div>
     </div>
   )
@@ -1717,11 +1741,11 @@ function FullCardSkeleton() {
 
 function RowSkeleton() {
   return (
-    <div className="flex items-center gap-3 p-3.5 border border-gray-100 rounded-2xl animate-pulse">
-      <div className="w-16 h-16 bg-gray-100 rounded-xl shrink-0" />
+    <div className="flex items-center gap-3 p-3.5 border border-pink-100/40 rounded-2xl animate-pulse">
+      <div className="w-16 h-16 bg-gradient-to-br from-fuchsia-100/70 to-violet-100/50 rounded-xl shrink-0" />
       <div className="flex-1 space-y-2">
-        <div className="h-4 bg-gray-100 rounded w-3/4" />
-        <div className="h-3 bg-gray-100 rounded w-1/2" />
+        <div className="h-4 bg-pink-100/60 rounded w-3/4" />
+        <div className="h-3 bg-fuchsia-100/50 rounded w-1/2" />
       </div>
     </div>
   )

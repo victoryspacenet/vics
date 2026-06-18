@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Plus, ChevronRight, Lightbulb, Loader2 } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, ClipboardList, Lightbulb, Loader2, Plus } from 'lucide-react'
 import { getAppealKeywordHints, INQUIRY_STATUS, fetchUserInquiriesPaged } from '../lib/inquiryStorage'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
@@ -27,7 +27,7 @@ const STATUS_CONFIG = {
     badge: 'bg-fuchsia-100/90 text-fuchsia-900 border border-fuchsia-200/60',
   },
   [INQUIRY_STATUS.replied]: {
-    label: '답변완료',
+    label: '수동답변완료',
     dot: 'bg-emerald-500',
     badge: 'bg-emerald-100/90 text-emerald-900 border border-emerald-200/60',
   },
@@ -58,21 +58,19 @@ function formatCardDate(iso) {
 
 function InquiryRetentionNote() {
   return (
-    <div
-      className={cn(
-        SECTION_CARD,
-        'mt-8 p-4 border-amber-200/50 bg-gradient-to-br from-amber-50/95 via-orange-50/50 to-rose-50/40'
-      )}
-    >
-      <div className="flex items-center gap-2 mb-2">
-        <div className="w-8 h-8 rounded-xl bg-amber-100/90 border border-amber-200/60 flex items-center justify-center shadow-sm">
-          <Lightbulb size={18} className="text-amber-600" />
+    <div className="mt-8 rounded-2xl overflow-hidden border border-amber-200/60 bg-gradient-to-br from-amber-50/95 via-orange-50/60 to-rose-50/40 shadow-sm">
+      <div className="h-1 bg-gradient-to-r from-amber-400 via-orange-400 to-rose-400" />
+      <div className="p-4">
+        <div className="flex items-center gap-2.5 mb-2">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 shadow-sm">
+            <Lightbulb size={14} className="text-white" />
+          </span>
+          <span className="text-sm font-black bg-gradient-to-r from-amber-700 to-orange-700 bg-clip-text text-transparent">참고해주세요</span>
         </div>
-        <span className="text-sm font-black text-fuchsia-950">참고해주세요</span>
+        <ul className="text-xs text-amber-900/70 space-y-1 leading-relaxed pl-1">
+          <li>· 문의 내역은 최근 1년까지만 보관됩니다.</li>
+        </ul>
       </div>
-      <ul className="text-xs text-fuchsia-800/75 space-y-1 leading-relaxed">
-        <li>· 문의 내역은 최근 1년까지만 보관됩니다.</li>
-      </ul>
     </div>
   )
 }
@@ -104,6 +102,7 @@ export function InquiryHistoryPage() {
   const [items, setItems] = useState([])
   const [totalCount, setTotalCount] = useState(0)
   const [autoRepliedIds, setAutoRepliedIds] = useState(new Set())
+  const [manualRepliedIds, setManualRepliedIds] = useState(new Set())
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -126,19 +125,29 @@ export function InquiryHistoryPage() {
 
       if (rows.length > 0) {
         const ids = rows.map((r) => r.id)
-        const { data: replies } = await supabase
-          .from('inquiry_replies')
-          .select('inquiry_id')
-          .eq('reply_type', 'auto')
-          .in('inquiry_id', ids)
-        setAutoRepliedIds(new Set((replies || []).map((r) => r.inquiry_id)))
+        const [{ data: autoReplies }, { data: manualReplies }] = await Promise.all([
+          supabase
+            .from('inquiry_replies')
+            .select('inquiry_id')
+            .eq('reply_type', 'auto')
+            .in('inquiry_id', ids),
+          supabase
+            .from('inquiry_replies')
+            .select('inquiry_id')
+            .eq('reply_type', 'manual')
+            .in('inquiry_id', ids),
+        ])
+        setAutoRepliedIds(new Set((autoReplies || []).map((r) => r.inquiry_id)))
+        setManualRepliedIds(new Set((manualReplies || []).map((r) => r.inquiry_id)))
       } else {
         setAutoRepliedIds(new Set())
+        setManualRepliedIds(new Set())
       }
     } catch {
       setItems([])
       setTotalCount(0)
       setAutoRepliedIds(new Set())
+      setManualRepliedIds(new Set())
     } finally {
       setLoading(false)
     }
@@ -156,62 +165,87 @@ export function InquiryHistoryPage() {
   }, [totalCount, page])
 
   return (
-    <div className={cn('min-h-screen', PAGE_BG)}>
-      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto')}>
-        {/* 헤더: 뒤로 + 제목 + [+문의] */}
-        <div className={cn('sticky top-0 z-10 px-4 py-3 flex items-center gap-3', HEADER_GLASS)}>
+    <div className={cn('min-h-screen relative overflow-hidden', PAGE_BG)}>
+      {/* 앰비언트 배경 */}
+      <div className="pointer-events-none fixed inset-0 z-0">
+        <div className="absolute -top-32 -left-32 w-80 h-80 rounded-full bg-gradient-radial from-fuchsia-300/20 to-transparent blur-3xl" />
+        <div className="absolute top-1/3 -right-20 w-64 h-64 rounded-full bg-gradient-radial from-pink-300/15 to-transparent blur-3xl" />
+        <div className="absolute bottom-20 left-1/4 w-56 h-56 rounded-full bg-gradient-radial from-rose-300/12 to-transparent blur-3xl" />
+      </div>
+      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto relative z-10')}>
+        {/* 헤더 */}
+        <div className={cn('sticky top-0 z-10 px-4 py-3 flex items-center gap-2.5', HEADER_GLASS)}>
           <button
             onClick={() => navigate(-1)}
-            className="p-2 -ml-2 rounded-xl hover:bg-pink-100/60 transition-colors"
+            className="flex items-center gap-1 pl-2 pr-3 py-2 -ml-1 rounded-xl bg-gradient-to-r from-fuchsia-50 to-pink-50 border border-pink-200/60 hover:from-fuchsia-100 hover:to-pink-100 transition-all shrink-0 shadow-sm"
             aria-label="뒤로"
           >
-            <ArrowLeft size={20} className="text-fuchsia-900" />
+            <ChevronLeft size={16} className="text-fuchsia-700" />
+            <span className="text-xs font-bold text-fuchsia-700">뒤로</span>
           </button>
-          <h1 className="text-lg font-black text-fuchsia-950 flex-1 tracking-tight">내 문의 내역</h1>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-fuchsia-500 to-pink-500 shadow-md shadow-fuchsia-300/40">
+              <ClipboardList size={14} className="text-white" />
+            </span>
+            <h1 className="text-base font-black bg-gradient-to-r from-fuchsia-700 via-pink-600 to-rose-600 bg-clip-text text-transparent tracking-tight">내 문의 내역</h1>
+          </div>
           <Link
             to="/inquiry/form"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-gradient-to-r from-lime-400 via-emerald-400 to-teal-500 text-[#0f1f0f] text-sm font-black shadow-md shadow-emerald-300/45 hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] transition-all ring-1 ring-white/50"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-white text-sm font-black shadow-[0_4px_14px_-4px_rgba(16,185,129,0.55)] hover:shadow-[0_4px_18px_-4px_rgba(16,185,129,0.7)] hover:scale-[1.02] active:scale-[0.98] transition-all"
           >
-            <Plus size={18} strokeWidth={2.5} />
+            <Plus size={16} strokeWidth={2.5} />
             문의
           </Link>
         </div>
 
         <div className="px-4 py-6">
           {loading ? (
-            <div className="flex justify-center py-16">
+            <div className="flex flex-col items-center justify-center py-20 gap-3">
               <Loader2 size={28} className="animate-spin text-fuchsia-400" />
+              <p className="text-sm font-bold text-fuchsia-700/60">불러오는 중...</p>
             </div>
           ) : items.length === 0 ? (
             /* 빈 상태 */
-            <div className="text-center py-16">
-              <p className="text-sm font-medium text-fuchsia-800/70 mb-6">아직 문의하신 내역이 없어요.</p>
+            <div className="text-center py-16 space-y-4">
+              <div className="text-4xl">📭</div>
+              <p className="text-sm font-bold text-fuchsia-800/70">아직 문의하신 내역이 없어요.</p>
               <Link
                 to="/inquiry/form"
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-lime-400 via-emerald-400 to-teal-500 text-[#0f1f0f] font-black shadow-lg shadow-emerald-300/45 hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all ring-1 ring-white/50"
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-white font-black shadow-[0_4px_20px_-4px_rgba(16,185,129,0.5)] hover:shadow-[0_6px_28px_-4px_rgba(16,185,129,0.65)] hover:scale-[1.02] active:scale-[0.98] transition-all"
               >
-                <Plus size={20} strokeWidth={2.5} />
+                <Plus size={18} strokeWidth={2.5} />
                 1:1 문의하기
               </Link>
             </div>
           ) : (
             <>
-              <p className="text-sm font-bold text-fuchsia-800/70 mb-4">전체 {totalCount}건</p>
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-xs font-black bg-gradient-to-r from-fuchsia-600 to-pink-600 bg-clip-text text-transparent">전체</span>
+                <span className="px-2 py-0.5 rounded-full text-xs font-black bg-gradient-to-r from-fuchsia-600 to-pink-500 text-white shadow-sm">{totalCount}건</span>
+              </div>
               <div className="space-y-3">
                 {items.map((item) => {
-                  const isAutoReplied = autoRepliedIds.has(item.id)
+                  const isManualReplied = manualRepliedIds.has(item.id)
+                  const isAutoReplied = !isManualReplied && autoRepliedIds.has(item.id)
                   const isCompleted = item.status === 'completed'
-                  const config = isAutoReplied
+                  const config = isManualReplied
+                    ? STATUS_CONFIG[INQUIRY_STATUS.replied]
+                    : isAutoReplied
                     ? AUTO_REPLIED_CONFIG
                     : isCompleted
                     ? STATUS_CONFIG[INQUIRY_STATUS.replied]
                     : STATUS_CONFIG[INQUIRY_STATUS.received]
-                  const preview = isAutoReplied
+                  const preview = isManualReplied
+                    ? PREVIEW_BY_STATUS[INQUIRY_STATUS.replied]
+                    : isAutoReplied
                     ? AUTO_REPLIED_CONFIG.preview
                     : isCompleted
                     ? PREVIEW_BY_STATUS[INQUIRY_STATUS.replied]
                     : PREVIEW_BY_STATUS[INQUIRY_STATUS.received]
                   const rid = item.receipt_id || item.id
+                  const accentColor = isCompleted || isAutoReplied
+                    ? 'from-emerald-400 to-teal-500'
+                    : 'from-fuchsia-400 to-pink-500'
 
                   return (
                     <Link
@@ -220,31 +254,30 @@ export function InquiryHistoryPage() {
                         ? `/inquiry/appeal/${encodeURIComponent(rid)}`
                         : `/inquiry/history/${encodeURIComponent(rid)}`}
                       className={cn(
-                        SECTION_CARD,
-                        'group block p-4 border-pink-100/70',
-                        'hover:border-fuchsia-300/70 hover:shadow-[0_8px_32px_-12px_rgba(192,38,211,0.25)] hover:-translate-y-0.5',
-                        'active:translate-y-0 active:shadow-md',
-                        'transition-all duration-200 ease-out'
+                        'relative flex items-center gap-3 p-4 rounded-2xl overflow-hidden',
+                        'border border-pink-100/70 bg-white/92 shadow-[0_4px_28px_-10px_rgba(244,114,182,0.18)] backdrop-blur-[2px]',
+                        'hover:border-fuchsia-300/70 hover:shadow-[0_8px_32px_-10px_rgba(192,38,211,0.28)] hover:-translate-y-0.5',
+                        'active:translate-y-0 transition-all duration-200 ease-out group'
                       )}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-black ${config.badge}`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${config.dot}`} />
-                              {config.label}
-                            </span>
-                          </div>
-                          <InquiryCardTitle item={{ ...item, receiptId: rid }} isReplied={isCompleted} />
-                          <p className="text-xs text-fuchsia-700/55 mt-1">{preview}</p>
-                        </div>
-                        <div className="shrink-0 flex items-center gap-2">
-                          <span className="text-xs text-fuchsia-600/50 font-medium">
-                            {formatCardDate(item.created_at)}
+                      {/* 좌측 컬러 액센트 바 */}
+                      <div className={`absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b ${accentColor} rounded-l-2xl opacity-70 group-hover:opacity-100 transition-opacity`} />
+                      <div className="flex-1 min-w-0 pl-1">
+                        <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-black ${config.badge}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${config.dot}`} />
+                            {config.label}
                           </span>
-                          <div className="w-8 h-8 rounded-xl bg-fuchsia-50/90 border border-pink-100/60 group-hover:bg-fuchsia-100 group-hover:border-fuchsia-200/70 flex items-center justify-center transition-all">
-                            <ChevronRight size={18} className="text-fuchsia-400 group-hover:text-fuchsia-600 group-hover:translate-x-0.5 transition-all" />
-                          </div>
+                        </div>
+                        <InquiryCardTitle item={{ ...item, receiptId: rid }} isReplied={isCompleted} />
+                        <p className="text-xs text-fuchsia-700/50 mt-1">{preview}</p>
+                      </div>
+                      <div className="shrink-0 flex items-center gap-2">
+                        <span className="text-xs text-fuchsia-600/45 font-medium">
+                          {formatCardDate(item.created_at)}
+                        </span>
+                        <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-fuchsia-50 to-pink-50/80 border border-pink-100/60 group-hover:from-fuchsia-100 group-hover:to-pink-100 flex items-center justify-center transition-all">
+                          <ChevronRight size={16} className="text-fuchsia-400 group-hover:text-fuchsia-600 group-hover:translate-x-0.5 transition-all" />
                         </div>
                       </div>
                     </Link>
@@ -255,8 +288,8 @@ export function InquiryHistoryPage() {
               {totalPages > 1 && (
                 <div className="flex items-center justify-center gap-2 mt-6">
                   <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}
-                    className="w-9 h-9 rounded-xl border border-pink-200/80 bg-white/80 flex items-center justify-center text-fuchsia-800 hover:bg-fuchsia-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                    <ArrowLeft size={16} />
+                    className="w-9 h-9 rounded-xl border border-pink-200/80 bg-white/80 flex items-center justify-center text-fuchsia-700 hover:bg-gradient-to-br hover:from-fuchsia-50 hover:to-pink-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm">
+                    <ChevronLeft size={16} />
                   </button>
                   {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                     const p = page <= 3 ? i + 1 : Math.max(1, page - 2 + i)
@@ -264,14 +297,15 @@ export function InquiryHistoryPage() {
                     return (
                       <button key={p} onClick={() => setPage(p)}
                         className={cn('w-9 h-9 rounded-xl text-sm font-black transition-all',
-                          page === p ? 'bg-gradient-to-br from-fuchsia-600 to-pink-500 text-white shadow-md shadow-fuchsia-300/40 ring-1 ring-white/50'
-                            : 'border border-pink-200/80 bg-white/80 text-fuchsia-800 hover:bg-fuchsia-50')}>
+                          page === p
+                            ? 'bg-gradient-to-br from-fuchsia-600 to-pink-500 text-white shadow-[0_4px_14px_-4px_rgba(192,38,211,0.5)] scale-105 ring-1 ring-white/50'
+                            : 'border border-pink-200/80 bg-white/80 text-fuchsia-800 hover:bg-gradient-to-br hover:from-fuchsia-50 hover:to-pink-50 shadow-sm')}>
                         {p}
                       </button>
                     )
                   })}
                   <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                    className="w-9 h-9 rounded-xl border border-pink-200/80 bg-white/80 flex items-center justify-center text-fuchsia-800 hover:bg-fuchsia-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                    className="w-9 h-9 rounded-xl border border-pink-200/80 bg-white/80 flex items-center justify-center text-fuchsia-700 hover:bg-gradient-to-br hover:from-fuchsia-50 hover:to-pink-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm">
                     <ChevronRight size={16} />
                   </button>
                 </div>

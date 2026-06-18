@@ -21,9 +21,21 @@ export function MainPageLowerSections({ quickLoading, newItems }) {
       <VipBillboard />
 
       <section className="mb-10">
-        <div className="flex items-center gap-2 mb-4">
-          <Zap size={20} className="text-emerald-500" />
-          <h2 className="text-lg font-bold text-[#22282E] tracking-tight">NEW 매치업</h2>
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 via-teal-500 to-cyan-500 shadow-[0_4px_14px_-2px_rgba(20,184,166,0.5)]">
+              <Zap size={18} className="text-white" strokeWidth={2.5} />
+            </span>
+            <div>
+              <h2 className="text-base font-black leading-none bg-gradient-to-r from-emerald-600 via-teal-500 to-cyan-500 bg-clip-text text-transparent tracking-tight">
+                NEW 매치업
+              </h2>
+              <p className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-500/80">JUST ARRIVED</p>
+            </div>
+          </div>
+          <span className="rounded-full border border-emerald-200/80 bg-gradient-to-r from-emerald-50 to-cyan-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-700 shadow-sm">
+            ⚡ NEW
+          </span>
         </div>
         <MatchupCarousel>
           {quickLoading
@@ -44,10 +56,10 @@ export function MainPageLowerSections({ quickLoading, newItems }) {
           <div className="mt-3 flex justify-end px-4">
             <Link
               to="/feed/new"
-              className="inline-flex flex-row items-center gap-0.5 whitespace-nowrap text-sm font-bold text-emerald-600 hover:text-emerald-500 transition-colors"
+              className="inline-flex flex-row items-center gap-1 whitespace-nowrap rounded-full border border-emerald-200/80 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-100"
             >
               더보기
-              <ChevronRight size={16} strokeWidth={2.5} aria-hidden />
+              <ChevronRight size={14} strokeWidth={2.5} aria-hidden />
             </Link>
           </div>
         )}
@@ -56,16 +68,22 @@ export function MainPageLowerSections({ quickLoading, newItems }) {
       <GoatRankingSection />
 
       <section className="mt-10">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <Trophy size={20} className="text-amber-500" />
-            <h2 className="text-lg font-bold text-[#22282E] tracking-tight">
-              랭킹 보드 TOP
-              <span className="ml-1 text-sm font-medium text-slate-400">(역대 누적 강자)</span>
-            </h2>
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 via-yellow-500 to-orange-500 shadow-[0_4px_14px_-2px_rgba(245,158,11,0.5)]">
+              <Trophy size={18} className="text-white" strokeWidth={2.5} />
+            </span>
+            <div>
+              <h2 className="text-base font-black leading-none bg-gradient-to-r from-amber-600 via-yellow-500 to-orange-500 bg-clip-text text-transparent tracking-tight">
+                랭킹 보드 TOP
+              </h2>
+              <p className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-500/80">
+                시즌 {getCurrentSeason().number} · {getDaysUntilSeasonEnd()}일 후 종료
+              </p>
+            </div>
           </div>
-          <span className="text-xs text-gray-500">
-            시즌 {getCurrentSeason().number} · {getDaysUntilSeasonEnd()}일 후 종료
+          <span className="rounded-full border border-amber-200/80 bg-gradient-to-r from-amber-50 to-yellow-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-amber-700 shadow-sm">
+            🏆 RANK
           </span>
         </div>
         <MainRankingBoard />

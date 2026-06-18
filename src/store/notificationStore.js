@@ -15,9 +15,11 @@ function isBenignNotificationFetchError(err) {
 }
 
 /** 짧은 간격 다중 호출 시 Supabase 내부 락/abort 충돌 방지 */
-let notifFetchChain = Promise.resolve()
-/** reset(로그아웃) 이후 늦게 끝난 fetch가 상태를 덮어쓰지 않도록 */
 let notifFetchEpoch = 0
+let notifFetchInFlight = null
+let notifLastFetchedAt = 0
+let notifLastFetchedUserId = null
+const NOTIF_FETCH_TTL_MS = 30_000
 
 export const useNotificationStore = create((set, get) => ({
   notifications: [],
@@ -26,10 +28,19 @@ export const useNotificationStore = create((set, get) => ({
   pollingCleanup: null,
 
   // 알림 목록 로드
-  fetchNotifications: async (userId) => {
+  fetchNotifications: async (userId, { force = false } = {}) => {
     if (!userId) return
+    if (notifFetchInFlight) return notifFetchInFlight
+    if (
+      !force &&
+      notifLastFetchedUserId === userId &&
+      Date.now() - notifLastFetchedAt < NOTIF_FETCH_TTL_MS
+    ) {
+      return
+    }
+
     const epoch = notifFetchEpoch
-    notifFetchChain = notifFetchChain.catch(() => {}).then(async () => {
+    notifFetchInFlight = (async () => {
       set({ loading: true })
       try {
         const { data, error } = await supabase
@@ -46,6 +57,8 @@ export const useNotificationStore = create((set, get) => ({
           notifications: list,
           unreadCount: list.filter((n) => !n.is_read).length,
         })
+        notifLastFetchedAt = Date.now()
+        notifLastFetchedUserId = userId
       } catch (err) {
         if (isBenignNotificationFetchError(err)) {
           if (import.meta.env.DEV) {
@@ -57,8 +70,13 @@ export const useNotificationStore = create((set, get) => ({
       } finally {
         if (epoch === notifFetchEpoch) set({ loading: false })
       }
-    })
-    return notifFetchChain
+    })()
+
+    try {
+      await notifFetchInFlight
+    } finally {
+      notifFetchInFlight = null
+    }
   },
 
   /** Realtime 대신 60초 폴링 (Disk I/O 절감) */
@@ -113,6 +131,8 @@ export const useNotificationStore = create((set, get) => ({
   // 스토어 초기화 (로그아웃)
   reset: () => {
     notifFetchEpoch += 1
+    notifLastFetchedAt = 0
+    notifLastFetchedUserId = null
     const { pollingCleanup } = get()
     if (pollingCleanup) pollingCleanup()
     set({ notifications: [], unreadCount: 0, loading: false, pollingCleanup: null })

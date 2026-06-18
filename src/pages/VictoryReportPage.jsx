@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   BarChart3,
   CalendarDays,
+  ChevronLeft,
   Download,
   Home,
   Palette,
@@ -425,7 +426,7 @@ export function VictoryReportPage() {
         return
       }
       setPayConfirmOpen(false)
-      await fetchProfile(user.id)
+      await fetchProfile(user.id, { force: true })
       showToast(
         `${(res.pointsSpent ?? VCARD_REPORT_COST).toLocaleString('ko-KR')} P가 차감됐어요. 제작 연출을 시작해요!`,
         'success',
@@ -540,7 +541,14 @@ export function VictoryReportPage() {
   }, [user, openLoginModal, vCardId, nickname, showToast])
 
   return (
-    <div className="min-h-[70vh] pb-12">
+    <div className="relative min-h-screen overflow-hidden pb-12 bg-gradient-to-br from-sky-50/80 via-fuchsia-50/30 to-violet-50/50">
+      {/* 앰비언트 배경 */}
+      <div className="pointer-events-none fixed inset-0 z-0">
+        <div className="absolute -top-28 -left-28 w-96 h-96 rounded-full bg-[radial-gradient(circle,_rgba(56,189,248,0.12)_0%,_transparent_70%)] blur-3xl" />
+        <div className="absolute top-1/3 -right-20 w-72 h-72 rounded-full bg-[radial-gradient(circle,_rgba(192,38,211,0.11)_0%,_transparent_70%)] blur-3xl" />
+        <div className="absolute bottom-20 left-1/4 w-64 h-64 rounded-full bg-[radial-gradient(circle,_rgba(139,92,246,0.10)_0%,_transparent_70%)] blur-3xl" />
+      </div>
+
       {vcardFlow === 'crafting' && (
         <VCardCraftingOverlay
           open
@@ -550,61 +558,79 @@ export function VictoryReportPage() {
           onComplete={handleCraftComplete}
         />
       )}
-      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto px-0 pt-2 sm:px-1')}>
-        <button
-          type="button"
-          onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/rewards'))}
-          className="mb-4 inline-flex items-center gap-2 text-sm font-bold text-fuchsia-700 hover:text-fuchsia-900"
-        >
-          <ArrowLeft size={18} />
-          포인트 리워드로
-        </button>
+      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto px-0 pt-0 sm:px-1 relative z-10')}>
+        {/* 스티키 헤더 */}
+        <div className="sticky top-0 z-10 px-4 py-3 flex items-center gap-2.5 bg-gradient-to-b from-white/90 via-sky-50/40 to-fuchsia-50/20 backdrop-blur-md border-b border-sky-100/55">
+          <button
+            type="button"
+            onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/rewards'))}
+            className="flex items-center gap-1 pl-2 pr-3 py-2 -ml-1 rounded-xl bg-gradient-to-r from-sky-50 to-indigo-50 border border-sky-200/60 hover:from-sky-100 hover:to-indigo-100 transition-all shrink-0 shadow-sm"
+          >
+            <ChevronLeft size={16} className="text-sky-700" />
+            <span className="text-xs font-bold text-sky-700">뒤로</span>
+          </button>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-sky-500 to-indigo-600 shadow-md shadow-sky-300/40">
+              <BarChart3 size={13} className="text-white" />
+            </span>
+            <h1 className="text-base font-black bg-gradient-to-r from-sky-600 via-violet-600 to-fuchsia-600 bg-clip-text text-transparent tracking-tight truncate">
+              V-Report · 승리 요약 리포트
+            </h1>
+          </div>
+        </div>
 
-        <header className="mb-6 rounded-2xl border border-pink-100/70 bg-white/90 p-4 shadow-sm sm:p-6">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-500 to-indigo-600 text-white shadow-md">
-                <BarChart3 size={24} strokeWidth={2.4} />
-              </div>
-              <div>
-                <h1 className="text-xl font-black tracking-tight text-[#22282E] sm:text-2xl">
-                  📈 V-Report: 당신의 승리를 증명하세요
-                </h1>
-                <p className="mt-1 max-w-xl text-sm font-medium leading-relaxed text-fuchsia-900/70">
-                  {hideCraftAndPay
-                    ? '축하하기를 누르면 폭죽 연출 후 응원 한마디를 남기는 페이지로 이동해요.'
-                    : '포인트를 사용하여 완벽한 성적표를 소셜에 공유해 보세요.'}
-                </p>
-                {hideCraftAndPay ? (
-                  <p className="mt-2 inline-flex flex-wrap items-center gap-2 rounded-xl border border-sky-200 bg-sky-50/90 px-3 py-2 text-xs font-bold text-sky-900">
-                    <span className="font-black text-sky-950">{nickname}</span>
-                    님의 리포트를 보고 있어요.
+        <div className="px-4 pt-4">
+        {/* 히어로 헤더 카드 */}
+        <header className="mb-5 rounded-2xl overflow-hidden border border-sky-200/60 bg-white/90 shadow-[0_4px_24px_-10px_rgba(56,189,248,0.18)] backdrop-blur-sm">
+          <div className="h-1.5 bg-gradient-to-r from-sky-500 via-violet-500 to-fuchsia-500" />
+          <div className="p-4 sm:p-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-500 to-indigo-600 text-white shadow-md shadow-sky-300/40">
+                  <BarChart3 size={22} strokeWidth={2.4} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-black tracking-tight bg-gradient-to-r from-sky-700 via-violet-700 to-fuchsia-700 bg-clip-text text-transparent sm:text-xl">
+                    📈 V-Report: 당신의 승리를 증명하세요
+                  </h2>
+                  <p className="mt-1 max-w-xl text-sm font-medium leading-relaxed text-fuchsia-900/65">
+                    {hideCraftAndPay
+                      ? '축하하기를 누르면 폭죽 연출 후 응원 한마디를 남기는 페이지로 이동해요.'
+                      : '포인트를 사용하여 완벽한 성적표를 소셜에 공유해 보세요.'}
                   </p>
-                ) : null}
+                  {hideCraftAndPay && (
+                    <p className="mt-2 inline-flex flex-wrap items-center gap-2 rounded-xl border border-sky-200 bg-sky-50/90 px-3 py-2 text-xs font-bold text-sky-900">
+                      <span className="font-black text-sky-950">{nickname}</span>
+                      님의 리포트를 보고 있어요.
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-2 self-start sm:self-center">
-              <CalendarDays className="h-5 w-5 text-violet-500" />
-              <select
-                value={period}
-                onChange={(e) => setPeriod(e.target.value)}
-                disabled={hideCraftAndPay}
-                className="rounded-xl border border-violet-200 bg-violet-50/80 px-3 py-2 text-sm font-black text-violet-950 outline-none focus:ring-2 focus:ring-violet-400/40 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {PERIODS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
+              <div className="flex shrink-0 items-center gap-2 self-start sm:self-center">
+                <CalendarDays className="h-5 w-5 text-violet-500" />
+                <select
+                  value={period}
+                  onChange={(e) => setPeriod(e.target.value)}
+                  disabled={hideCraftAndPay}
+                  className="rounded-xl border border-violet-200 bg-violet-50/80 px-3 py-2 text-sm font-black text-violet-950 outline-none focus:ring-2 focus:ring-violet-400/40 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {PERIODS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
         </header>
 
         {vcardFlow === 'done' ? (
-          <section className="mx-auto w-full max-w-md rounded-2xl border-2 border-emerald-300/70 bg-gradient-to-b from-emerald-50/95 via-white to-fuchsia-50/35 p-5 shadow-[0_8px_40px_-12px_rgba(16,185,129,0.35)] sm:p-7">
+          <section className="mx-auto w-full max-w-md rounded-2xl overflow-hidden border border-emerald-300/60 bg-gradient-to-b from-emerald-50/95 via-white to-fuchsia-50/35 shadow-[0_8px_40px_-12px_rgba(16,185,129,0.35)] sm:p-0">
+            <div className="h-1 bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400" />
+            <div className="p-5 sm:p-7">
             <p className="border-b border-emerald-200/60 pb-4 text-center text-base font-black leading-snug text-emerald-950 sm:text-lg">
-              V-Card가 성공적으로 제작되었습니다!
+              🎉 V-Card가 성공적으로 제작되었습니다!
             </p>
             <div className="mt-5 flex justify-center rounded-xl bg-slate-900/[0.06] p-3 ring-1 ring-slate-200/80">
               <div
@@ -676,16 +702,21 @@ export function VictoryReportPage() {
             <p className="mt-6 text-center text-[11px] leading-relaxed text-slate-500">
               인스타 스토리 공유 시 앱에서 배경음악·VictorySpace 전용 필터를 더하면 바이럴에 도움이 돼요. (앱 기능·정책에 따름)
             </p>
+            </div>
           </section>
         ) : (
           <>
         <div className={cn('grid gap-6', hideCraftAndPay ? 'lg:mx-auto lg:max-w-xl' : 'lg:grid-cols-2 lg:gap-8')}>
           {/* 미리보기 */}
-          <section className="rounded-2xl border border-pink-100/70 bg-white/95 p-4 shadow-sm sm:p-5">
-            <h2 className="mb-1 flex flex-wrap items-center gap-2 text-sm font-black text-fuchsia-950 sm:text-base">
-              <Sparkles className="h-5 w-5 text-amber-500" />
-              V-Card 그래픽 미리보기
-              <span className="text-xs font-bold text-fuchsia-500/80">(실시간 적용)</span>
+          <section className="rounded-2xl overflow-hidden border border-sky-100/70 bg-white/95 shadow-[0_4px_20px_-8px_rgba(56,189,248,0.15)] backdrop-blur-sm">
+            <div className="h-0.5 bg-gradient-to-r from-sky-400 via-violet-400 to-fuchsia-400" />
+            <div className="p-4 sm:p-5">
+            <h2 className="mb-2 flex flex-wrap items-center gap-2 text-sm font-black sm:text-base">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 shadow-sm">
+                <Sparkles size={13} className="text-white" />
+              </span>
+              <span className="bg-gradient-to-r from-sky-700 to-violet-700 bg-clip-text text-transparent">V-Card 그래픽 미리보기</span>
+              <span className="text-xs font-bold text-fuchsia-500/70">(실시간 적용)</span>
             </h2>
             {storyNeonPreviewOverride ? (
               <p className="mb-2 rounded-lg border border-amber-200/90 bg-amber-50/95 px-3 py-2 text-[11px] font-bold leading-snug text-amber-950">
@@ -762,14 +793,19 @@ export function VictoryReportPage() {
             </div>
 
             <p className="mt-3 text-center text-[11px] font-bold text-slate-500">V-Card ID: {vCardId}</p>
+            </div>
           </section>
 
           {/* 커스텀 */}
           {!hideCraftAndPay ? (
-          <section className="space-y-5 rounded-2xl border border-pink-100/70 bg-white/95 p-4 shadow-sm sm:p-5">
-            <h2 className="flex items-center gap-2 text-sm font-black text-fuchsia-950 sm:text-base">
-              <Palette className="h-5 w-5 text-violet-500" />
-              템플릿 커스텀
+          <section className="rounded-2xl overflow-hidden border border-violet-100/70 bg-white/95 shadow-[0_4px_20px_-8px_rgba(139,92,246,0.13)] backdrop-blur-sm">
+            <div className="h-0.5 bg-gradient-to-r from-violet-400 via-fuchsia-400 to-pink-400" />
+            <div className="space-y-5 p-4 sm:p-5">
+            <h2 className="flex items-center gap-2 text-sm font-black sm:text-base">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-600 shadow-sm">
+                <Palette size={13} className="text-white" />
+              </span>
+              <span className="bg-gradient-to-r from-violet-700 to-fuchsia-700 bg-clip-text text-transparent">템플릿 커스텀</span>
             </h2>
 
             <div>
@@ -869,83 +905,59 @@ export function VictoryReportPage() {
                 주로 <strong className="text-slate-700">V-Card ID</strong>만 새로 바뀝니다.
               </p>
             </div>
+            </div>
           </section>
           ) : null}
         </div>
 
         {!hideCraftAndPay ? (
           <>
-            <div className="mt-8 flex flex-col items-stretch justify-center gap-3 border-t border-pink-100/80 pt-6 sm:flex-row sm:items-center">
+            <div className="mt-6 flex flex-col items-stretch justify-center gap-3 border-t border-sky-100/60 pt-5 sm:flex-row sm:items-center">
               <button
                 type="button"
                 onClick={() => navigate('/rewards')}
                 className={cn(
                   'group relative isolate order-2 inline-flex min-w-[200px] items-stretch justify-center rounded-3xl p-[2.5px] sm:order-1',
-                  'bg-gradient-to-r from-slate-500 via-fuchsia-500 to-sky-500 shadow-[0_10px_36px_-12px_rgba(100,116,139,0.45)]',
-                  'transition-all duration-300 hover:scale-[1.02] hover:shadow-[0_14px_44px_-10px_rgba(192,132,252,0.35)] active:scale-[0.98]',
+                  'bg-gradient-to-r from-slate-400 via-fuchsia-400 to-sky-400 shadow-[0_8px_28px_-10px_rgba(100,116,139,0.35)]',
+                  'transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-400 focus-visible:ring-offset-2',
                 )}
               >
-                <span
-                  className={cn(
-                    'relative flex w-full items-center justify-center gap-2.5 overflow-hidden rounded-[1.35rem]',
-                    'bg-gradient-to-br from-white/98 via-slate-50/95 to-fuchsia-50/70 px-7 py-3.5 backdrop-blur-md',
-                    'ring-1 ring-white/85',
-                  )}
-                >
-                  <span
-                    className="pointer-events-none absolute -left-4 -top-6 h-20 w-20 rounded-full bg-gradient-to-br from-sky-300/25 to-fuchsia-300/20 blur-2xl transition-opacity duration-500 group-hover:opacity-100"
-                    aria-hidden
-                  />
-                  <span
-                    className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-fuchsia-500/[0.06] to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100"
-                    aria-hidden
-                  />
-                  <ArrowLeft
-                    size={18}
-                    strokeWidth={2.6}
-                    className="relative shrink-0 text-fuchsia-600 transition-transform duration-300 group-hover:-translate-x-1 group-hover:text-fuchsia-700"
-                    aria-hidden
-                  />
-                  <span className="relative bg-gradient-to-r from-slate-800 via-fuchsia-700 to-sky-700 bg-clip-text text-sm font-black tracking-tight text-transparent sm:text-[15px]">
+                <span className="relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-[1.35rem] bg-gradient-to-br from-white/98 via-slate-50/95 to-fuchsia-50/70 px-7 py-3.5 backdrop-blur-md ring-1 ring-white/85">
+                  <ArrowLeft size={16} strokeWidth={2.6} className="relative shrink-0 text-fuchsia-600 transition-transform duration-300 group-hover:-translate-x-1" aria-hidden />
+                  <span className="relative bg-gradient-to-r from-slate-800 via-fuchsia-700 to-sky-700 bg-clip-text text-sm font-black tracking-tight text-transparent">
                     취소
                   </span>
-                  <Sparkles
-                    size={15}
-                    className="relative shrink-0 text-sky-500 drop-shadow-[0_0_6px_rgba(14,165,233,0.45)] transition-transform duration-300 group-hover:rotate-12 group-hover:scale-110"
-                    aria-hidden
-                  />
                 </span>
               </button>
               <button
                 type="button"
-                disabled={
-                  exporting || vcardFlow === 'crafting' || paySubmitting || (!!user && pointsInsufficient)
-                }
+                disabled={exporting || vcardFlow === 'crafting' || paySubmitting || (!!user && pointsInsufficient)}
                 onClick={handlePayButtonClick}
                 className={cn(
-                  'order-1 inline-flex items-center justify-center gap-2 rounded-2xl px-6 py-3 text-sm font-black text-white shadow-lg transition sm:order-2 sm:min-w-[280px]',
-                  'bg-gradient-to-r from-fuchsia-600 via-violet-600 to-indigo-600 hover:brightness-110 disabled:opacity-60',
+                  'order-1 inline-flex items-center justify-center gap-2 rounded-2xl px-6 py-3.5 text-sm font-black text-white shadow-lg transition sm:order-2 sm:min-w-[280px]',
+                  'bg-gradient-to-r from-fuchsia-600 via-violet-600 to-indigo-600 shadow-[0_4px_18px_-4px_rgba(139,92,246,0.55)] hover:scale-[1.02] active:scale-[0.99] disabled:opacity-60 disabled:hover:scale-100',
                 )}
               >
-                <Sparkles size={18} />
+                <Sparkles size={17} />
                 {paySubmitting ? '처리 중…' : `${VCARD_REPORT_COST.toLocaleString('ko-KR')} P 결제하고 제작하기`}
               </button>
             </div>
-            <p className="mt-2 text-center text-xs font-bold text-amber-800/90">
+            <p className="mt-2 text-center text-xs font-bold text-amber-700/80">
               포인트 소진: {VCARD_REPORT_COST.toLocaleString('ko-KR')} P (제작 확인 시 즉시 차감)
             </p>
           </>
         ) : null}
 
-        <p className="mt-8 text-center text-[11px] text-slate-500">
-          최종 PNG는 인스타그램 스토리 비율 <strong>1080×1920</strong>입니다.{' '}
-          <Link to="/rewards" className="font-bold text-fuchsia-700 underline-offset-2 hover:underline">
+        <p className="mt-8 text-center text-[11px] text-slate-400">
+          최종 PNG는 인스타그램 스토리 비율 <strong className="text-slate-500">1080×1920</strong>입니다.{' '}
+          <Link to="/rewards" className="font-bold text-fuchsia-600 underline-offset-2 hover:underline">
             포인트 리워드 센터
           </Link>
         </p>
           </>
         )}
+        </div>{/* /px-4 pt-4 */}
 
         {/* 스케일 없이 캡처 전용 (1080×1920) — 완료 화면에서도 DOM에 유지 */}
         <div

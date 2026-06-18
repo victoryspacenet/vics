@@ -3,8 +3,10 @@ import { Megaphone } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import {
   MATCHUP_CREATOR_PROFILE_FIELDS,
+  EMPTY_TIER_RANK_INFO,
   enrichMatchupsWithCreatorRankInfo,
 } from '../../lib/creatorRankSnapshot'
+import { runWhenIdle } from '../../lib/runDeferred'
 import { MainMatchupCard } from './MainMatchupCard'
 import { MainCardSkeleton } from './MainCardSkeleton'
 import { MatchupCarousel } from './MatchupCarousel'
@@ -39,7 +41,13 @@ export function VipBillboard() {
       const list = (data || [])
         .map((r) => r.matchups)
         .filter(Boolean)
-      setMatchups(await enrichMatchupsWithCreatorRankInfo(list))
+        .map((m) => ({ ...m, _creatorRankInfo: { ...EMPTY_TIER_RANK_INFO } }))
+      setMatchups(list)
+      runWhenIdle(() => {
+        void enrichMatchupsWithCreatorRankInfo(list).then(setMatchups).catch((err) => {
+          console.warn('[VipBillboard] rank enrich:', err)
+        })
+      }, { timeoutMs: 2000 })
     } catch (err) {
       console.error('[VipBillboard]', err)
     } finally {

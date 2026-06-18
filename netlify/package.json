@@ -1,0 +1,8 @@
+{
+  "name": "vics-netlify",
+  "private": true,
+  "description": "Netlify Functions 전용 의존성 (브라우저 번들과 분리)",
+  "dependencies": {
+    "firebase-admin": "^13.0.2"
+  }
+}

@@ -44,9 +44,18 @@ const FEED_TABS = [
 
 export function MainTabBar({ currentVariant }) {
   const location = useLocation()
+  /** 홈(MainPage)에서는 섹션 사이 정적 배치, 개별 피드 페이지에서만 sticky */
+  const isSticky = currentVariant !== null
 
   return (
-    <div className="sticky top-14 z-20 -mx-4 mb-5 px-4 py-3 max-lg:touch-manipulation">
+    <div
+      className={cn(
+        '-mx-4 px-4 max-lg:touch-manipulation',
+        isSticky
+          ? 'sticky top-14 z-20 mb-3 py-2'
+          : 'relative mb-4 py-3',
+      )}
+    >
       {/* 글래스 트랙 — 순백·과포화 완화 (메인/피드 눈부심 완화) */}
       <div
         className={cn(
@@ -60,7 +69,7 @@ export function MainTabBar({ currentVariant }) {
         <div
           role="tablist"
           aria-label="매치업 피드 종류"
-          className="flex items-stretch justify-start gap-2 overflow-x-auto overscroll-x-contain scroll-smooth touch-pan-x snap-x snap-mandatory pb-0.5 scrollbar-hide lg:justify-center lg:gap-1.5 lg:overflow-visible"
+          className="flex items-stretch justify-center gap-2 overflow-x-auto overscroll-x-contain scroll-smooth touch-pan-x snap-x snap-mandatory pb-0.5 scrollbar-hide lg:gap-1.5 lg:overflow-visible"
         >
           {FEED_TABS.map((tab) => {
             const Icon = tab.icon

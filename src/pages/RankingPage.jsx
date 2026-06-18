@@ -53,14 +53,14 @@ const VOTER_SORT_OPTIONS = [
 /** 랭킹 행에 티어 스냅샷(_tierRankInfo) 포함 — 캐시 키 버전 */
 const RANKING_ROWS_CACHE_VER = 't3'
 
-/** 랭킹 LNB·드로어 — 바탕 흰색 */
+/** 랭킹 LNB·드로어 */
 const MZ_SB =
-  'rounded-2xl border border-gray-100 bg-white shadow-sm'
+  'rounded-2xl border border-amber-100/70 bg-gradient-to-b from-white via-amber-50/25 to-yellow-50/15 shadow-[0_4px_24px_-8px_rgba(251,191,36,0.14)]'
 
 const LNB_ROW_ON =
-  'bg-gradient-to-r from-pink-200/90 via-fuchsia-200/85 to-violet-200/90 text-fuchsia-950 font-black shadow-sm shadow-pink-200/30 border border-white/70'
+  'bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white font-black shadow-[0_4px_14px_-2px_rgba(251,146,60,0.5)] ring-1 ring-white/30'
 const LNB_ROW_OFF =
-  'text-pink-700/90 hover:text-fuchsia-800 hover:bg-pink-50/90 hover:shadow-sm'
+  'text-amber-800/80 hover:text-amber-900 hover:bg-amber-50/70 hover:shadow-sm'
 
 // ── 드롭다운 컴포넌트 ────────────────────────────────────────────────
 function Dropdown({ label, options, value, onChange }) {
@@ -78,21 +78,21 @@ function Dropdown({ label, options, value, onChange }) {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap border border-pink-200 bg-white text-fuchsia-900 shadow-sm shadow-pink-100/50 hover:bg-pink-50 hover:border-pink-300 transition-colors"
+        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap border border-amber-200/70 bg-gradient-to-br from-white to-amber-50/60 text-amber-900 shadow-sm shadow-amber-100/50 hover:bg-amber-50 hover:border-amber-300/70 transition-colors"
       >
         {selected?.label || label}
         <ChevronDown size={12} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <div className="absolute top-full mt-1.5 left-0 rounded-xl border border-pink-200 bg-white shadow-lg shadow-pink-200/40 z-[60] min-w-[120px] overflow-hidden">
+        <div className="absolute top-full mt-1.5 left-0 rounded-xl border border-amber-200/60 bg-gradient-to-b from-white to-amber-50/60 shadow-lg shadow-amber-200/30 z-[60] min-w-[120px] overflow-hidden">
           {options.map((opt) => (
             <button
               key={opt.id}
               onClick={() => { onChange(opt.id); setOpen(false) }}
               className={`w-full text-left px-4 py-2.5 text-xs font-bold transition-colors ${
                 value === opt.id
-                  ? 'bg-gradient-to-r from-pink-200 to-fuchsia-200 text-fuchsia-950'
-                  : 'text-gray-700 bg-white hover:bg-pink-50'
+                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white'
+                  : 'text-amber-900/80 bg-transparent hover:bg-amber-50/80'
               }`}
             >
               {opt.label}
@@ -134,12 +134,24 @@ function Podium({ users, category, typeTab, sortBy, categories }) {
   const typeOpt = TYPE_OPTIONS.find((t) => t.id === typeTab)
 
   return (
-    <div className="bg-gradient-to-b from-violet-50/90 via-fuchsia-50/50 to-amber-50/70 rounded-3xl border border-violet-200/40 ring-1 ring-amber-100/50 px-4 pt-5 pb-0 mb-4 overflow-hidden">
-      <div className="flex items-center gap-2 mb-5">
-        <Flame size={15} className="text-amber-500" />
-        <p className="text-sm font-black text-[#22282E]">
-          TOP 3 {typeOpt?.label || ''}{catLabel && catLabel.id !== 'all' ? ` ${catLabel.label}` : ''} 랭커
-        </p>
+    <div className="relative bg-gradient-to-b from-amber-50/80 via-orange-50/50 to-rose-50/40 rounded-3xl border border-amber-200/50 shadow-[0_4px_24px_-8px_rgba(251,146,60,0.2)] px-4 pt-5 pb-0 mb-4 overflow-hidden">
+      {/* 상단 골드 라인 */}
+      <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-amber-400 via-orange-500 to-rose-400 rounded-t-3xl" />
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 via-orange-500 to-rose-500 shadow-[0_4px_14px_-2px_rgba(251,146,60,0.55)]">
+            <Flame size={17} className="text-white" strokeWidth={2.5} />
+          </span>
+          <div>
+            <p className="text-base font-black leading-none bg-gradient-to-r from-amber-600 via-orange-500 to-rose-500 bg-clip-text text-transparent">
+              TOP 3 {typeOpt?.label || ''}{catLabel && catLabel.id !== 'all' ? ` ${catLabel.label}` : ''} 랭커
+            </p>
+            <p className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-500/80">TOP RANKED</p>
+          </div>
+        </div>
+        <span className="rounded-full border border-amber-200/80 bg-gradient-to-r from-amber-50 to-orange-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-amber-700 shadow-sm">
+          👑 TOP 3
+        </span>
       </div>
       <div className="flex items-end justify-center gap-1">
         <PodiumCard user={second} rank={second?._displayRank ?? 2} typeTab={typeTab} sortBy={sortBy} />
@@ -195,25 +207,25 @@ function PodiumCard({ user: u, rank, typeTab, sortBy }) {
 // ── 순위 행 스켈레톤 ───────────────────────────────────────────────────
 function RankRowSkeleton() {
   return (
-    <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 border-b border-violet-100/40 last:border-0">
-      <div className="w-7 sm:w-8 h-5 bg-gray-100 rounded flex-shrink-0" />
+    <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 border-b border-amber-100/40 last:border-0 animate-pulse">
+      <div className="w-7 sm:w-8 h-5 bg-amber-100/60 rounded flex-shrink-0" />
       <div className="flex items-center gap-2 flex-[2] min-w-0">
-        <div className="w-8 h-8 rounded-full bg-gray-100 flex-shrink-0" />
+        <div className="w-8 h-8 rounded-full bg-amber-100/60 flex-shrink-0" />
         <div className="flex-1 min-w-0 space-y-1">
-          <div className="h-3.5 w-20 bg-gray-100 rounded" />
-          <div className="h-2.5 w-14 bg-gray-100 rounded" />
+          <div className="h-3.5 w-20 bg-amber-100/60 rounded" />
+          <div className="h-2.5 w-14 bg-orange-100/50 rounded" />
         </div>
       </div>
       <div className="flex-1 hidden sm:block">
-        <div className="h-3 w-10 bg-gray-100 rounded mx-auto" />
+        <div className="h-3 w-10 bg-amber-100/50 rounded mx-auto" />
       </div>
       <div className="flex-1 hidden md:block">
-        <div className="h-3 w-8 bg-gray-100 rounded mx-auto" />
+        <div className="h-3 w-8 bg-amber-100/50 rounded mx-auto" />
       </div>
       <div className="flex-1 flex justify-end">
-        <div className="h-3 w-12 bg-gray-100 rounded" />
+        <div className="h-3 w-12 bg-amber-100/60 rounded" />
       </div>
-      <div className="w-8 h-4 bg-gray-100 rounded flex-shrink-0" />
+      <div className="w-8 h-4 bg-amber-100/50 rounded flex-shrink-0" />
     </div>
   )
 }
@@ -226,10 +238,26 @@ function RankRow({ entry, rank, isMe, typeTab, sortBy }) {
   const creatorStat = entry.total_votes_received || 0
   const oracleP = entry.oracle_points || 0
 
+  const isTop3 = rank <= 3
+  const top3BgMap = {
+    1: 'bg-gradient-to-r from-amber-50/90 to-yellow-50/60',
+    2: 'bg-gradient-to-r from-slate-50/90 to-gray-50/60',
+    3: 'bg-gradient-to-r from-orange-50/80 to-amber-50/50',
+  }
+  const top3BorderMap = {
+    1: 'border-l-amber-400',
+    2: 'border-l-slate-300',
+    3: 'border-l-orange-400',
+  }
+
   return (
     <div className={cn(
-      'flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 border-b border-violet-100/45 last:border-0 transition-colors',
-      isMe ? 'bg-lime-50/80 border-l-[3px] border-l-lime-400' : 'hover:bg-violet-50/45'
+      'flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 border-b border-amber-100/40 last:border-0 transition-colors',
+      isMe
+        ? 'bg-lime-50/80 border-l-[3px] border-l-lime-400'
+        : isTop3
+          ? cn(top3BgMap[rank], 'border-l-[3px]', top3BorderMap[rank])
+          : 'hover:bg-amber-50/40'
     )}>
       <div className="w-7 sm:w-8 text-center flex-shrink-0">
         {rank <= 3
@@ -611,8 +639,8 @@ export function RankingPage() {
   const LNBContent = () => (
     <div className="space-y-1">
       {/* 랭킹 센터 헤더 */}
-      <div className="px-3 py-3 mb-1">
-        <p className="text-xs font-black text-pink-400 uppercase tracking-widest">랭킹 센터</p>
+      <div className="px-3 py-3 mb-1 border-b border-amber-100/60">
+        <p className="text-xs font-black bg-gradient-to-r from-amber-500 to-orange-500 bg-clip-text text-transparent uppercase tracking-widest">🏆 랭킹 센터</p>
       </div>
 
       {/* 전체 랭킹 */}
@@ -627,8 +655,8 @@ export function RankingPage() {
 
       {/* 카테고리별 */}
       <div>
-        <p className="px-3 py-2 text-[10px] font-black text-pink-400 uppercase tracking-widest flex items-center gap-1">
-          <ChevronRight size={10} />카테고리별
+        <p className="px-3 py-2 text-[10px] font-black bg-gradient-to-r from-amber-500 to-orange-500 bg-clip-text text-transparent uppercase tracking-widest flex items-center gap-1">
+          <ChevronRight size={10} className="text-amber-500" />카테고리별
         </p>
         {rankingCategories.filter((c) => c.id !== 'all').map((cat) => (
           <button
@@ -655,8 +683,8 @@ export function RankingPage() {
       </div>
 
       {/* 명예의 전당 (트랙별 TOP 3) */}
-      <div className="mt-4 pt-4 border-t border-pink-100/60">
-        <p className="px-3 py-2 text-[10px] font-black text-pink-400 uppercase tracking-widest flex items-center gap-1">
+      <div className="mt-4 pt-4 border-t border-amber-100/60">
+        <p className="px-3 py-2 text-[10px] font-black bg-gradient-to-r from-amber-500 to-rose-500 bg-clip-text text-transparent uppercase tracking-widest flex items-center gap-1">
           <Flame size={10} className="text-orange-400" />명예의 전당
         </p>
         {hallOfFameUsers?.champion?.length > 0 || hallOfFameUsers?.oracle?.length > 0 ? (
@@ -712,18 +740,29 @@ export function RankingPage() {
   )
 
   return (
-    <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto')}>
+    <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto relative')}>
+      {/* ── 앰비언트 배경 ── */}
+      <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden" aria-hidden>
+        <div className="absolute -top-20 left-1/2 -translate-x-1/2 h-[480px] w-[480px] rounded-full bg-gradient-radial from-amber-300/12 via-yellow-200/6 to-transparent blur-3xl" />
+        <div className="absolute top-1/3 -right-20 h-[360px] w-[360px] rounded-full bg-gradient-radial from-orange-300/9 via-rose-200/4 to-transparent blur-3xl" />
+        <div className="absolute bottom-0 left-0 h-[320px] w-[320px] rounded-full bg-gradient-radial from-violet-300/7 via-fuchsia-200/3 to-transparent blur-3xl" />
+      </div>
 
       {/* ── 페이지 타이틀 (모바일) ── */}
       <div className="flex items-center justify-between mb-4 lg:hidden">
-        <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-orange-400 flex items-center justify-center">
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 via-orange-500 to-rose-500 shadow-[0_4px_14px_-2px_rgba(251,146,60,0.55)]">
             <span className="text-base">🏆</span>
+          </span>
+          <div>
+            <h1 className="text-lg font-black leading-none bg-gradient-to-r from-amber-600 via-orange-500 to-rose-500 bg-clip-text text-transparent">
+              RANKING
+            </h1>
+            <p className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-amber-500/80">LEADERBOARD</p>
           </div>
-          <h1 className="text-lg font-black text-[#22282E]">RANKING</h1>
         </div>
         <button onClick={() => setLnbOpen(true)}
-          className="p-2 rounded-xl border border-pink-100/70 bg-gradient-to-br from-white to-pink-50/50 text-fuchsia-700 hover:bg-white shadow-sm shadow-pink-100/40">
+          className="p-2 rounded-xl border border-amber-200/70 bg-gradient-to-br from-white to-amber-50/60 text-amber-700 hover:bg-amber-50 shadow-sm shadow-amber-100/40 transition-colors">
           <Menu size={18} />
         </button>
       </div>
@@ -739,7 +778,7 @@ export function RankingPage() {
               'flex-shrink-0 flex items-center gap-1 px-3 py-1.5 text-xs rounded-full border transition-all',
               category === cat.id
                 ? LNB_ROW_ON
-                : 'border-pink-100/80 bg-white/90 text-pink-700/90 shadow-sm hover:bg-pink-50/80 hover:shadow-md'
+                : 'border-amber-200/70 bg-white/90 text-amber-800/80 shadow-sm hover:bg-amber-50/70 hover:shadow-md'
             )}
             style={
               cat.pointColor && category !== cat.id
@@ -776,17 +815,20 @@ export function RankingPage() {
 
           {/* 섹션 헤더 */}
           <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-            <h2 className="text-base font-black text-[#22282E] flex items-center gap-2">
-              {activeCat?.id === 'all' ? (
-                <>
-                  {activeCat.icon} {activeCat.label}
-                </>
-              ) : (
-                `${activeCat?.label || '전체'} 랭킹`
-              )}
-              <span className="text-xs font-bold text-gray-400">· {TYPE_OPTIONS.find((t) => t.id === typeTab)?.label}</span>
-              <span className="text-[10px] font-medium text-gray-400">· 일 1회 업데이트</span>
-            </h2>
+            <div className="flex items-center gap-3">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 via-orange-500 to-rose-500 shadow-[0_4px_14px_-2px_rgba(251,146,60,0.5)] shrink-0">
+                <span className="text-base">🏆</span>
+              </span>
+              <div>
+                <h2 className="text-base font-black leading-none bg-gradient-to-r from-amber-600 via-orange-500 to-rose-500 bg-clip-text text-transparent">
+                  {activeCat?.id === 'all' ? '전체 랭킹' : `${activeCat?.label || '전체'} 랭킹`}
+                  <span className="ml-2 text-xs font-bold text-amber-600/70">
+                    · {TYPE_OPTIONS.find((t) => t.id === typeTab)?.label}
+                  </span>
+                </h2>
+                <p className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-amber-500/70">일 1회 업데이트</p>
+              </div>
+            </div>
             {/* 드롭다운 필터 3종 */}
             <div className="flex items-center gap-2 flex-wrap">
               <Dropdown
@@ -815,11 +857,12 @@ export function RankingPage() {
             <Podium users={top3} category={category} typeTab={typeTab} sortBy={sortBy} categories={rankingCategories} />
           )}
 
-          {/* 순위 테이블 (LNB와 별도 — 일반 카드) */}
-          <div className="rounded-2xl border border-violet-100/80 bg-white/95 shadow-sm shadow-violet-100/20 overflow-hidden mb-4">
+          {/* 순위 테이블 */}
+          <div className="relative rounded-2xl border border-amber-200/60 bg-gradient-to-br from-white via-amber-50/25 to-white shadow-[0_4px_24px_-8px_rgba(251,146,60,0.18)] overflow-hidden mb-4">
+            <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-amber-400 via-orange-500 to-rose-400" />
 
             {/* 테이블 헤더 */}
-            <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 bg-violet-100/35 border-b border-violet-200/40 text-[10px] font-black text-violet-600/80 uppercase tracking-wider">
+            <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 bg-gradient-to-r from-amber-100/50 to-orange-100/30 border-b border-amber-200/40 text-[10px] font-black text-amber-700/80 uppercase tracking-wider mt-[3px]">
               <div className="w-7 sm:w-8 text-center flex-shrink-0">#</div>
               <div className="flex-[2]">유저</div>
               <div className="flex-1 text-center hidden sm:block">
@@ -859,8 +902,9 @@ export function RankingPage() {
             )}
             {rankings.length === 0 && !loading && (
               <div className="py-14 text-center">
-                <p className="text-3xl mb-2">🏆</p>
-                <p className="text-sm font-bold text-gray-400">아직 랭킹 데이터가 없어요</p>
+                <p className="text-4xl mb-3">🏆</p>
+                <p className="text-sm font-black bg-gradient-to-r from-amber-600 to-orange-500 bg-clip-text text-transparent mb-1">아직 랭킹 데이터가 없어요</p>
+                <p className="text-xs text-amber-400/80">매치업에 참여하면 랭킹에 등록돼요!</p>
               </div>
             )}
           </div>
@@ -887,13 +931,13 @@ export function RankingPage() {
                 <button
                   onClick={() => goTo(page - 1)}
                   disabled={page === 0 || loading}
-                  className="px-3 py-1.5 rounded-xl text-xs font-bold border border-violet-200 bg-white text-fuchsia-700 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-violet-50 transition-colors"
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold border border-amber-200/70 bg-white text-amber-800 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-amber-50 transition-colors"
                 >
                   ← 이전
                 </button>
                 {getPageNums().map((p, i) =>
                   p === '…' ? (
-                    <span key={`ellipsis-${i}`} className="px-1.5 text-xs text-gray-400 select-none">…</span>
+                    <span key={`ellipsis-${i}`} className="px-1.5 text-xs text-amber-400/70 select-none">…</span>
                   ) : (
                     <button
                       key={p}
@@ -902,8 +946,8 @@ export function RankingPage() {
                       className={cn(
                         'w-8 h-8 rounded-xl text-xs font-black border transition-colors',
                         p === page
-                          ? 'bg-gradient-to-r from-pink-200 via-fuchsia-200 to-violet-200 border-fuchsia-300 text-fuchsia-900 shadow-sm'
-                          : 'border-violet-100 bg-white text-gray-600 hover:bg-violet-50'
+                          ? 'bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 border-orange-400 text-white shadow-[0_4px_14px_-2px_rgba(251,146,60,0.45)] scale-110'
+                          : 'border-amber-200/60 bg-white text-amber-800/70 hover:bg-amber-50'
                       )}
                     >
                       {p + 1}
@@ -913,7 +957,7 @@ export function RankingPage() {
                 <button
                   onClick={() => goTo(page + 1)}
                   disabled={page >= totalPages - 1 || loading}
-                  className="px-3 py-1.5 rounded-xl text-xs font-bold border border-violet-200 bg-white text-fuchsia-700 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-violet-50 transition-colors"
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold border border-amber-200/70 bg-white text-amber-800 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-amber-50 transition-colors"
                 >
                   다음 →
                 </button>
@@ -928,13 +972,15 @@ export function RankingPage() {
       ════════════════════════════════════════ */}
       {user && myRank && (
         <div className={cn('fixed bottom-16 left-0 right-0 z-30 mx-auto px-3 pointer-events-none lg:bottom-4', LAYOUT_CONTENT_MAX_WIDTH_CLASS)}>
-          <div className="pointer-events-auto bg-white/95 backdrop-blur-md border border-lime-200 rounded-2xl shadow-xl shadow-lime-100/50 px-4 py-3 flex items-center gap-3">
+          <div className="pointer-events-auto bg-gradient-to-r from-white via-lime-50/60 to-emerald-50/40 backdrop-blur-md border border-lime-200/80 rounded-2xl shadow-xl shadow-lime-200/40 px-4 py-3 flex items-center gap-3">
             {/* 내 위치 */}
             <div className="flex-shrink-0 text-center">
-              <p className="text-[9px] text-gray-400 font-bold">내 순위</p>
-              <p className="text-lg font-black text-lime-600 leading-none">{myRank.rank}<span className="text-xs font-bold text-gray-400 ml-0.5">위</span></p>
+              <p className="text-[9px] text-lime-600/70 font-bold uppercase tracking-wide">내 순위</p>
+              <p className="text-xl font-black leading-none bg-gradient-to-b from-lime-600 to-emerald-600 bg-clip-text text-transparent">
+                {myRank.rank}<span className="text-xs font-bold text-gray-400 ml-0.5">위</span>
+              </p>
             </div>
-            <div className="w-px h-10 bg-lime-100 flex-shrink-0" />
+            <div className="w-px h-10 bg-gradient-to-b from-lime-200 to-emerald-200 flex-shrink-0" />
 
             {/* 아바타 + 정보 */}
             <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -995,18 +1041,18 @@ export function RankingPage() {
       {lnbOpen && (
         <>
           <div
-            className="fixed inset-0 z-40 bg-gradient-to-br from-fuchsia-900/25 via-violet-900/20 to-pink-900/25 backdrop-blur-md backdrop-saturate-150"
+            className="fixed inset-0 z-40 bg-gradient-to-br from-amber-900/20 via-orange-900/15 to-rose-900/20 backdrop-blur-md backdrop-saturate-150"
             onClick={() => setLnbOpen(false)}
             aria-hidden
           />
           <div
-            className={`fixed top-0 left-0 bottom-0 z-50 w-[min(18rem,90vw)] max-w-[18rem] shadow-2xl shadow-gray-200/35 overflow-y-auto rounded-none rounded-r-2xl ${MZ_SB}`}
+            className={`fixed top-0 left-0 bottom-0 z-50 w-[min(18rem,90vw)] max-w-[18rem] shadow-2xl shadow-amber-200/30 overflow-y-auto rounded-none rounded-r-2xl ${MZ_SB}`}
             style={{ animation: 'fade-in-up 0.25s cubic-bezier(0.16,1,0.3,1) both' }}
           >
-            <div className="flex items-center justify-between px-4 py-4 border-b border-pink-100/60">
-              <p className="font-black text-fuchsia-600">🏆 랭킹 센터</p>
-              <button type="button" onClick={() => setLnbOpen(false)} className="p-1.5 rounded-xl text-pink-400 hover:bg-white/80 transition-colors">
-                <X size={18} className="text-pink-300" />
+            <div className="flex items-center justify-between px-4 py-4 border-b border-amber-100/60">
+              <p className="font-black bg-gradient-to-r from-amber-600 to-orange-500 bg-clip-text text-transparent">🏆 랭킹 센터</p>
+              <button type="button" onClick={() => setLnbOpen(false)} className="p-1.5 rounded-xl text-amber-400 hover:bg-amber-50 transition-colors font-bold">
+                <X size={18} />
               </button>
             </div>
             <div className="p-3">

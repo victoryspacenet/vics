@@ -3,11 +3,7 @@
  * supabase_notices.sql 을 먼저 실행해 테이블을 생성하세요.
  */
 import { supabase } from './supabase'
-import {
-  applyPublicNoticeTitleFilter,
-  filterPublicNoticeRows,
-  isPublicNoticeTitle,
-} from './noticePublicFeed'
+import { applyPublicNoticeTitleFilter } from './noticePublicFeed'
 
 const TAG_MAP = {
   notice: { tag: '공지',    tagColor: 'bg-gray-100 text-gray-700' },
@@ -71,7 +67,7 @@ function notifyUpdated() {
  * @param {{ page?: number; pageSize?: number; category?: string; listOnly?: boolean; forPublicFeed?: boolean }} opts
  * - `category`: `'all'`이면 생략, 그 외 `notices.category`와 일치
  * - `listOnly`: true면 상단 배너용 `is_banner=true` 행 제외(일반 목록만)
- * - `forPublicFeed`: true면 `빅스 정식 버전 개봉` 제목만 (유저 `/notice`)
+ * - `forPublicFeed`: (현재 무시됨) 유저 공개 피드 여부 — 모든 공지 표시
  */
 export async function getAdminNoticesPaged({
   page = 1,
@@ -103,8 +99,7 @@ export async function getAdminNoticesPaged({
 
     const { data, error, count } = await q.range(from, to)
     if (error) throw error
-    const rows = forPublicFeed ? filterPublicNoticeRows(data ?? []) : data ?? []
-    const notices = rows.map(normalizeNotice)
+    const notices = (data ?? []).map(normalizeNotice)
     return {
       notices,
       totalCount: typeof count === 'number' ? count : notices.length,
@@ -137,8 +132,7 @@ export async function getAdminPinnedNoticeCandidates({
     q = applyPublicNoticeTitleFilter(q, forPublicFeed)
     const { data, error } = await q
     if (error) throw error
-    const rows = forPublicFeed ? filterPublicNoticeRows(data ?? []) : data ?? []
-    return rows.map(normalizeNotice)
+    return (data ?? []).map(normalizeNotice)
   } catch (e) {
     console.warn('[noticeStorage] getAdminPinnedNoticeCandidates 실패:', e)
     return []
@@ -151,7 +145,7 @@ export async function getNoticeById(id, { forPublicFeed = false } = {}) {
   try {
     const { data, error } = await supabase.from('notices').select(NOTICE_LIST_FIELDS).eq('id', id).maybeSingle()
     if (error) throw error
-    if (data && forPublicFeed && !isPublicNoticeTitle(data.title)) return null
+    // forPublicFeed 타이틀 필터 제거 — 모든 공지 표시
     return data ? normalizeNotice(data) : null
   } catch (e) {
     console.warn('[noticeStorage] getNoticeById 실패:', e)

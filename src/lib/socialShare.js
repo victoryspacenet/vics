@@ -2,7 +2,7 @@
  * 매치업·페이지 SNS 공유 (웹)
  * - 카카오: VITE_KAKAO_JS_KEY 있으면 카카오톡 공유(피드), 없으면 Web Share API 또는 링크 복사
  * - 페이스북 / X: 공식 공유 URL 새 창
- * - 인스타그램: 웹 공유 API 없음 → 링크 복사
+ * - 인스타그램: 모바일 네이티브 공유 시트 → 링크 복사 + instagram.com 열기
  */
 import { copyToClipboard } from './utils'
 
@@ -115,8 +115,13 @@ export async function shareMatchupToSns(platform, opts) {
           console.warn('[shareMatchupToSns] Kakao', e)
         }
       }
-      if (await tryWebShare()) return
-      await copyLink('링크를 복사했어요. 카카오톡 채팅에 붙여넣어 주세요')
+      // 모바일: 네이티브 공유 시트(카카오톡 포함) 우선 시도
+      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+      if (isMobile && await tryWebShare()) return
+      // 링크 복사 + 카카오톡 웹 열기
+      try { await copyToClipboard(url) } catch { /* ignore */ }
+      window.open('https://web.kakao.com', '_blank', 'noopener,noreferrer')
+      notify('링크를 복사했어요. 카카오톡에 붙여넣어 주세요 📋')
       return
     }
     case 'facebook': {
@@ -137,7 +142,13 @@ export async function shareMatchupToSns(platform, opts) {
       return
     }
     case 'instagram': {
-      await copyLink('링크를 복사했어요. 인스타그램 스토리·게시에 붙여넣어 주세요')
+      // 모바일: 네이티브 공유 시트 우선 시도
+      const isMobileInsta = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+      if (isMobileInsta && await tryWebShare()) return
+      // 링크 복사 + 인스타그램 열기
+      try { await copyToClipboard(url) } catch { /* ignore */ }
+      window.open('https://www.instagram.com', '_blank', 'noopener,noreferrer')
+      notify('링크를 복사했어요. 인스타그램에 붙여넣어 주세요 📋')
       return
     }
     default:

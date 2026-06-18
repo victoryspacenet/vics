@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, ChevronRight, Flame, LayoutTemplate, List, Pencil, MessageCircle } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, Flame, LayoutTemplate, List, Pencil, MessageCircle, Bell } from 'lucide-react'
 import { getAdminNoticesPaged, getAdminPinnedNoticeCandidates } from '../lib/noticeStorage'
-import { filterPublicNoticeRows } from '../lib/noticePublicFeed'
 import { useAuthStore } from '../store/authStore'
 import { canAccessAdmin } from '../lib/adminAuth'
 import { cn } from '../lib/utils'
@@ -66,13 +65,11 @@ export function NoticePage() {
         ])
         if (cancelled) return
         const prof = profile ?? null
-        const visibleRows = filterPublicNoticeRows(pageData.notices).filter((n) =>
-          canViewNotice(n, prof),
-        )
-        const pinnedVisible = filterPublicNoticeRows(pinned)
+        const visibleRows = pageData.notices.filter((n) => canViewNotice(n, prof))
+        const pinnedVisible = pinned.filter((n) => canViewNotice(n, prof))
         const banner =
-          pinnedVisible.find((n) => canViewNotice(n, prof)) ||
-          visibleRows.find((n) => canViewNotice(n, prof)) ||
+          pinnedVisible[0] ||
+          visibleRows[0] ||
           null
         setBannerNotice(banner)
         const list = banner
@@ -117,18 +114,31 @@ export function NoticePage() {
   const listQs = buildNoticeListSearchString(filter, page)
 
   return (
-    <div className={cn('min-h-screen w-full min-w-0', PAGE_BG)}>
-      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto w-full')}>
+    <div className={cn('min-h-screen w-full min-w-0 relative overflow-hidden', PAGE_BG)}>
+      {/* 앰비언트 배경 */}
+      <div className="pointer-events-none fixed inset-0 z-0">
+        <div className="absolute -top-32 -left-32 w-80 h-80 rounded-full bg-gradient-radial from-fuchsia-300/20 to-transparent blur-3xl" />
+        <div className="absolute top-1/3 -right-20 w-64 h-64 rounded-full bg-gradient-radial from-pink-300/15 to-transparent blur-3xl" />
+        <div className="absolute bottom-20 left-1/4 w-56 h-56 rounded-full bg-gradient-radial from-rose-300/12 to-transparent blur-3xl" />
+      </div>
+      <div className={cn(LAYOUT_CONTENT_MAX_WIDTH_CLASS, 'mx-auto w-full relative z-10')}>
         {/* 헤더 */}
         <div className={cn('sticky top-0 z-10 px-4 py-3 flex items-center gap-2 sm:gap-3 flex-wrap', HEADER_GLASS)}>
           <button
             onClick={() => navigate(-1)}
-            className="p-2 -ml-2 rounded-xl hover:bg-pink-100/60 transition-colors shrink-0"
+            className="flex items-center gap-1 pl-2 pr-3 py-2 -ml-1 rounded-xl bg-gradient-to-r from-fuchsia-50 to-pink-50 border border-pink-200/60 hover:from-fuchsia-100 hover:to-pink-100 transition-all shrink-0 shadow-sm"
             aria-label="뒤로"
           >
-            <ArrowLeft size={20} className="text-fuchsia-900" />
+            <ChevronLeft size={16} className="text-fuchsia-700" />
+            <span className="text-xs font-bold text-fuchsia-700">뒤로</span>
           </button>
-          <h1 className="text-lg font-black text-fuchsia-950 flex-1 min-w-0 tracking-tight">공지사항</h1>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-fuchsia-500 to-pink-500 shadow-md shadow-fuchsia-300/40">
+              <Bell size={14} className="text-white" />
+            </span>
+            <h1 className="text-base font-black bg-gradient-to-r from-fuchsia-700 via-pink-600 to-rose-600 bg-clip-text text-transparent tracking-tight">공지사항</h1>
+            <span className="text-[10px] font-black text-fuchsia-400/60 uppercase tracking-widest hidden sm:block">Notice</span>
+          </div>
           {canAccessAdmin(user) && (
             <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end">
               <Link
@@ -191,9 +201,12 @@ export function NoticePage() {
           {bannerNotice && (
             <section className="mb-8">
               <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1.5">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-orange-200/60 bg-gradient-to-br from-orange-200 to-rose-300 shadow-sm">
-                  <Flame size={18} className="text-orange-600" />
-                </div>
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-400 via-rose-500 to-fuchsia-600 shadow-[0_3px_12px_-2px_rgba(244,63,94,0.45)]">
+                  <Flame size={16} className="text-white" />
+                </span>
+                <span className="text-sm font-black bg-gradient-to-r from-orange-600 via-rose-600 to-fuchsia-700 bg-clip-text text-transparent">
+                  지금 가장 핫한 소식
+                </span>
                 <span
                   className={cn(
                     'inline-flex shrink-0 flex-row items-center whitespace-nowrap rounded-lg px-2.5 py-0.5 text-xs font-black [writing-mode:horizontal-tb]',
@@ -203,21 +216,22 @@ export function NoticePage() {
                   {bannerNotice.tag}
                 </span>
                 <NoticeExposureBadge notice={bannerNotice} />
-                <h2 className="min-w-0 text-sm font-black tracking-tight text-fuchsia-950">
-                  지금 가장 핫한 소식
-                </h2>
               </div>
               <Link
                 to={`/notice/${bannerNotice.id}${listQs}`}
-                className="block rounded-2xl overflow-hidden bg-gradient-to-br from-amber-400 via-fuchsia-500 to-rose-500 shadow-[0_12px_40px_-12px_rgba(244,114,182,0.45)] hover:shadow-[0_16px_48px_-12px_rgba(192,38,211,0.4)] hover:scale-[1.01] transition-all ring-2 ring-white/50"
+                className="block rounded-2xl overflow-hidden bg-gradient-to-br from-amber-400 via-fuchsia-500 to-rose-500 shadow-[0_12px_40px_-12px_rgba(244,114,182,0.5)] hover:shadow-[0_16px_52px_-12px_rgba(192,38,211,0.5)] hover:scale-[1.01] transition-all ring-2 ring-white/50"
               >
-                <div className="flex flex-col justify-end gap-1 px-4 py-3.5 sm:px-5 sm:py-4 text-white">
+                <div className="flex flex-col justify-end gap-1.5 px-5 py-4 text-white">
                   <p className="text-base font-black leading-snug drop-shadow-md sm:text-lg">
                     {bannerNotice.title}
                   </p>
                   <p className="text-sm text-white/95 font-semibold leading-snug drop-shadow">
                     {bannerNotice.summary}
                   </p>
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <span className="text-[10px] font-bold text-white/70">{bannerNotice.date}</span>
+                    <ChevronRight size={12} className="text-white/70" />
+                  </div>
                 </div>
               </Link>
             </section>
@@ -225,20 +239,25 @@ export function NoticePage() {
 
           {/* 최신 게시글 */}
           <section>
-            <h2 className="text-sm font-black text-fuchsia-950 mb-3 tracking-tight">최신 게시글</h2>
+            <div className="flex items-center gap-2.5 mb-3">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-fuchsia-500 to-pink-500 shadow-md shadow-fuchsia-300/40 text-sm">📋</span>
+              <span className="text-sm font-black bg-gradient-to-r from-fuchsia-700 via-pink-600 to-rose-600 bg-clip-text text-transparent">최신 게시글</span>
+              <span className="ml-auto text-[10px] font-black text-fuchsia-400/50 uppercase tracking-widest">Latest</span>
+            </div>
             <div className="space-y-2.5">
               {listLoading ? (
                 <div className="space-y-2.5">
                   {Array.from({ length: 3 }).map((_, i) => (
                     <div
                       key={i}
-                      className={cn(SECTION_CARD, 'h-20 animate-pulse border-pink-100/60 bg-fuchsia-50/40')}
+                      className={cn(SECTION_CARD, 'h-20 animate-pulse bg-gradient-to-r from-fuchsia-50/60 to-pink-50/40')}
                     />
                   ))}
                 </div>
               ) : paginatedList.length === 0 ? (
-                <div className={cn(SECTION_CARD, 'py-12 text-center text-sm text-fuchsia-700/60 font-medium')}>
-                  등록된 공지가 없어요
+                <div className={cn(SECTION_CARD, 'py-12 text-center space-y-2')}>
+                  <p className="text-2xl">📭</p>
+                  <p className="text-sm font-bold text-fuchsia-700/60">등록된 공지가 없어요</p>
                 </div>
               ) : (
                 paginatedList.map((notice) => (
@@ -246,33 +265,35 @@ export function NoticePage() {
                   key={notice.id}
                   to={`/notice/${notice.id}${listQs}`}
                   className={cn(
-                    SECTION_CARD,
-                    'flex items-center gap-3 p-4 border-pink-100/70',
-                    'hover:border-fuchsia-300/60 hover:shadow-[0_8px_28px_-12px_rgba(192,38,211,0.22)] hover:-translate-y-0.5',
+                    'relative flex items-center gap-3 p-4 rounded-2xl overflow-hidden',
+                    'border border-pink-100/70 bg-white/92 shadow-[0_4px_28px_-10px_rgba(244,114,182,0.18)] backdrop-blur-[2px]',
+                    'hover:border-fuchsia-300/70 hover:shadow-[0_8px_32px_-10px_rgba(192,38,211,0.28)] hover:-translate-y-0.5',
                     'transition-all duration-200 group'
                   )}
                 >
-                  <div className="flex-1 min-w-0">
+                  {/* 좌측 컬러 액센트 바 */}
+                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-fuchsia-400 to-pink-500 rounded-l-2xl opacity-60 group-hover:opacity-100 transition-opacity" />
+                  <div className="flex-1 min-w-0 pl-1">
                     <div className="flex flex-wrap items-center gap-2 mb-1">
                       <span className={`shrink-0 px-2 py-0.5 rounded-lg text-[10px] font-black ${notice.tagColor}`}>
                         {notice.tag}
                       </span>
                       <NoticeExposureBadge notice={notice} />
                       {notice.isHighlighted && (
-                        <span className="shrink-0 w-4 h-4 flex items-center justify-center rounded-full bg-gradient-to-br from-rose-500 to-red-500 text-white text-[9px] font-black shadow-sm">
-                          N
+                        <span className="shrink-0 px-1.5 py-0.5 rounded-full bg-gradient-to-r from-rose-500 to-fuchsia-500 text-white text-[9px] font-black shadow-sm">
+                          NEW
                         </span>
                       )}
-                      <p className="text-sm font-bold text-fuchsia-950 truncate group-hover:text-fuchsia-800">
+                      <p className="text-sm font-bold text-fuchsia-950 truncate group-hover:text-fuchsia-700 transition-colors">
                         {notice.title}
                       </p>
                     </div>
-                    <p className="text-xs text-fuchsia-700/55 font-medium">
-                      {notice.date} | {notice.author}
+                    <p className="text-xs text-fuchsia-700/50 font-medium">
+                      {notice.date} · {notice.author}
                     </p>
                   </div>
-                  <div className="w-8 h-8 rounded-xl bg-fuchsia-50/90 border border-pink-100/60 group-hover:bg-fuchsia-100 flex items-center justify-center transition-colors shrink-0">
-                    <ChevronRight size={18} className="text-fuchsia-400 group-hover:text-fuchsia-600 group-hover:translate-x-0.5 transition-all" />
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-fuchsia-50 to-pink-50/80 border border-pink-100/60 group-hover:from-fuchsia-100 group-hover:to-pink-100 flex items-center justify-center transition-all shrink-0">
+                    <ChevronRight size={16} className="text-fuchsia-400 group-hover:text-fuchsia-600 group-hover:translate-x-0.5 transition-all" />
                   </div>
                 </Link>
               ))
@@ -286,10 +307,10 @@ export function NoticePage() {
                   type="button"
                   onClick={() => goToPage(Math.max(1, page - 1))}
                   disabled={page === 1}
-                  className="w-9 h-9 rounded-xl border border-pink-200/80 bg-white/80 flex items-center justify-center text-fuchsia-800 hover:bg-fuchsia-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="w-9 h-9 rounded-xl border border-pink-200/80 bg-white/80 flex items-center justify-center text-fuchsia-700 hover:bg-gradient-to-br hover:from-fuchsia-50 hover:to-pink-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
                   aria-label="이전 페이지"
                 >
-                  <ArrowLeft size={16} />
+                  <ChevronLeft size={16} />
                 </button>
                 {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                   const p = page <= 3 ? i + 1 : Math.max(1, page - 2 + i)
@@ -302,8 +323,8 @@ export function NoticePage() {
                       className={cn(
                         'w-9 h-9 rounded-xl text-sm font-black transition-all',
                         page === p
-                          ? 'bg-gradient-to-br from-fuchsia-600 to-pink-500 text-white shadow-md shadow-fuchsia-300/40 ring-1 ring-white/50'
-                          : 'border border-pink-200/80 bg-white/80 text-fuchsia-800 hover:bg-fuchsia-50'
+                          ? 'bg-gradient-to-br from-fuchsia-600 to-pink-500 text-white shadow-[0_4px_14px_-4px_rgba(192,38,211,0.5)] scale-105 ring-1 ring-white/50'
+                          : 'border border-pink-200/80 bg-white/80 text-fuchsia-800 hover:bg-gradient-to-br hover:from-fuchsia-50 hover:to-pink-50 shadow-sm'
                       )}
                     >
                       {p}
@@ -314,7 +335,7 @@ export function NoticePage() {
                   type="button"
                   onClick={() => goToPage(Math.min(totalPages, page + 1))}
                   disabled={page === totalPages}
-                  className="w-9 h-9 rounded-xl border border-pink-200/80 bg-white/80 flex items-center justify-center text-fuchsia-800 hover:bg-fuchsia-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="w-9 h-9 rounded-xl border border-pink-200/80 bg-white/80 flex items-center justify-center text-fuchsia-700 hover:bg-gradient-to-br hover:from-fuchsia-50 hover:to-pink-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
                   aria-label="다음 페이지"
                 >
                   <ChevronRight size={16} />

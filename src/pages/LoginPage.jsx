@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { Sparkles, X } from 'lucide-react'
+import { ArrowRight, Eye, EyeOff, Sparkles, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { messageForSignInWithPasswordError } from '../lib/signInPasswordErrors'
 import { useAuthStore } from '../store/authStore'
@@ -151,6 +151,7 @@ export function LoginPage() {
   const { showToast } = useUIStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPw, setShowPw] = useState(false)
   const [loading, setLoading] = useState(false)
   const [emailVerifyHint, setEmailVerifyHint] = useState(false)
 
@@ -200,7 +201,7 @@ export function LoginPage() {
         password,
       })
       if (error) throw error
-      await fetchProfile(data.user.id)
+      await fetchProfile(data.user.id, { force: true })
       clearStoredLoginReturn()
       showToast('로그인 됐어요!', 'success')
       navigate(returnAfterLogin, { replace: true })
@@ -225,35 +226,41 @@ export function LoginPage() {
         subtitle="오늘도 취향 경쟁 한 판, 같이 즐겨요 💜"
       />
 
-      {emailVerifyHint ? (
+      {emailVerifyHint && (
         <div
-          className="rounded-[1.25rem] border border-sky-300/45 bg-gradient-to-br from-sky-50/95 to-indigo-50/50 px-4 py-3.5 text-left shadow-[inset_0_1px_0_0_rgba(255,255,255,0.65)] backdrop-blur-sm"
+          className="rounded-2xl overflow-hidden border border-sky-200/60 bg-gradient-to-br from-sky-50/95 to-indigo-50/60 shadow-sm"
           role="status"
         >
-          <div className="mb-2 flex items-center gap-2">
-            <Sparkles className="h-4 w-4 shrink-0 text-sky-600" strokeWidth={2.2} />
-            <p className="text-sm font-black text-sky-950">이메일 인증이 필요해요</p>
+          <div className="h-0.5 bg-gradient-to-r from-sky-400 to-indigo-400" />
+          <div className="px-4 py-4">
+            <div className="mb-2 flex items-center gap-2.5">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-sky-400 to-indigo-500 shadow-sm">
+                <Sparkles className="h-3.5 w-3.5 text-white" strokeWidth={2.2} />
+              </span>
+              <p className="text-sm font-black text-sky-950">이메일 인증이 필요해요</p>
+            </div>
+            <p className="text-sm font-medium leading-relaxed text-sky-900/80 pl-0.5">
+              가입하신 주소로 인증 메일이 갔을 수 있어요.{' '}
+              <strong className="text-sky-800">받은 편지함·스팸함</strong>을 확인한 뒤, 메일 속 링크로 인증을 마친 다음 여기서 로그인해 주세요.
+            </p>
           </div>
-          <p className="text-sm font-medium leading-relaxed text-sky-900/88">
-            가입하신 주소로 인증 메일이 갔을 수 있어요. <strong>받은 편지함·스팸함</strong>을 확인한 뒤, 메일 속 링크로 인증을 마친 다음 여기서 로그인해 주세요.
-          </p>
         </div>
-      ) : null}
+      )}
 
       <RecoveryGlassCard>
         <SocialButtons oauthReturnPath={returnAfterLogin} tone="mz" />
 
         <div className="my-6 flex items-center gap-3">
-          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-fuchsia-300/55 to-transparent" />
-          <span className="shrink-0 text-[11px] font-black uppercase tracking-[0.12em] text-fuchsia-600/75">
+          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-fuchsia-300/50 to-transparent" />
+          <span className="shrink-0 rounded-full border border-fuchsia-200/60 bg-white/70 px-3 py-0.5 text-[10px] font-black uppercase tracking-widest text-fuchsia-600/70 backdrop-blur-sm">
             or 이메일
           </span>
-          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-fuchsia-300/55 to-transparent" />
+          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-fuchsia-300/50 to-transparent" />
         </div>
 
         <form onSubmit={handleEmailLogin} className="space-y-4">
           <div>
-            <label htmlFor="login-email" className="mb-1.5 block text-xs font-bold text-violet-900/70">
+            <label htmlFor="login-email" className="mb-1.5 block text-xs font-bold text-violet-900/65">
               이메일
             </label>
             <input
@@ -267,42 +274,75 @@ export function LoginPage() {
             />
           </div>
           <div>
-            <label htmlFor="login-password" className="mb-1.5 block text-xs font-bold text-violet-900/70">
+            <label htmlFor="login-password" className="mb-1.5 block text-xs font-bold text-violet-900/65">
               비밀번호
             </label>
-            <input
-              id="login-password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              autoComplete="current-password"
-              className={recoveryInputClass()}
-            />
+            <div className="relative">
+              <input
+                id="login-password"
+                type={showPw ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                autoComplete="current-password"
+                className={recoveryInputClass() + ' pr-11'}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPw((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-fuchsia-600 transition-colors"
+                tabIndex={-1}
+                aria-label={showPw ? '비밀번호 숨기기' : '비밀번호 보기'}
+              >
+                {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </div>
-          <div className="text-right">
+
+          <div className="flex items-center justify-between pt-0.5">
+            <span />
             <button
               type="button"
               onClick={() => navigate('/forgot-password')}
-              className="cursor-pointer border-0 bg-transparent p-0 text-[11px] font-bold text-fuchsia-700/85 underline decoration-fuchsia-300/80 decoration-2 underline-offset-[3px] transition hover:text-violet-700"
+              className="cursor-pointer border-0 bg-transparent p-0 text-[11px] font-bold text-fuchsia-700/80 underline decoration-fuchsia-300/70 decoration-2 underline-offset-[3px] transition hover:text-violet-700"
             >
               비밀번호를 잊으셨나요?
             </button>
           </div>
-          <Button size="full" variant="mz" disabled={!email.trim() || !password || loading}>
+
+          <button
+            type="submit"
+            disabled={!email.trim() || !password || loading}
+            className="flex min-h-[3.25rem] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 via-fuchsia-500 to-pink-500 px-4 py-3.5 text-sm font-black text-white shadow-[0_4px_18px_-4px_rgba(139,92,246,0.55)] transition-all hover:brightness-105 hover:shadow-[0_6px_24px_-4px_rgba(192,38,211,0.5)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+          >
             {loading ? (
-              <span className="flex items-center justify-center gap-2">
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/35 border-t-white" />
+              <>
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white shrink-0" />
                 로그인 중…
-              </span>
+              </>
             ) : (
-              '로그인하고 입장하기 🚀'
+              <>
+                로그인하고 입장하기 🚀
+              </>
             )}
-          </Button>
+          </button>
         </form>
       </RecoveryGlassCard>
 
-
+      {/* 회원가입 링크 */}
+      <div className="text-center space-y-3 pt-1">
+        <p className="flex flex-wrap items-center justify-center gap-1 text-sm font-medium text-slate-500">
+          아직 계정이 없어요?
+          <button
+            type="button"
+            onClick={() => navigate('/signup')}
+            className="inline-flex items-center gap-0.5 border-none bg-transparent p-0 font-black text-violet-700 underline decoration-violet-300/80 decoration-2 underline-offset-[3px] transition hover:text-fuchsia-600 hover:decoration-fuchsia-400/80"
+          >
+            회원가입 하기
+            <ArrowRight size={13} strokeWidth={2.5} />
+          </button>
+        </p>
+      </div>
 
     </PasswordRecoveryShell>
   )
@@ -319,6 +359,7 @@ export function LoginModal({ onClose }) {
   const { showToast, loginModalContext } = useUIStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showModalPw, setShowModalPw] = useState(false)
   const [loading, setLoading] = useState(false)
 
   const oauthReturnPath = useMemo(
@@ -343,7 +384,7 @@ export function LoginModal({ onClose }) {
         password,
       })
       if (error) throw error
-      await fetchProfile(data.user.id)
+      await fetchProfile(data.user.id, { force: true })
       clearStoredLoginReturn()
       showToast('로그인 됐어요!', 'success')
       onClose()
@@ -417,21 +458,29 @@ export function LoginModal({ onClose }) {
             autoComplete="email"
             className={MZ_INPUT}
           />
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="비밀번호"
-            autoComplete="current-password"
-            className={MZ_INPUT}
-          />
+          <div className="relative">
+            <input
+              type={showModalPw ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="비밀번호"
+              autoComplete="current-password"
+              className={MZ_INPUT + ' pr-11'}
+            />
+            <button
+              type="button"
+              onClick={() => setShowModalPw((v) => !v)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-fuchsia-400/70 hover:text-fuchsia-700 transition-colors"
+              tabIndex={-1}
+              aria-label={showModalPw ? '비밀번호 숨기기' : '비밀번호 보기'}
+            >
+              {showModalPw ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
           <div className="flex justify-end -mt-0.5">
             <button
               type="button"
-              onClick={() => {
-                onClose()
-                navigate('/forgot-password')
-              }}
+              onClick={() => { onClose(); navigate('/forgot-password') }}
               className="border-none bg-transparent p-0 text-[11px] font-bold text-fuchsia-600/75 underline underline-offset-2 hover:text-fuchsia-800"
             >
               비밀번호 찾기
@@ -440,17 +489,15 @@ export function LoginModal({ onClose }) {
           <button
             type="submit"
             disabled={!email.trim() || !password || loading}
-            className="flex min-h-[3.25rem] w-full items-center justify-center rounded-2xl bg-gradient-to-r from-violet-600 via-fuchsia-500 to-pink-500 px-3 py-3.5 text-center text-sm font-black leading-snug text-white shadow-lg shadow-fuchsia-400/35 transition-all hover:brightness-105 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
+            className="flex min-h-[3.25rem] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 via-fuchsia-500 to-pink-500 px-3 py-3.5 text-sm font-black text-white shadow-[0_4px_18px_-4px_rgba(139,92,246,0.55)] transition-all hover:brightness-105 hover:shadow-[0_6px_24px_-4px_rgba(192,38,211,0.5)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
           >
             {loading ? (
-              <span className="inline-flex items-center justify-center gap-2">
+              <>
                 <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-white/30 border-t-white" />
                 로그인 중…
-              </span>
+              </>
             ) : (
-              <span className="block w-full whitespace-normal break-keep px-0.5">
-                로그인하고 입장하기 🚀
-              </span>
+              <span className="whitespace-normal break-keep">로그인하고 입장하기 🚀</span>
             )}
           </button>
         </form>

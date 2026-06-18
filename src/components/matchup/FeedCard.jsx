@@ -27,22 +27,34 @@ import { useMatchupEngagement } from './MatchupEngagementContext'
 const VARIANT_STYLE = {
   best: {
     badge: (rank) =>
-      rank === 1 ? 'bg-gradient-to-r from-amber-400 to-yellow-300 text-amber-900' :
+      rank === 1 ? 'bg-gradient-to-r from-amber-400 to-yellow-300 text-amber-900 shadow-[0_2px_8px_rgba(251,191,36,0.4)]' :
       rank === 2 ? 'bg-gradient-to-r from-gray-300 to-gray-200 text-gray-700' :
       rank === 3 ? 'bg-gradient-to-r from-orange-400 to-amber-300 text-orange-900' :
-                   'bg-gray-100 text-gray-500',
-    label: (rank) => rank != null ? `RANK ${rank}` : 'RANK',
-    border: 'border-gray-100 hover:border-orange-200',
+                   'bg-gradient-to-r from-amber-100 to-orange-100 text-amber-800',
+    label: (rank) => rank != null ? `🔥 RANK ${rank}` : '🔥 RANK',
+    border: 'border-amber-200/70 hover:border-amber-300/80',
+    bg: 'from-white via-amber-50/55 to-orange-50/40',
+    topBar: 'from-amber-400 via-orange-500 to-rose-400',
+    shadow: 'shadow-[0_4px_24px_-6px_rgba(251,146,60,0.22)] lg:shadow-[0_6px_32px_-8px_rgba(251,146,60,0.26)]',
+    hoverShadow: 'hover:shadow-[0_8px_32px_-6px_rgba(251,146,60,0.38)]',
   },
   hot: {
-    badge: () => 'bg-gradient-to-r from-violet-500 to-purple-400 text-white',
+    badge: () => 'bg-gradient-to-r from-violet-500 to-fuchsia-400 text-white shadow-[0_2px_8px_rgba(168,85,247,0.4)]',
     label: () => '✨ 박빙',
-    border: 'border-gray-100 hover:border-violet-200',
+    border: 'border-fuchsia-200/65 hover:border-fuchsia-300/75',
+    bg: 'from-white via-violet-50/55 to-fuchsia-50/40',
+    topBar: 'from-violet-500 via-fuchsia-500 to-pink-400',
+    shadow: 'shadow-[0_4px_24px_-6px_rgba(168,85,247,0.2)] lg:shadow-[0_6px_32px_-8px_rgba(168,85,247,0.24)]',
+    hoverShadow: 'hover:shadow-[0_8px_32px_-6px_rgba(168,85,247,0.36)]',
   },
   new: {
-    badge: () => 'bg-gradient-to-r from-emerald-400 to-teal-400 text-white',
-    label: () => '🆕 NEW',
-    border: 'border-gray-100 hover:border-emerald-200',
+    badge: () => 'bg-gradient-to-r from-emerald-400 to-teal-400 text-white shadow-[0_2px_8px_rgba(20,184,166,0.4)]',
+    label: () => '⚡ NEW',
+    border: 'border-emerald-200/65 hover:border-emerald-300/75',
+    bg: 'from-white via-emerald-50/55 to-cyan-50/40',
+    topBar: 'from-emerald-400 via-teal-500 to-cyan-400',
+    shadow: 'shadow-[0_4px_24px_-6px_rgba(20,184,166,0.2)] lg:shadow-[0_6px_32px_-8px_rgba(20,184,166,0.24)]',
+    hoverShadow: 'hover:shadow-[0_8px_32px_-6px_rgba(20,184,166,0.34)]',
   },
 }
 
@@ -183,15 +195,24 @@ export function FeedCard({
   return (
     <div
       className={cn(
-        'border rounded-2xl lg:rounded-3xl transition-all duration-200 overflow-hidden',
+        'relative border rounded-2xl lg:rounded-3xl transition-all duration-300 overflow-hidden',
         bannerGlow
           ? 'vics-feed-banner-highlight vics-feed-banner-highlight--feed-lg shadow-none lg:shadow-none'
-          : 'bg-gradient-to-br from-white via-white to-slate-50/55 shadow-sm lg:shadow-md hover:shadow-md lg:hover:shadow-lg hover:via-cyan-50/10',
-        !bannerGlow && vs.border,
+          : cn(
+              `bg-gradient-to-br ${vs.bg ?? 'from-white via-white to-slate-50/55'}`,
+              vs.shadow ?? 'shadow-sm lg:shadow-md',
+              vs.hoverShadow ?? 'hover:shadow-md lg:hover:shadow-lg',
+              vs.border,
+              'hover:-translate-y-0.5',
+            ),
         premiumFrame && VIP_MATCHUP_SURFACE_CLASS,
         premiumFrame && 'sm:scale-[1.008] sm:hover:scale-[1.01]',
       )}
     >
+      {/* 카드 상단 컬러 라인 */}
+      {!bannerGlow && vs.topBar && (
+        <div className={`absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r ${vs.topBar}`} />
+      )}
 
       {/* ── 카드 헤더 ── */}
       <div className="relative z-[6] px-4 pt-4 pb-2 lg:px-6 lg:pt-5 lg:pb-3 flex items-start justify-between gap-2 lg:gap-3">
@@ -291,9 +312,10 @@ export function FeedCard({
               media={matchupSideToMedia(matchup, 'right')}
             />
           ) : (
-            <div className="aspect-square bg-gray-50 rounded-xl lg:rounded-2xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center gap-1 lg:gap-2">
-              <Swords className="text-gray-300 w-[18px] h-[18px] lg:w-7 lg:h-7" />
-              <span className="text-[10px] lg:text-xs text-gray-400 font-bold text-center leading-tight">도전자<br/>모집 중</span>
+            <div className="aspect-square rounded-xl lg:rounded-2xl overflow-hidden border border-dashed border-emerald-400/35 bg-gradient-to-br from-emerald-950/85 via-teal-950/75 to-cyan-950/80 flex flex-col items-center justify-center gap-1.5 lg:gap-2.5">
+              <span className="text-2xl lg:text-4xl">⚔️</span>
+              <span className="text-[10px] lg:text-sm font-black text-emerald-300 tracking-wide text-center leading-tight">도전자 모집 중</span>
+              <span className="text-[9px] lg:text-xs font-semibold text-teal-400/80 text-center">먼저 도전해보세요!</span>
             </div>
           )}
 
@@ -325,7 +347,12 @@ export function FeedCard({
       </div>
 
       {/* ── 하단 액션 ── */}
-      <div className="px-4 lg:px-6 pb-3.5 lg:pb-5 pt-2 lg:pt-3 flex items-center justify-between border-t border-gray-50">
+      <div className={cn(
+        'px-4 lg:px-6 pb-3.5 lg:pb-5 pt-2 lg:pt-3 flex items-center justify-between border-t',
+        variant === 'best' ? 'border-amber-100/80' :
+        variant === 'hot' ? 'border-fuchsia-100/80' :
+        'border-emerald-100/80',
+      )}>
         <div className="flex items-center gap-3 lg:gap-4">
           {/* 참여자 */}
           <div className="flex items-center gap-1 lg:gap-1.5 text-xs lg:text-sm text-gray-400">
@@ -440,8 +467,13 @@ function ThumbnailCell({
           </>
         )}
         {type === 'text' && (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 p-3 lg:p-5">
-            <p className="line-clamp-4 lg:line-clamp-6 text-center text-xs lg:text-base font-semibold leading-relaxed text-[#22282E]">{text}</p>
+          <div className={cn(
+            'flex h-full w-full items-center justify-center p-3 lg:p-5',
+            side === 'left'
+              ? 'bg-gradient-to-br from-amber-950/90 via-orange-900/80 to-rose-950/85'
+              : 'bg-gradient-to-br from-violet-950/90 via-fuchsia-900/80 to-indigo-950/85',
+          )}>
+            <p className="line-clamp-4 lg:line-clamp-6 text-center text-xs lg:text-base font-bold leading-relaxed text-white/90 drop-shadow-sm">{text}</p>
           </div>
         )}
 
