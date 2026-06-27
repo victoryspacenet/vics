@@ -39,6 +39,9 @@ export const ProfileEditPage = lazy(() =>
 export const ProfileImageEditPage = lazy(() =>
   import('../pages/ProfileImageEditPage').then((m) => ({ default: m.ProfileImageEditPage })),
 )
+export const TendencyReportPage = lazy(() =>
+  import('../pages/TendencyReportPage').then((m) => ({ default: m.TendencyReportPage })),
+)
 export const DeleteAccountPage = lazy(() =>
   import('../pages/DeleteAccountPage').then((m) => ({ default: m.DeleteAccountPage })),
 )

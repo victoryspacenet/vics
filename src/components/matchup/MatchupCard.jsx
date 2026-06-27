@@ -8,7 +8,6 @@ import { useUIStore } from '../../store/uiStore'
 import { Avatar } from '../ui/Avatar'
 import { FeaturedBadgeSpan } from '../ui/FeaturedBadge'
 import { UserProfileLink } from '../ui/UserProfileLink'
-import { LevelBadge } from '../ui/LevelBadge'
 import { TierBadge } from '../ui/TierBadge'
 import { VoteBar } from './VoteBar'
 import { VoteFireworks } from '../ui/VoteFireworks'
@@ -20,6 +19,7 @@ import { formatDate, formatNumber, copyToClipboard, calcPercent, cn } from '../.
 import { voteViaApi } from '../../lib/voteApi'
 import { fandomTierHasDiamondListNicknameAura } from '../../lib/fandomTiers'
 import { FandomBronzeStarBadge } from '../fandom/FandomBronzeStarBadge'
+import { FoundingMemberBadge } from '../profile/FoundingMemberBadge'
 import { MatchupMediaOpenButton, MatchupMediaViewer } from './MatchupMediaViewer'
 import { matchupSideToMedia } from '../../lib/matchupMediaView'
 import { useMatchupEngagement } from './MatchupEngagementContext'
@@ -197,8 +197,8 @@ export function MatchupCard({ matchup: initialMatchup, compact, onVoteUpdate }) 
               {creator?.nickname || '사용자'}
             </UserProfileLink>
             <FandomBronzeStarBadge tierId={creator?.fandom_tier} />
-            <FeaturedBadgeSpan badgeId={creator?.featured_badge} className="translate-y-px" />
-            <LevelBadge points={creator?.points || 0} variant="badge" />
+            <FoundingMemberBadge profile={creator} size={12} />
+            <FeaturedBadgeSpan profile={creator} rankInfo={matchup._creatorRankInfo} className="translate-y-px" />
             <TierBadge profile={creator} rankInfo={matchup._creatorRankInfo || {}} variant="compact" />
             <span className="text-xs text-gray-400">{formatDate(matchup.created_at)}</span>
           </div>
@@ -354,23 +354,16 @@ function ContentBox({
     side === 'left'
       ? 'ring-2 ring-fuchsia-500 shadow-[0_0_20px_rgba(217,70,239,0.35)]'
       : 'ring-2 ring-sky-500 shadow-[0_0_20px_rgba(14,165,233,0.35)]'
-  const labelBar =
-    side === 'left'
-      ? 'bg-gradient-to-r from-fuchsia-600 to-pink-500'
-      : 'bg-gradient-to-r from-sky-500 to-blue-600'
   return (
     <MatchupThumbFrame side={side} className={cn('w-full', height)} innerClassName="h-full">
       {voted && (
         <div className={`pointer-events-none absolute inset-0 z-[8] rounded-[10px] ${neonRing}`} />
       )}
-      <span className={`pointer-events-none absolute left-2 top-2 z-10 ${labelBar} rounded-md px-2 py-0.5 text-xs font-bold text-white shadow-sm`}>
-        {label}
-      </span>
       <MatchupMediaOpenButton media={media} onOpen={onOpenMedia} className="h-full min-h-0">
         {type === 'image' && url && (
         <img
           src={safeMediaUrl(thumbnail || url)}
-          alt={label ?? ''}
+          alt={side === 'left' ? 'A측' : 'B측'}
           className="h-full w-full object-cover"
           loading="lazy"
           decoding="async"
@@ -380,7 +373,7 @@ function ContentBox({
       {type === 'video' && (url || thumbnail) && (
         <img
           src={safeMediaUrl(thumbnail || url)}
-          alt={label ?? ''}
+          alt={side === 'left' ? 'A측' : 'B측'}
           className="h-full w-full object-cover"
           loading="lazy"
           decoding="async"

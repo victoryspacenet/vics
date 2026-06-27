@@ -14,15 +14,18 @@ import { useUIStore } from '../store/uiStore'
 import { useAuthStore } from '../store/authStore'
 import { FeedCard } from '../components/matchup/FeedCard'
 import { MatchupEngagementProvider } from '../components/matchup/MatchupEngagementContext'
+import {
+  MATCHUPS_CAT_STORAGE_KEY,
+  MATCHUPS_CAT_URL_PARAM,
+  VALID_MATCHUPS_FEED_FILTERS,
+  readInitialMatchupsFeedCategory,
+  useMatchupsFeedCategories,
+  MatchupsFeedLnbDesktopAside,
+  MatchupsFeedLnbMobileTrigger,
+  MatchupsFeedLnbMobileDrawer,
+} from '../components/matchup/MatchupsFeedLnb'
 import { cn } from '../lib/utils'
-import { getFeedCategoryNavItems } from '../lib/categoryAdminStorage'
 import { storedCategoryValuesForFilter } from '../lib/matchupCategoryAliases'
-
-const FILTERS = [
-  { id: 'active',   label: '투표진행중 매치업' },
-  { id: 'completed', label: '투표완료 매치업' },
-  { id: 'mine',     label: '내가 올린 매치업' },
-]
 
 const SORT_OPTIONS = [
   { id: 'newest',  label: '최신순', icon: '🔃' },
@@ -32,49 +35,14 @@ const SORT_OPTIONS = [
 /** DB·UI 공통 페이지 크기 (한 번에 가져오는 행 수) */
 const PAGE_SIZE = 20
 
-const VALID_FILTERS = ['active', 'completed', 'mine']
-
-/** 다른 화면 갔다가 `/matchups`로 돌아와도 탭·필터가 유지되도록 (URL·sessionStorage) */
-const MATCHUPS_CAT_STORAGE_KEY = 'vics_matchups_feed_category'
-const MATCHUPS_CAT_URL_PARAM = 'cat'
-
-function readInitialMatchupsCategory() {
-  if (typeof window === 'undefined') return 'all'
-  try {
-    const items = getFeedCategoryNavItems()
-    const ids = new Set(items.map((c) => c.id))
-    const params = new URLSearchParams(window.location.search)
-    const urlCat = params.get(MATCHUPS_CAT_URL_PARAM)
-    let stored = ''
-    try {
-      stored = sessionStorage.getItem(MATCHUPS_CAT_STORAGE_KEY) || ''
-    } catch {
-      void 0
-    }
-    const candidate = urlCat || stored
-    if (candidate && candidate !== 'all' && ids.has(candidate)) return candidate
-  } catch {
-    void 0
-  }
-  return 'all'
-}
-
-/** 매치업 목록 LNB·드로어 */
-const MZ_SB =
-  'rounded-2xl border border-fuchsia-100/70 bg-gradient-to-b from-white via-fuchsia-50/30 to-pink-50/20 shadow-[0_4px_24px_-8px_rgba(217,70,239,0.12)]'
-
-/** LNB 행 */
-const LNB_ROW_ON =
-  'bg-gradient-to-r from-pink-500 via-fuchsia-500 to-violet-500 text-white font-black shadow-[0_4px_14px_-2px_rgba(168,85,247,0.4)] ring-1 ring-white/30'
-const LNB_ROW_OFF =
-  'text-fuchsia-800/80 hover:text-fuchsia-900 hover:bg-fuchsia-50/80 hover:shadow-sm'
+const VALID_FILTERS = VALID_MATCHUPS_FEED_FILTERS
 
 export function HomePage({ refreshRef }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const filterParam = searchParams.get('filter')
   const filter = VALID_FILTERS.includes(filterParam) ? filterParam : 'active'
 
-  const [category,   setCategory]   = useState(readInitialMatchupsCategory)
+  const [category,   setCategory]   = useState(readInitialMatchupsFeedCategory)
   const [sortBy,     setSortBy]     = useState('newest')
   const [sortOpen,   setSortOpen]   = useState(false)
   const [data,       setData]       = useState([])
@@ -82,7 +50,7 @@ export function HomePage({ refreshRef }) {
   const [loading,    setLoading]    = useState(true)
   const [page,       setPage]       = useState(1)
   const [lnbOpen,    setLnbOpen]    = useState(false)
-  const [catNavTick, setCatNavTick] = useState(0)
+  const feedCategories = useMatchupsFeedCategories()
   const fetchSeqRef = useRef(0)
   const { openCreateDrawer, openLoginModal } = useUIStore()
   const { user } = useAuthStore()
@@ -92,19 +60,35 @@ export function HomePage({ refreshRef }) {
     dataRef.current = data
   }, [data])
 
-  const feedCategories = useMemo(() => {
-    void catNavTick
-    try {
-      return getFeedCategoryNavItems()
-    } catch {
-      return [{ id: 'all', icon: '✨', label: '전체 매치' }]
-    }
-  }, [catNavTick])
-
   const activeCategoryLabel = useMemo(
     () => feedCategories.find((c) => c.id === category)?.label ?? '전체 매치',
     [feedCategories, category]
   )
+
+  const lnbProps = {
+    category,
+    filter,
+    feedCategories,
+    user,
+    onCategoryChange: (id) => {
+      setPage(1)
+      setCategory(id)
+      setLnbOpen(false)
+    },
+    onFilterChange: (id) => {
+      setPage(1)
+      setSearchParams((p) => {
+        const n = new URLSearchParams(p)
+        n.set('filter', id)
+        return n
+      })
+      setLnbOpen(false)
+    },
+    onCreateClick: () => {
+      setLnbOpen(false)
+      user ? openCreateDrawer() : openLoginModal()
+    },
+  }
 
   useEffect(() => {
     try {
@@ -128,16 +112,6 @@ export function HomePage({ refreshRef }) {
   }, [category, setSearchParams])
 
   useEffect(() => {
-    const bump = () => setCatNavTick((t) => t + 1)
-    window.addEventListener('vics_categories_changed', bump)
-    window.addEventListener('storage', bump)
-    return () => {
-      window.removeEventListener('vics_categories_changed', bump)
-      window.removeEventListener('storage', bump)
-    }
-  }, [])
-
-  useEffect(() => {
     const ids = new Set(feedCategories.map((c) => c.id))
     if (!ids.has(category)) setCategory('all')
   }, [feedCategories, category])
@@ -156,31 +130,17 @@ export function HomePage({ refreshRef }) {
       /** 비로그인 시 URL에 filter=mine 이 있어도 목록은 진행 중 매치업 기준으로 조회 */
       const queryFilter = filter === 'mine' && !user?.id ? 'active' : filter
 
-      /** 메인 홈 베스트·추천과 동일한 매치업만 노출 (시드/더미 대량 노출 방지) */
-      let featuredIds = null
-      /** 활성 피드: 메인 베스트/추천과 같은 뱃지 문구용 — 키는 소문자 UUID */
+      /** 활성 피드: 전체 투표 진행 중 매치업 노출, 베스트/추천 뱃지는 메인 홈과 동일 상위 7+7만 */
       let featuredRoleById = {}
       if (queryFilter === 'active') {
         const fed = await fetchMainFeaturedFeedRestriction()
-        featuredIds = fed.ids
         featuredRoleById = fed.roleById
-        if (!featuredIds.length) {
-          if (seq !== fetchSeqRef.current) return
-          setTotalCount(0)
-          setData([])
-          setLoading(false)
-          return
-        }
       }
 
       let q = supabase
         .from('matchups')
         .select(HOME_FEED_MATCHUP_SELECT, { count: 'exact' })
         .not('right_type', 'is', null)
-
-      if (featuredIds?.length) {
-        q = q.in('id', featuredIds)
-      }
 
       if (category !== 'all') {
         const catVals = storedCategoryValuesForFilter(category)
@@ -219,6 +179,7 @@ export function HomePage({ refreshRef }) {
       rowsForEnrich = rows.map((m) => ({
         ...m,
         _creatorRankInfo: { ...EMPTY_TIER_RANK_INFO },
+        _rightCreatorRankInfo: { ...EMPTY_TIER_RANK_INFO },
         _feedListBadgeVariant: roleHint(m.id),
       }))
       setData(rowsForEnrich)
@@ -267,68 +228,6 @@ export function HomePage({ refreshRef }) {
 
   const feedMatchupIds = useMemo(() => data.map((m) => m.id).filter(Boolean), [data])
 
-  const LNBContent = () => (
-    <div className="space-y-1">
-      <div className="px-3 py-2 mb-1">
-        <p className="text-[10px] font-black bg-gradient-to-r from-fuchsia-500 to-violet-500 bg-clip-text text-transparent uppercase tracking-widest">🌐 카테고리</p>
-      </div>
-      {feedCategories.map((c) => (
-        <button
-          key={c.id}
-          onClick={() => { setPage(1); setCategory(c.id) }}
-          className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all ${
-            category === c.id ? LNB_ROW_ON : LNB_ROW_OFF
-          }`}
-          style={
-            c.id !== 'all' && c.pointColor && category !== c.id
-              ? { borderLeft: `3px solid ${c.pointColor}` }
-              : undefined
-          }
-        >
-          {c.id === 'all' && c.icon ? <span>{c.icon}</span> : null}
-          {c.id !== 'all' && c.iconImageUrl ? (
-            <img src={c.iconImageUrl} alt="" className="h-5 w-5 shrink-0 rounded object-cover" />
-          ) : null}
-          {c.id !== 'all' && !c.iconImageUrl && c.icon ? (
-            <span className="shrink-0 text-base leading-none">{c.icon}</span>
-          ) : null}
-          <span className="min-w-0 truncate">{c.label}</span>
-        </button>
-      ))}
-      <div className="pt-4 mt-4 border-t border-pink-100/60">
-        <p className="px-3 py-2 text-[10px] font-black bg-gradient-to-r from-pink-500 to-rose-500 bg-clip-text text-transparent uppercase tracking-widest">📍 필터</p>
-        {FILTERS.map((f) => (
-          <button
-            key={f.id}
-            onClick={() => {
-              setPage(1)
-              setSearchParams((p) => {
-                const n = new URLSearchParams(p)
-                n.set('filter', f.id)
-                return n
-              })
-            }}
-            disabled={f.id === 'mine' && !user}
-            className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all disabled:opacity-50 ${
-              filter === f.id ? LNB_ROW_ON : LNB_ROW_OFF
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
-      <div className="pt-4">
-        <button
-          onClick={handleCreate}
-          className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-lime-400 to-emerald-400 text-[#0f1f0f] text-sm font-black rounded-2xl shadow-md hover:shadow-lg active:scale-95 transition-all"
-        >
-          <Plus size={16} strokeWidth={2.5} />
-          매치업 생성
-        </button>
-      </div>
-    </div>
-  )
-
   return (
     <div className="relative grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-5 items-start">
       {/* ── 앰비언트 배경 오라 ── */}
@@ -338,18 +237,7 @@ export function HomePage({ refreshRef }) {
         <div className="absolute bottom-20 right-1/4 h-[320px] w-[320px] rounded-full bg-gradient-radial from-cyan-300/7 via-teal-200/3 to-transparent blur-3xl" />
       </div>
 
-      {/* ══ LNB (데스크탑) ══ */}
-      <aside className="hidden lg:block">
-        <div className={`sticky top-24 p-3 ${MZ_SB}`}>
-          {/* LNB 상단 헤더 */}
-          <div className="px-3 pt-2 pb-3 mb-2 border-b border-fuchsia-100/60">
-            <p className="text-xs font-black bg-gradient-to-r from-fuchsia-600 via-pink-500 to-violet-600 bg-clip-text text-transparent uppercase tracking-widest">
-              ⚔️ MATCHUP LIST
-            </p>
-          </div>
-          <LNBContent />
-        </div>
-      </aside>
+      <MatchupsFeedLnbDesktopAside {...lnbProps} />
 
       {/* ══ 메인 콘텐츠 ══ */}
       <div className="min-w-0">
@@ -403,15 +291,10 @@ export function HomePage({ refreshRef }) {
           </div>
           {/* 필터 + 정렬 툴바 */}
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setLnbOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-fuchsia-200/60 bg-gradient-to-br from-white to-fuchsia-50/80 text-xs font-bold text-fuchsia-800/85 shadow-sm"
-            >
-              <span className="max-w-[38vw] truncate sm:max-w-none" title={activeCategoryLabel}>
-                🌐 {activeCategoryLabel}
-              </span>
-              <ChevronDown size={12} className="shrink-0" />
-            </button>
+            <MatchupsFeedLnbMobileTrigger
+              activeCategoryLabel={activeCategoryLabel}
+              onOpen={() => setLnbOpen(true)}
+            />
             <div className="relative ml-auto">
               <button
                 onClick={() => setSortOpen((o) => !o)}
@@ -445,23 +328,25 @@ export function HomePage({ refreshRef }) {
           </div>
         </div>
 
-        {/* ── 피드 (모바일: 한 화면에 한 카드 느낌 / 웹: 뷰포트 비율에 맞춰 카드·썸네일 확대) ── */}
+        {/* ── 피드 (모바일: 스냅·한 장면 / 웹: 컴팩트 목록 스크롤) ── */}
         <MatchupEngagementProvider matchupIds={feedMatchupIds}>
-          <div className="overflow-y-auto overscroll-contain max-h-[calc(100vh-16rem)] sm:max-h-[calc(100vh-14rem)] lg:max-h-[calc(100vh-10rem)] xl:max-h-[calc(100vh-9.5rem)] snap-y snap-mandatory">
+          <div className="overflow-y-auto overscroll-contain max-h-[calc(100vh-16rem)] sm:max-h-[calc(100vh-14rem)] snap-y snap-mandatory lg:overflow-visible lg:max-h-none lg:snap-none">
             {loading
               ? Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="snap-center snap-always py-3 lg:py-5">
-                    <FeedCardSkeleton />
+                  <div key={i} className="snap-center snap-always py-3 lg:snap-align-none lg:py-2">
+                    <div className="w-full max-w-full lg:max-w-2xl mx-auto">
+                      <FeedCardSkeleton />
+                    </div>
                   </div>
                 ))
               : data.length > 0
               ? data.map((m, i) => (
                   <div
                     key={m.id}
-                    className="snap-center snap-always py-3 lg:py-5 min-h-[min(72vh,400px)] lg:min-h-[min(82vh,560px)] xl:min-h-[min(85vh,680px)] flex items-center justify-center w-full animate-fade-in-feed-stagger"
+                    className="snap-center snap-always py-3 lg:snap-align-none lg:py-2.5 min-h-[min(72vh,400px)] lg:min-h-0 flex items-center justify-center w-full animate-fade-in-feed-stagger"
                     style={{ '--stagger-delay': `${Math.min(i, 11) * 52}ms` }}
                   >
-                    <div className="w-full max-w-full lg:max-w-[min(100%,52rem)] xl:max-w-[min(100%,56rem)] mx-auto">
+                    <div className="w-full max-w-full lg:max-w-2xl mx-auto">
                       <FeedCard
                         matchup={m}
                         listBadge={filter === 'active'}
@@ -490,23 +375,7 @@ export function HomePage({ refreshRef }) {
         )}
       </div>
 
-      {/* 모바일 LNB 드로어 */}
-      {lnbOpen && (
-        <>
-          <div
-            className="fixed inset-0 z-40 bg-gradient-to-br from-fuchsia-900/25 via-violet-900/20 to-pink-900/25 backdrop-blur-md backdrop-saturate-150"
-            onClick={() => setLnbOpen(false)}
-            aria-hidden
-          />
-          <div className={`fixed top-0 left-0 bottom-0 z-50 w-[min(18rem,90vw)] max-w-[18rem] shadow-xl shadow-gray-200/40 overflow-y-auto p-4 ${MZ_SB} rounded-none rounded-r-2xl`}>
-            <div className="flex justify-between items-center mb-4">
-              <p className="font-black bg-gradient-to-r from-fuchsia-600 to-violet-600 bg-clip-text text-transparent">🌐 카테고리 & 필터</p>
-              <button type="button" onClick={() => setLnbOpen(false)} className="p-2 rounded-xl text-fuchsia-400 hover:bg-fuchsia-50 transition-colors font-bold">✕</button>
-            </div>
-            <LNBContent />
-          </div>
-        </>
-      )}
+      <MatchupsFeedLnbMobileDrawer open={lnbOpen} onClose={() => setLnbOpen(false)} {...lnbProps} />
     </div>
   )
 }
@@ -593,19 +462,19 @@ function PaginationBtn({ page, current, onClick }) {
 // ── 스켈레톤 ─────────────────────────────────────────────────────────
 function FeedCardSkeleton() {
   return (
-    <div className="relative border border-fuchsia-100/60 bg-gradient-to-br from-white via-fuchsia-50/30 to-white rounded-2xl lg:rounded-3xl p-4 lg:p-6 space-y-3 lg:space-y-4 animate-pulse max-w-full lg:max-w-[min(100%,52rem)] xl:max-w-[min(100%,56rem)] mx-auto overflow-hidden">
+    <div className="relative border border-fuchsia-100/60 bg-gradient-to-br from-white via-fuchsia-50/30 to-white rounded-2xl p-4 lg:p-4 space-y-3 animate-pulse w-full overflow-hidden">
       <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-fuchsia-200 via-violet-200 to-pink-200 rounded-t-2xl" />
       <div className="flex items-center gap-3">
-        <div className="w-10 lg:w-12 h-5 lg:h-6 bg-fuchsia-100/80 rounded-lg" />
-        <div className="flex-1 h-4 lg:h-5 bg-fuchsia-100/60 rounded" />
+        <div className="w-10 h-5 bg-fuchsia-100/80 rounded-lg" />
+        <div className="flex-1 h-4 bg-fuchsia-100/60 rounded" />
       </div>
-      <div className="grid grid-cols-2 gap-2 lg:gap-4">
-        <div className="aspect-square bg-fuchsia-100/60 rounded-xl lg:rounded-2xl" />
-        <div className="aspect-square bg-violet-100/60 rounded-xl lg:rounded-2xl" />
+      <div className="grid grid-cols-2 gap-2 lg:gap-3 lg:max-w-xl lg:mx-auto w-full">
+        <div className="aspect-square bg-fuchsia-100/60 rounded-xl" />
+        <div className="aspect-square bg-violet-100/60 rounded-xl" />
       </div>
       <div className="flex items-center justify-between pt-1">
-        <div className="w-24 lg:w-32 h-4 lg:h-5 bg-fuchsia-100/60 rounded" />
-        <div className="w-20 lg:w-24 h-7 lg:h-9 bg-fuchsia-100/80 rounded-xl" />
+        <div className="w-24 h-4 bg-fuchsia-100/60 rounded" />
+        <div className="w-20 h-7 bg-fuchsia-100/80 rounded-xl" />
       </div>
     </div>
   )

@@ -13,11 +13,9 @@ function getOgMeta(matchup, baseUrl, requestUrl) {
   const ogTitle = `${leftLabel} vs ${rightLabel} 대결 중!`
   const ogDescription = `${leftLabel}와 ${rightLabel}의 대결! VICS에서 투표해보세요`
 
-  const thumb = matchup.left_thumbnail_url
-    || (matchup.left_type === 'image' ? matchup.left_url : null)
-    || matchup.right_thumbnail_url
-    || (matchup.right_type === 'image' ? matchup.right_url : null)
-  const ogImage = thumb ? (thumb.startsWith('http') ? thumb : `${baseUrl}${thumb}`) : `${baseUrl}/logo.png`
+  const ogImage = matchup.id
+    ? `${baseUrl.replace(/\/+$/, '')}/api/matchup-share-image?matchupId=${encodeURIComponent(matchup.id)}`
+    : `${baseUrl}/logo.png`
 
   return {
     title: `${ogTitle} - VICS`,

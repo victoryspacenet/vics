@@ -144,6 +144,12 @@ export function ChallengeDrawer() {
     }
   }, [isOpen])
 
+  // 업로드 직전 getSession 락 경합 완화 — 드로어 열릴 때 세션 미리 확보
+  useEffect(() => {
+    if (!isOpen || !user?.id) return
+    void warmupMatchupMediaUploadSession(supabase).catch(() => {})
+  }, [isOpen, user?.id])
+
   // 도전자(B) 수정: 기존 오른쪽 콘텐츠로 폼 채우기
   useEffect(() => {
     if (!isOpen || !challengeMatchup || !challengeMatchupEdit) return
@@ -362,7 +368,10 @@ export function ChallengeDrawer() {
     setUploading(true)
     try {
       setUploadStep('로그인 확인 중...')
-      await warmupMatchupMediaUploadSession(supabase)
+      const uploadSession = await warmupMatchupMediaUploadSession(supabase)
+      if (!uploadSession?.access_token) {
+        throw new Error('로그인이 필요해요. 다시 로그인한 뒤 시도해 주세요.')
+      }
 
       let rightUrl = null
       let rightThumbnail = null
@@ -398,7 +407,10 @@ export function ChallengeDrawer() {
       setUploadStep(isEditRun ? '수정 저장 중...' : '매치업 완성 중...')
 
       // 업로드 후 세션 재확인 (영상 등 긴 업로드 후 토큰 만료 대비)
-      await warmupMatchupMediaUploadSession(supabase)
+      const postUploadSession = await warmupMatchupMediaUploadSession(supabase)
+      if (!postUploadSession?.access_token) {
+        throw new Error('로그인이 만료됐어요. 다시 로그인한 뒤 시도해 주세요.')
+      }
 
       if (!isEditRun) {
         // 업로드 중 다른 사용자가 먼저 도전했는지 확인
@@ -873,7 +885,7 @@ function UserAPreview({ matchup }) {
   return (
     <div className="relative aspect-square rounded-xl overflow-hidden bg-amber-50/50 border border-amber-200/50">
       <span className="absolute top-2 left-2 z-10 text-[11px] font-black bg-gradient-to-r from-amber-500 to-orange-500 text-white px-1.5 py-0.5 rounded-md shadow-sm">
-        {matchup.left_label || 'A'}
+        A
       </span>
       {matchup.left_type === 'image' && src && (
         <img src={safeMediaUrl(src)} alt="A" className="absolute inset-0 w-full h-full object-cover" />

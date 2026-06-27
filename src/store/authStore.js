@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { MAIN_SPOTLIGHT_1H_COST } from '../lib/mainSpotlight'
 import { isRejoinCooldownDbError, REJOIN_COOLDOWN_USER_MESSAGE } from '../lib/rejoinCooldown'
 import { runWhenIdle } from '../lib/runDeferred'
+import { setAuthSessionCache, clearAuthSessionCache } from '../lib/authSessionCache'
 import {
   clearTierMilestoneGrantThrottle,
   markTierMilestoneGrantRan,
@@ -233,51 +234,61 @@ export const useAuthStore = create((set, get) => ({
             const initialSessionDone = new Promise((r) => { resolveInitialSession = r })
 
             // ── 리스너를 먼저 등록 ──
-            const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+            const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
               if (gen !== authInitGeneration) return
               console.log('[Auth] onAuthStateChange:', event, session?.user?.id)
-              try {
-                if (session?.user) {
-                  set({ user: session.user })
-                  void useAdminPermissionStore.getState().load(session.user)
-                  if (skipHeavyAuthHooksOnResetPasswordPage()) return
-                  if (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'INITIAL_SESSION') {
-                    await ensureProfile(session.user)
-                  }
-                  if (gen !== authInitGeneration) return
-                  if (event !== 'TOKEN_REFRESHED') {
-                    const forceProfile =
-                      event === 'INITIAL_SESSION' ||
-                      event === 'SIGNED_IN' ||
-                      event === 'USER_UPDATED'
-                    await get().fetchProfile(session.user.id, { force: forceProfile })
-                  }
-                  // 페이지 새로고침(INITIAL_SESSION) 포함, 로그인 시 푸시 재등록
-                  if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-                    runWhenIdle(() => {
-                      void import('../lib/pushNotifications').then((m) =>
-                        m.registerPushForCurrentUser().then((r) => {
-                          if (r?.error && !r?.skipped) console.warn('[Auth] push register:', r.error)
-                        }),
-                      )
-                    })
-                  }
-                } else {
-                  useAdminPermissionStore.getState().reset()
-                  invalidateProfileFetchCache()
-                  profileFetchInFlight = null
-                  profileFetchInFlightUserId = null
-                  set({ user: null, profile: null })
-                }
-              } catch (err) {
-                console.error('[Auth] onAuthStateChange error:', err)
-              } finally {
-                // INITIAL_SESSION 완료 후 loading 해제 (성공·실패 무관)
-                if (event === 'INITIAL_SESSION') {
-                  if (gen === authInitGeneration) set({ loading: false })
-                  resolveInitialSession()
-                }
+
+              const finishInitialSession = () => {
+                if (event !== 'INITIAL_SESSION') return
+                if (gen !== authInitGeneration) return
+                set({ loading: false })
+                resolveInitialSession()
               }
+
+              if (session?.user) {
+                setAuthSessionCache(session)
+                set({ user: session.user })
+                finishInitialSession()
+
+                void useAdminPermissionStore.getState().load(session.user)
+                if (skipHeavyAuthHooksOnResetPasswordPage()) return
+
+                void (async () => {
+                  try {
+                    if (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'INITIAL_SESSION') {
+                      await ensureProfile(session.user)
+                    }
+                    if (gen !== authInitGeneration) return
+                    if (event !== 'TOKEN_REFRESHED') {
+                      const forceProfile =
+                        event === 'INITIAL_SESSION' ||
+                        event === 'SIGNED_IN' ||
+                        event === 'USER_UPDATED'
+                      await get().fetchProfile(session.user.id, { force: forceProfile })
+                    }
+                    if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+                      runWhenIdle(() => {
+                        void import('../lib/pushNotifications').then((m) =>
+                          m.registerPushForCurrentUser().then((r) => {
+                            if (r?.error && !r?.skipped) console.warn('[Auth] push register:', r.error)
+                          }),
+                        )
+                      })
+                    }
+                  } catch (err) {
+                    console.error('[Auth] onAuthStateChange profile hooks error:', err)
+                  }
+                })()
+                return
+              }
+
+              useAdminPermissionStore.getState().reset()
+              clearAuthSessionCache()
+              invalidateProfileFetchCache()
+              profileFetchInFlight = null
+              profileFetchInFlightUserId = null
+              set({ user: null, profile: null })
+              finishInitialSession()
             })
 
             if (gen !== authInitGeneration) {
@@ -286,10 +297,10 @@ export const useAuthStore = create((set, get) => ({
             }
             authStateSubscription = subscription
 
-            // INITIAL_SESSION을 기다린다 (최대 8초 — 네트워크 이상 시 폴백)
+            // INITIAL_SESSION을 기다린다 (최대 4초 — 네트워크 이상 시 폴백)
             await Promise.race([
               initialSessionDone,
-              new Promise((r) => setTimeout(r, 8000)),
+              new Promise((r) => setTimeout(r, 4000)),
             ])
 
             // 타임아웃으로 INITIAL_SESSION이 오지 않았으면 loading 강제 해제
@@ -448,6 +459,7 @@ export const useAuthStore = create((set, get) => ({
           delete safe.fandom_points
           delete safe.fandom_tier
           delete safe.matchup_tier_bonus_mask
+          delete safe.founding_member_number
           const { data, error } = await supabase
             .from('profiles')
             .update({ ...safe, updated_at: new Date().toISOString() })
@@ -474,6 +486,7 @@ export const useAuthStore = create((set, get) => ({
         const uid = get().user?.id
         clearTierMilestoneGrantThrottle()
         useAdminPermissionStore.getState().reset()
+        clearAuthSessionCache()
         if (uid) {
           try {
             const { clearPushDeviceTokensForUser } = await import('../lib/pushNotifications')

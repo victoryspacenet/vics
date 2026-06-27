@@ -8,14 +8,11 @@ import { useUIStore } from '../../store/uiStore'
 import { formatNumber, formatDate, calcPercent, cn } from '../../lib/utils'
 import { VsBadge } from '../ui/VsBadge'
 import { MatchupThumbFrame } from '../ui/MatchupThumbFrame'
-import { Avatar } from '../ui/Avatar'
-import { UserProfileLink } from '../ui/UserProfileLink'
-import { FeaturedBadgeSpan } from '../ui/FeaturedBadge'
 import { safeMediaUrl } from '../../lib/sanitize'
 import { isFeedBannerHighlightActive } from '../../lib/bannerHighlightBoost'
 import { isMatchupCreatorVipTierGlow, VIP_MATCHUP_SURFACE_CLASS } from '../../lib/matchupCreatorVipGlow'
-import { fandomTierHasDiamondListNicknameAura } from '../../lib/fandomTiers'
-import { FandomBronzeStarBadge } from '../fandom/FandomBronzeStarBadge'
+import { MatchupFeedParticipants } from '../matchup/MatchupFeedParticipants'
+import { matchupSideBadge } from '../../lib/matchupContentSide'
 
 /** 이미지·영상·텍스트 썸네일 (영상은 썸네일 없을 때 video 태그로 표시 — img에 mp4 넣으면 깨짐) */
 function MatchupSidePreview({ side, matchup: m, eagerMedia = false }) {
@@ -23,7 +20,7 @@ function MatchupSidePreview({ side, matchup: m, eagerMedia = false }) {
   const type = isLeft ? m.left_type : m.right_type
   const url = isLeft ? m.left_url : m.right_url
   const thumb = isLeft ? m.left_thumbnail_url : m.right_thumbnail_url
-  const label = isLeft ? m.left_label : m.right_label
+  const sideBadge = matchupSideBadge(side)
   const text = isLeft ? m.left_text : m.right_text
 
   const safeThumb = safeMediaUrl(thumb || '')
@@ -36,7 +33,7 @@ function MatchupSidePreview({ side, matchup: m, eagerMedia = false }) {
     return (
       <div className={`flex h-full min-h-[4rem] w-full items-center justify-center bg-gradient-to-br ${textGrad} p-3`}>
         <p className="line-clamp-4 text-center text-[10px] font-bold leading-relaxed text-white/90 drop-shadow-sm">
-          {text || label || '—'}
+          {text || '—'}
         </p>
       </div>
     )
@@ -47,7 +44,7 @@ function MatchupSidePreview({ side, matchup: m, eagerMedia = false }) {
       return (
         <img
           src={safeThumb}
-          alt={label || ''}
+          alt={sideBadge}
           className="h-full w-full min-h-0 object-cover"
           loading={eagerMedia ? 'eager' : 'lazy'}
           decoding="async"
@@ -64,7 +61,7 @@ function MatchupSidePreview({ side, matchup: m, eagerMedia = false }) {
             playsInline
             preload={eagerMedia ? 'metadata' : 'none'}
             className="h-full w-full object-cover"
-            aria-label={label || ''}
+            aria-label={sideBadge}
           />
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/25">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/25 backdrop-blur-sm">
@@ -76,7 +73,7 @@ function MatchupSidePreview({ side, matchup: m, eagerMedia = false }) {
     }
     return (
       <div className="flex h-full w-full items-center justify-center text-gray-400">
-        <span className="text-xs">{label || (isLeft ? 'A' : 'B')}</span>
+        <span className="text-xs">{sideBadge}</span>
       </div>
     )
   }
@@ -87,7 +84,7 @@ function MatchupSidePreview({ side, matchup: m, eagerMedia = false }) {
       return (
         <img
           src={src}
-          alt={label || ''}
+          alt={sideBadge}
           className="h-full w-full min-h-0 object-cover"
           loading={eagerMedia ? 'eager' : 'lazy'}
           decoding="async"
@@ -97,7 +94,7 @@ function MatchupSidePreview({ side, matchup: m, eagerMedia = false }) {
     }
     return (
       <div className="flex h-full w-full items-center justify-center text-gray-400">
-        <span className="text-xs">{label || (isLeft ? 'A' : 'B')}</span>
+        <span className="text-xs">{sideBadge}</span>
       </div>
     )
   }
@@ -107,7 +104,7 @@ function MatchupSidePreview({ side, matchup: m, eagerMedia = false }) {
     return (
       <img
         src={legacySrc}
-        alt={label || ''}
+        alt={sideBadge}
         className="h-full w-full min-h-0 object-cover"
         loading={eagerMedia ? 'eager' : 'lazy'}
         decoding="async"
@@ -118,7 +115,7 @@ function MatchupSidePreview({ side, matchup: m, eagerMedia = false }) {
 
   return (
     <div className="flex h-full w-full items-center justify-center text-gray-400">
-      <span className="text-xs">{label || (isLeft ? 'A' : 'B')}</span>
+      <span className="text-xs">{sideBadge}</span>
     </div>
   )
 }
@@ -210,25 +207,15 @@ export function MainMatchupCard({ matchup: m, variant, rank, eagerMedia = false 
           </div>
         </Link>
 
-        {creator?.nickname && (
-          <div className="mb-3 flex min-w-0 items-center gap-1.5">
-            <UserProfileLink userId={creator?.id} className="inline-flex shrink-0">
-              <Avatar src={creator?.avatar_url} alt={creator?.nickname} size="xs" />
-            </UserProfileLink>
-            <UserProfileLink
-              userId={creator?.id}
-              className={cn(
-                'min-w-0 truncate text-xs font-semibold text-gray-600 hover:underline',
-                fandomTierHasDiamondListNicknameAura(creator?.fandom_tier) &&
-                  'vics-fandom-diamond-nickname-aura text-slate-800',
-              )}
-            >
-              {creator.nickname}
-            </UserProfileLink>
-            <FandomBronzeStarBadge tierId={creator?.fandom_tier} size={12} />
-            <FeaturedBadgeSpan badgeId={creator?.featured_badge} className="translate-y-px shrink-0" />
-          </div>
-        )}
+        <MatchupFeedParticipants
+          className="mb-3"
+          leftProfile={creator}
+          rightProfile={m.right_profiles}
+          leftRankInfo={m._creatorRankInfo}
+          rightRankInfo={m._rightCreatorRankInfo}
+          showRight={m.right_type != null}
+          size="main"
+        />
 
         {variant === 'hot' && m.tags?.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-2">

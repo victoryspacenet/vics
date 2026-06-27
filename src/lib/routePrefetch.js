@@ -7,6 +7,7 @@ const inflight = new Set()
 
 /** @type {Record<string, () => Promise<unknown>>} */
 const PREFETCH_BY_PATH = {
+  '/': () => import('../pages/MainPage'),
   '/matchups': () => import('../pages/HomePage'),
   '/ranking': () => import('../pages/RankingPage'),
   '/search': () => import('../pages/SearchPage'),
@@ -20,6 +21,7 @@ const PREFETCH_BY_PATH = {
 
 /** pathname → 프리페치 (동적 세그먼트는 접두사 매칭) */
 const PREFIX_ROUTES = [
+  ['/feed/', () => import('../pages/MainFeedPage')],
   ['/rewards/', () => import('../routes/lazyRewardsMatchupMypage')],
   ['/matchup/', () => import('../pages/MatchupDetailPage')],
   ['/profile/', () => import('../pages/PublicProfilePage')],

@@ -62,7 +62,7 @@ async function fetchMatchup(id) {
   if (!supabaseUrl || !anonKey || !isValidSupabaseUrl(supabaseUrl)) return null
 
   const res = await fetch(
-    `${supabaseUrl}/rest/v1/matchups?id=eq.${id}&select=title,left_label,right_label,left_thumbnail_url,right_thumbnail_url,left_url,right_url,left_type,right_type`,
+    `${supabaseUrl}/rest/v1/matchups?id=eq.${id}&select=id,title,left_label,right_label,left_thumbnail_url,right_thumbnail_url,left_url,right_url,left_type,right_type`,
     {
       headers: {
         apikey: anonKey,
@@ -117,12 +117,16 @@ function buildOGHtml(matchup, canonicalUrl) {
 </html>`
 }
 
-function getOgImageUrl(matchup, baseUrl) {
-  const leftImg = matchup.left_thumbnail_url || (matchup.left_type === 'image' ? matchup.left_url : null)
-  const rightImg = matchup.right_thumbnail_url || (matchup.right_type === 'image' ? matchup.right_url : null)
-  const img = leftImg || rightImg
-  if (img && img.startsWith('http')) return img
-  return `${baseUrl}/logo.png`
+function getOgImageUrl(matchup, canonicalUrl) {
+  try {
+    const origin = new URL(canonicalUrl).origin
+    if (matchup?.id) {
+      return `${origin}/api/matchup-share-image?matchupId=${encodeURIComponent(matchup.id)}`
+    }
+    return `${origin}/logo.png`
+  } catch {
+    return '/logo.png'
+  }
 }
 
 function escapeHtml(str) {

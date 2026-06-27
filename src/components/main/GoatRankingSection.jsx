@@ -10,6 +10,7 @@ import { RANKING_ELIGIBLE_CACHE_TAG, getRankingEligibleProfileIds } from '../../
 import { enrichProfileRowsWithTierSnapshot, EMPTY_TIER_RANK_INFO } from '../../lib/creatorRankSnapshot'
 import { attachCompetitionRanksInMemory } from '../../lib/rankingCompetitionRank'
 import { FeaturedBadgeSpan } from '../ui/FeaturedBadge'
+import { FoundingMemberBadge } from '../profile/FoundingMemberBadge'
 import { TierBadge } from '../ui/TierBadge'
 
 const MODE_TABS = [
@@ -114,7 +115,7 @@ const cacheKey = `goat_${mode}_v6_${RANKING_ELIGIBLE_CACHE_TAG}`
       try {
         const orderCol = pointsCol === 'season_points' ? 'points' : pointsCol
         const baseSelect =
-          'id, nickname, avatar_url, points, total_matchups, creator_wins, vote_total, vote_hits, hit_rate, featured_badge'
+          'id, nickname, avatar_url, points, total_matchups, creator_wins, vote_total, vote_hits, hit_rate, featured_badge, founding_member_number'
         const eligibleIds = await getRankingEligibleProfileIds()
         if (Array.isArray(eligibleIds) && eligibleIds.length === 0) {
           setGoatAll([])
@@ -297,7 +298,8 @@ const cacheKey = `goat_${mode}_v6_${RANKING_ELIGIBLE_CACHE_TAG}`
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-bold text-[#22282E] flex items-center gap-1 min-w-0 flex-wrap">
                       <span className="truncate">{p.nickname}</span>
-                      <FeaturedBadgeSpan badgeId={p.featured_badge} className="translate-y-px shrink-0" />
+                      <FeaturedBadgeSpan profile={p} rankInfo={p._tierRankInfo} className="translate-y-px shrink-0" />
+                      <FoundingMemberBadge profile={p} size={11} />
                     </p>
                     <TierBadge
                       profile={p}

@@ -10,6 +10,7 @@ import { getRankingEligibleProfileIds, RANKING_ELIGIBLE_CACHE_TAG } from '../../
 import { enrichProfileRowsWithTierSnapshot, EMPTY_TIER_RANK_INFO } from '../../lib/creatorRankSnapshot'
 import { attachCompetitionRanksInMemory } from '../../lib/rankingCompetitionRank'
 import { FeaturedBadgeSpan } from '../ui/FeaturedBadge'
+import { FoundingMemberBadge } from '../profile/FoundingMemberBadge'
 import { TierBadge } from '../ui/TierBadge'
 
 /** 메인 랭킹 위젯 캐시 — 티어 스냅샷 포함 */
@@ -78,7 +79,7 @@ export function MainRankingBoard() {
         isCreator
           ? (currentSort === 'votes' ? cols.total_votes_received : cols.points)
           : (currentSort === 'hitrate' ? cols.hit_rate : cols.points)
-      const selectCols = `id, nickname, avatar_url, points, season_points, total_matchups, creator_wins, total_votes_received, season_total_votes_received, vote_hits, vote_total, season_vote_hits, season_vote_total, hit_rate, season_hit_rate, featured_badge`
+      const selectCols = `id, nickname, avatar_url, points, season_points, total_matchups, creator_wins, total_votes_received, season_total_votes_received, vote_hits, vote_total, season_vote_hits, season_vote_total, hit_rate, season_hit_rate, featured_badge, founding_member_number`
 
       let query = supabase
         .from('profiles')
@@ -216,7 +217,8 @@ export function MainRankingBoard() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                       <span className="text-xs font-medium truncate text-[#22282E]">{profile.nickname}</span>
-                      <FeaturedBadgeSpan badgeId={profile.featured_badge} className="translate-y-px shrink-0" />
+                      <FeaturedBadgeSpan profile={profile} rankInfo={profile._tierRankInfo} className="translate-y-px shrink-0" />
+                      <FoundingMemberBadge profile={profile} size={11} />
                     </div>
                     <TierBadge
                       profile={profile}

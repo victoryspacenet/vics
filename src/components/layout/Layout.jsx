@@ -9,6 +9,7 @@ import { PopupNoticeDisplay } from '../notice/PopupNoticeDisplay'
 import { NotificationPanel } from '../ui/NotificationPanel'
 import { WelcomeBackOverlay } from '../ui/WelcomeBackOverlay'
 import { FandomMilestoneGate } from '../fandom/FandomMilestoneGate'
+import { TendencyReportGate } from '../tendency/TendencyReportGate'
 import { OfflineConnectivityBanner } from '../system/OfflineConnectivityBanner'
 import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
@@ -117,6 +118,7 @@ export function Layout({ children }) {
       <NotificationPanelOverlay />
       <WelcomeBackOverlay />
       <FandomMilestoneGate />
+      <TendencyReportGate />
     </div>
   )
 }

@@ -5,6 +5,7 @@ import { ChevronDown } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { Avatar } from '../ui/Avatar'
 import { FeaturedBadgeSpan } from '../ui/FeaturedBadge'
+import { FoundingMemberBadge } from '../profile/FoundingMemberBadge'
 import { TierBadge } from '../ui/TierBadge'
 import { formatNumber } from '../../lib/utils'
 import { getCachedRanking, setCachedRanking } from '../../lib/rankingCache'
@@ -53,7 +54,7 @@ export function RankingBoard() {
       let qb = supabase
         .from('profiles')
         .select(
-          'id, nickname, avatar_url, points, total_matchups, creator_wins, vote_total, vote_hits, hit_rate, featured_badge'
+          'id, nickname, avatar_url, points, total_matchups, creator_wins, vote_total, vote_hits, hit_rate, featured_badge, founding_member_number'
         )
         .order('points', { ascending: false })
         .limit(10)
@@ -128,7 +129,8 @@ export function RankingBoard() {
                       <span className="text-xs font-medium text-[#22282E] truncate">
                         {profile.nickname}
                       </span>
-                      <FeaturedBadgeSpan badgeId={profile.featured_badge} className="translate-y-px shrink-0" />
+                      <FeaturedBadgeSpan profile={profile} rankInfo={profile._tierRankInfo} className="translate-y-px shrink-0" />
+                      <FoundingMemberBadge profile={profile} size={11} />
                     </div>
                     <TierBadge
                       profile={profile}

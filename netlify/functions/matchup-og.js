@@ -25,11 +25,9 @@ function getOgMeta(matchup, baseUrl, requestUrl) {
   const ogTitle = `${leftLabel} vs ${rightLabel} 대결 중!`
   const ogDescription = `누가 누구와 대결 중! ${leftLabel}와 ${rightLabel}, VICS에서 투표해보세요`
 
-  const thumb = matchup.left_thumbnail_url
-    || (matchup.left_type === 'image' ? matchup.left_url : null)
-    || matchup.right_thumbnail_url
-    || (matchup.right_type === 'image' ? matchup.right_url : null)
-  const ogImage = thumb ? (thumb.startsWith('http') ? thumb : `${baseUrl}${thumb}`) : `${baseUrl}/logo.png`
+  const ogImage = matchup.id
+    ? `${baseUrl.replace(/\/+$/, '')}/api/matchup-share-image?matchupId=${encodeURIComponent(matchup.id)}`
+    : `${baseUrl}/logo.png`
 
   return {
     title: `${ogTitle} - VICS`,
@@ -61,12 +59,28 @@ function injectOgIntoHtml(html, meta) {
     .replace(/<meta property="og:title" content="[^"]*"\/?>/, `<meta property="og:title" content="${ogTitle}" />`)
     .replace(/<meta property="og:description" content="[^"]*"\/?>/, `<meta property="og:description" content="${d}" />`)
   if (out.includes('og:image')) {
-    out = out.replace(/<meta property="og:image" content="[^"]*"\/?>/, `<meta property="og:image" content="${img}" />`)
+    out = out.replace(
+      /<meta property="og:image" content="[^"]*"\/?>/,
+      `<meta property="og:image" content="${img}" />\n  <meta property="og:image:width" content="1200" />\n  <meta property="og:image:height" content="630" />`,
+    )
   } else {
-    out = out.replace('</head>', `  <meta property="og:image" content="${img}" />\n  <meta property="og:url" content="${url}" />\n</head>`)
+    out = out.replace(
+      '</head>',
+      `  <meta property="og:image" content="${img}" />\n  <meta property="og:image:width" content="1200" />\n  <meta property="og:image:height" content="630" />\n  <meta property="og:url" content="${url}" />\n</head>`,
+    )
   }
   if (!out.includes('og:url')) {
     out = out.replace('</head>', `  <meta property="og:url" content="${url}" />\n</head>`)
+  }
+  if (!out.includes('twitter:image')) {
+    out = out.replace(
+      '</head>',
+      `  <meta name="twitter:title" content="${ogTitle}" />\n  <meta name="twitter:description" content="${d}" />\n  <meta name="twitter:image" content="${img}" />\n</head>`,
+    )
+  } else {
+    out = out.replace(/<meta name="twitter:title" content="[^"]*"\/?>/, `<meta name="twitter:title" content="${ogTitle}" />`)
+    out = out.replace(/<meta name="twitter:description" content="[^"]*"\/?>/, `<meta name="twitter:description" content="${d}" />`)
+    out = out.replace(/<meta name="twitter:image" content="[^"]*"\/?>/, `<meta name="twitter:image" content="${img}" />`)
   }
   return out
 }

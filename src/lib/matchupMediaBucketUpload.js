@@ -5,15 +5,15 @@
  * - Edge 실패·타임아웃 시 직접 업로드 폴백, 직접 실패 시(이미지) Edge 폴백
  */
 import { MAX_IMAGE_BYTES, MAX_VIDEO_BYTES, UPLOAD_TIMEOUT_IMAGE_MS, UPLOAD_TIMEOUT_VIDEO_MS } from './mediaSpec'
+import {
+  clearAuthSessionCache as clearUploadSessionCache,
+  resolveSessionForUpload,
+  setAuthSessionCache,
+} from './authSessionCache'
 
 const BUCKET = 'matchup-media'
-const SESSION_TIMEOUT_MS = 12_000
-const EDGE_TIMEOUT_IMAGE_MS = 55_000
-const EDGE_TIMEOUT_VIDEO_MS = 90_000
+const SESSION_REFRESH_ON_AUTH_FAIL_MS = 20_000
 const UPLOAD_RETRY_MAX = 2
-
-/** @type {Promise<import('@supabase/supabase-js').Session | null> | null} */
-let uploadSessionFlight = null
 
 function publicUrlFallback(supabase, objectPath) {
   try {
@@ -29,7 +29,7 @@ function uploadTimeoutMs(fileKind) {
 }
 
 function edgeTimeoutMs(fileKind) {
-  return fileKind === 'video' ? EDGE_TIMEOUT_VIDEO_MS : EDGE_TIMEOUT_IMAGE_MS
+  return fileKind === 'video' ? 90_000 : 55_000
 }
 
 function uploadTimeoutMessage(fileKind) {
@@ -95,40 +95,11 @@ function isAuthUploadFailure(errMsg, status) {
 }
 
 /**
- * 업로드 직전 세션 확보·갱신(동시 호출 병합). auth 락 경합 완화용.
+ * 업로드 직전 세션 확보·갱신(동시 호출 병합). authStore 캐시 우선.
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  */
 export async function warmupMatchupMediaUploadSession(supabase) {
-  if (!uploadSessionFlight) {
-    uploadSessionFlight = (async () => {
-      try {
-        const { data, error } = await withTimeout(
-          supabase.auth.getSession(),
-          SESSION_TIMEOUT_MS,
-          '로그인 확인 시간이 초과했어요. 페이지를 새로고침한 뒤 다시 시도해 주세요.',
-        )
-        if (error) throw error
-        let session = data?.session ?? null
-        if (!session?.access_token) return null
-
-        const expMs = (session.expires_at ?? 0) * 1000
-        if (expMs && expMs - Date.now() < 90_000) {
-          const { data: refreshed, error: refErr } = await withTimeout(
-            supabase.auth.refreshSession(),
-            SESSION_TIMEOUT_MS,
-            '로그인 갱신 시간이 초과했어요. 다시 로그인해 주세요.',
-          )
-          if (!refErr && refreshed?.session?.access_token) {
-            session = refreshed.session
-          }
-        }
-        return session
-      } finally {
-        uploadSessionFlight = null
-      }
-    })()
-  }
-  return uploadSessionFlight
+  return resolveSessionForUpload(supabase)
 }
 
 /**
@@ -165,13 +136,15 @@ async function uploadDirectToStorage(supabase, { objectPath, blob, fileKind, ups
 
   const msg = error.message || ''
   if (isAuthUploadFailure(msg) && attempt < 1) {
-    uploadSessionFlight = null
+    clearUploadSessionCache()
     try {
       await withTimeout(
         supabase.auth.refreshSession(),
-        SESSION_TIMEOUT_MS,
+        SESSION_REFRESH_ON_AUTH_FAIL_MS,
         '로그인 갱신 시간이 초과했어요. 다시 로그인해 주세요.',
       )
+      const session = await resolveSessionForUpload(supabase)
+      if (session) setAuthSessionCache(session)
     } catch {
       return { error: { message: msg || '로그인이 필요해요' }, publicUrl }
     }

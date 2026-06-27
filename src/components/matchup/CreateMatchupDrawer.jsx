@@ -295,6 +295,12 @@ export function CreateMatchupDrawer({ onCreated }) {
     if (hasCreateMatchupDraft(user.id)) setShowRestorePrompt(true)
   }, [isCreateDrawerOpen, user?.id, createDrawerEditMatchup?.id])
 
+  // 업로드 직전 getSession 락 경합 완화 — 드로어 열릴 때 세션 미리 확보
+  useEffect(() => {
+    if (!isCreateDrawerOpen || !user?.id) return
+    void warmupMatchupMediaUploadSession(supabase).catch(() => {})
+  }, [isCreateDrawerOpen, user?.id])
+
   // 임시 저장 (디바운스 800ms)
   useEffect(() => {
     if (!isCreateDrawerOpen || !user?.id || uploading || createDrawerEditMatchup?.id) return
@@ -512,7 +518,10 @@ export function CreateMatchupDrawer({ onCreated }) {
     setUploading(true)
     try {
       setUploadStep('로그인 확인 중...')
-      await warmupMatchupMediaUploadSession(supabase)
+      const uploadSession = await warmupMatchupMediaUploadSession(supabase)
+      if (!uploadSession?.access_token) {
+        throw new Error('로그인이 필요해요. 다시 로그인한 뒤 시도해 주세요.')
+      }
 
       let leftUrl = null
       let leftThumb = null

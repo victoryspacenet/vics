@@ -12,6 +12,7 @@ import { useUIStore } from '../store/uiStore'
 import { RankingCelebrationModal } from '../components/ranking/RankingCelebrationModal'
 import { Avatar } from '../components/ui/Avatar'
 import { FeaturedBadgeSpan } from '../components/ui/FeaturedBadge'
+import { FoundingMemberBadge } from '../components/profile/FoundingMemberBadge'
 import { TierBadge } from '../components/ui/TierBadge'
 import {
   getInitialMobileTabCategoryIds,
@@ -188,7 +189,8 @@ function PodiumCard({ user: u, rank, typeTab, sortBy }) {
       </div>
       <p className="text-xs font-black text-[#22282E] text-center truncate w-full px-1 flex items-center justify-center gap-0.5">
         <span className="truncate">{u.nickname}</span>
-        <FeaturedBadgeSpan badgeId={u.featured_badge} />
+        <FeaturedBadgeSpan profile={u} rankInfo={u._tierRankInfo} />
+        <FoundingMemberBadge profile={u} size={11} />
       </p>
       <TierBadge
         profile={u}
@@ -282,7 +284,8 @@ function RankRow({ entry, rank, isMe, typeTab, sortBy }) {
             <p className={`text-xs font-black truncate flex items-center gap-0.5 min-w-0 ${isMe ? 'text-lime-700' : 'text-[#22282E]'}`}>
               {isMe && <span className="text-lime-500 mr-1 text-[9px] shrink-0">나</span>}
               <span className="truncate">{entry.nickname}</span>
-              <FeaturedBadgeSpan badgeId={entry.featured_badge} />
+              <FeaturedBadgeSpan profile={entry} rankInfo={entry._tierRankInfo} />
+              <FoundingMemberBadge profile={entry} size={11} />
             </p>
           </div>
           <TierBadge
@@ -415,12 +418,12 @@ export function RankingPage() {
         }
         let baseCh = supabase
           .from('profiles')
-          .select('id, nickname, avatar_url, points, total_votes_received, featured_badge')
+          .select('id, nickname, avatar_url, points, total_votes_received, featured_badge, founding_member_number')
           .order('total_votes_received', { ascending: false })
           .limit(3)
         let baseOr = supabase
           .from('profiles')
-          .select('id, nickname, avatar_url, points, vote_hits, vote_total, hit_rate, featured_badge')
+          .select('id, nickname, avatar_url, points, vote_hits, vote_total, hit_rate, featured_badge, founding_member_number')
           .gte('vote_total', 1)
           .order('hit_rate', { ascending: false })
           .limit(3)
@@ -438,7 +441,7 @@ export function RankingPage() {
         if (cancelled) return
         const { data } = await supabase
           .from('profiles')
-          .select('id, nickname, avatar_url, points, total_votes_received, featured_badge')
+          .select('id, nickname, avatar_url, points, total_votes_received, featured_badge, founding_member_number')
           .order('total_votes_received', { ascending: false })
           .limit(3)
         setHallOfFameUsers({ champion: data || [], oracle: [] })
@@ -532,7 +535,7 @@ export function RankingPage() {
       const to = from + PAGE_SIZE - 1
       const isCreator = typeTab === 'creator'
       const orderCol = sortBy === 'votes' ? 'total_votes_received' : sortBy === 'hitrate' ? 'hit_rate' : 'points'
-      const selectCols = 'id, nickname, avatar_url, points, total_matchups, total_votes_received, creator_wins, creator_win_streak, vote_hits, vote_total, oracle_points, hit_rate, featured_badge'
+      const selectCols = 'id, nickname, avatar_url, points, total_matchups, total_votes_received, creator_wins, creator_win_streak, vote_hits, vote_total, oracle_points, hit_rate, featured_badge, founding_member_number'
 
       let query = supabase
         .from('profiles')
@@ -698,7 +701,8 @@ export function RankingPage() {
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-bold text-fuchsia-900/80 truncate flex items-center gap-0.5">
                       <span className="truncate">{u.nickname || '사용자'}</span>
-                      <FeaturedBadgeSpan badgeId={u.featured_badge} />
+                      <FeaturedBadgeSpan profile={u} rankInfo={u._tierRankInfo} />
+                      <FoundingMemberBadge profile={u} size={11} />
                     </p>
                     <span className="text-[10px] text-fuchsia-400/90">{formatNumber(u.total_votes_received || 0)}표</span>
                   </div>
@@ -714,7 +718,8 @@ export function RankingPage() {
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-bold text-fuchsia-900/80 truncate flex items-center gap-0.5">
                       <span className="truncate">{u.nickname || '사용자'}</span>
-                      <FeaturedBadgeSpan badgeId={u.featured_badge} />
+                      <FeaturedBadgeSpan profile={u} rankInfo={u._tierRankInfo} />
+                      <FoundingMemberBadge profile={u} size={11} />
                     </p>
                     <span className="text-[10px] text-fuchsia-400/90">{calcHitRate(u.vote_hits, u.vote_total) !== null ? `${calcHitRate(u.vote_hits, u.vote_total)}% 적중` : '-'}</span>
                   </div>
@@ -995,7 +1000,8 @@ export function RankingPage() {
               <div className="min-w-0">
                 <p className="text-xs font-black text-lime-700 truncate flex items-center gap-0.5">
                   <span className="truncate">{profile?.nickname}</span>
-                  <FeaturedBadgeSpan badgeId={profile?.featured_badge} />
+                  <FeaturedBadgeSpan profile={profile} rankInfo={profile._tierRankInfo} />
+                  <FoundingMemberBadge profile={profile} size={11} />
                 </p>
                 <p className="text-[10px] text-gray-500">
                   {formatNumber(profile?.points || 0)}P

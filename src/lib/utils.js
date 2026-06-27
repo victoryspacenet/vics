@@ -68,14 +68,25 @@ export function getLevelProgress(points = 0) {
 }
 
 export function copyToClipboard(text) {
-  if (navigator.clipboard) {
-    return navigator.clipboard.writeText(text)
+  const value = String(text ?? '')
+  if (!value) return Promise.reject(new Error('empty clipboard text'))
+
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(value).catch(() => copyToClipboardFallback(value))
   }
+  return copyToClipboardFallback(value)
+}
+
+function copyToClipboardFallback(text) {
   const el = document.createElement('textarea')
   el.value = text
+  el.setAttribute('readonly', '')
+  el.style.position = 'fixed'
+  el.style.left = '-9999px'
   document.body.appendChild(el)
   el.select()
-  document.execCommand('copy')
+  el.setSelectionRange(0, text.length)
+  const ok = document.execCommand('copy')
   document.body.removeChild(el)
-  return Promise.resolve()
+  return ok ? Promise.resolve() : Promise.reject(new Error('clipboard fallback failed'))
 }

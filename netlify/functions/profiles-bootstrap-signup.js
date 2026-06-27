@@ -50,7 +50,7 @@ exports.handler = withIpRateLimit(async (event) => {
     return json(400, { error: '잘못된 요청이에요' })
   }
 
-  const { userId, email, nickname, birthdate, gender } = body
+  const { userId, email, nickname, birthdate, gender, signup_taste_answers: tasteRaw } = body
   if (!userId || typeof userId !== 'string') {
     return json(400, { error: 'userId가 필요해요' })
   }
@@ -89,6 +89,15 @@ exports.handler = withIpRateLimit(async (event) => {
     updated_at: new Date().toISOString(),
   }
 
+  if (
+    tasteRaw &&
+    typeof tasteRaw === 'object' &&
+    !Array.isArray(tasteRaw) &&
+    ['personality_type', 'matchup_role', 'interest_topic'].every((k) => typeof tasteRaw[k] === 'string')
+  ) {
+    row.signup_taste_answers = tasteRaw
+  }
+
   const { error: upErr } = await admin.from('profiles').upsert(row, { onConflict: 'id' })
 
   if (!upErr) {
@@ -114,6 +123,7 @@ exports.handler = withIpRateLimit(async (event) => {
     um.nickname = nick
     if (bd) um.birthdate = bd
     if (gen) um.gender = gen
+    if (row.signup_taste_answers) um.signup_taste_answers = row.signup_taste_answers
     const { error: metaErr } = await admin.auth.admin.updateUserById(userId, { user_metadata: um })
     if (metaErr) console.warn('[profiles-bootstrap-signup] updateUserById', metaErr.message || metaErr)
   } catch (e) {

@@ -10,7 +10,7 @@ import { safeMediaUrl, parseBannedWordError, parseNicknameSeasonLimitError } fro
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
 import { cn } from '../lib/utils'
-import { ACTIVITY_BADGES, isActivityBadgeEarned } from '../lib/featuredBadges'
+import { ACTIVITY_BADGES, isActivityBadgeEarned, getDisplayFeaturedBadgeId } from '../lib/featuredBadges'
 import { getTier, tierAtLeast, TIER_MIN_HOLD_POINTS } from '../lib/tiers'
 import { fandomTierHasGoldProfileGlow, fandomTierHasSilverProfileGlow, fandomTierFromClaps } from '../lib/fandomTiers'
 import { FANDOM_POINTS_PER_CLAP } from '../lib/fandomPoints'
@@ -444,7 +444,11 @@ export function ProfileEditPage() {
     same:     { text: '현재 닉네임과 동일해요',     color: 'text-fuchsia-600/65' },
   }[nicknameStatus]
 
-  const selectedBadgeObj = featuredBadge ? ALL_BADGES.find((b) => b.id === featuredBadge) : null
+  const selectedBadgeObj = useMemo(() => {
+    if (!canPickFeaturedBadge) return null
+    const id = featuredBadge ?? getDisplayFeaturedBadgeId(profile, {}, { commentCount })
+    return id ? ALL_BADGES.find((b) => b.id === id) : null
+  }, [canPickFeaturedBadge, featuredBadge, profile, commentCount])
 
   return (
     <div className={cn('max-w-screen-sm mx-auto min-h-screen', PAGE_BG)}>

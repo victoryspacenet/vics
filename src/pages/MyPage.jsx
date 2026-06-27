@@ -27,8 +27,10 @@ import { MatchupThumbFrame } from '../components/ui/MatchupThumbFrame'
 import { POINTS_VOTER_DRAW, POINTS_VOTER_HIT, POINTS_VOTER_MISS } from '../lib/pointRewards'
 import { getMyPageNeonShell } from '../lib/neonProfileTheme'
 import { FandomBronzeStarBadge } from '../components/fandom/FandomBronzeStarBadge'
+import { FoundingMemberBadge } from '../components/profile/FoundingMemberBadge'
 import { fandomTierHasGoldProfileGlow, fandomTierHasSilverProfileGlow } from '../lib/fandomTiers'
 import { isRankingBadgeActive, getRankingBadgeDays, getRankingBadgeRemainingDays } from '../lib/rankingBadge'
+import { TendencyReportMyPageCard } from '../components/tendency/TendencyReportMyPageCard'
 
 /** 전체 포인트 랭킹 순위 — TOP10은 랭킹 축하 모달과 동일 Gold·Silver·Bronze·TOP 10, 그 외 N위 */
 function overallRankGradeLabel(rank) {
@@ -472,6 +474,7 @@ export function MyPage() {
               <h1 className={cn('text-2xl font-black', neonShell.nicknameClass)}>
                 {profile?.nickname || '사용자'}
               </h1>
+              <FoundingMemberBadge profile={profile} variant="pill" />
               <FandomBronzeStarBadge tierId={profile?.fandom_tier} size={18} />
               <span className="text-lg" title={`매치업 등급 ${matchupTier.name}`}>{matchupTier.emoji}</span>
             </div>
@@ -504,6 +507,8 @@ export function MyPage() {
         </div>
         )}
       </div>
+
+      <TendencyReportMyPageCard userId={user?.id} />
 
       {/* ══ My 레벨 ══ */}
       <div className={`${SECTION_CARD} p-5 mb-6`}>
@@ -1019,14 +1024,6 @@ function CreatedMatchupFullCard({ matchup: m }) {
                   <p className="line-clamp-4 text-center text-xs font-bold text-white/90">{m.left_text}</p>
                 </div>
             }
-            {/* A 레이블 */}
-            {m.left_label && (
-              <div className="absolute bottom-1.5 left-1.5 z-10">
-                <span className="block max-w-[90%] truncate rounded-md bg-black/50 px-1.5 py-0.5 text-[9px] font-black text-white backdrop-blur-sm">
-                  {m.left_label}
-                </span>
-              </div>
-            )}
             {/* A WIN 뱃지 */}
             {isComplete && hasVotes && !isActive && winner === 'left' && (
               <div className="absolute right-1.5 top-1.5 z-10">
@@ -1055,14 +1052,6 @@ function CreatedMatchupFullCard({ matchup: m }) {
                   <p className="px-2 text-center text-[10px] font-black text-emerald-300">도전자 모집 중</p>
                 </div>
             }
-            {/* B 레이블 */}
-            {isComplete && m.right_label && (
-              <div className="absolute bottom-1.5 right-1.5 z-10">
-                <span className="block max-w-[90%] truncate rounded-md bg-black/50 px-1.5 py-0.5 text-[9px] font-black text-white backdrop-blur-sm">
-                  {m.right_label}
-                </span>
-              </div>
-            )}
             {/* B WIN 뱃지 */}
             {isComplete && hasVotes && !isActive && winner === 'right' && (
               <div className="absolute left-1.5 top-1.5 z-10">
@@ -1324,14 +1313,6 @@ function VotedMatchupFullCard({ vote, matchup: m, pointsEarned }) {
                   }`}>{left}%</span>
                 </div>
               )}
-              {/* 레이블 */}
-              {m.left_label && (
-                <div className="absolute bottom-1.5 right-1.5 z-10">
-                  <span className="block max-w-[80%] truncate rounded-md bg-black/50 px-1.5 py-0.5 text-[9px] font-black text-white backdrop-blur-sm">
-                    {m.left_label}
-                  </span>
-                </div>
-              )}
             </MatchupThumbFrame>
           </div>
 
@@ -1363,14 +1344,6 @@ function VotedMatchupFullCard({ vote, matchup: m, pointsEarned }) {
                   <span className={`rounded-lg px-1.5 py-0.5 text-[11px] font-black ${
                     !isActive && winner === 'right' ? 'bg-green-500 text-white' : 'bg-black/50 text-white backdrop-blur-sm'
                   }`}>{right}%</span>
-                </div>
-              )}
-              {/* 레이블 */}
-              {m.right_label && (
-                <div className="absolute bottom-1.5 left-1.5 z-10">
-                  <span className="block max-w-[80%] truncate rounded-md bg-black/50 px-1.5 py-0.5 text-[9px] font-black text-white backdrop-blur-sm">
-                    {m.right_label}
-                  </span>
                 </div>
               )}
             </MatchupThumbFrame>

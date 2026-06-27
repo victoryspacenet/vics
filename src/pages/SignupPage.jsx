@@ -10,6 +10,8 @@ import { isRejoinCooldownDbError, REJOIN_COOLDOWN_USER_MESSAGE } from '../lib/re
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
 import { Logo } from '../components/ui/Logo'
+import { SignupTasteSection } from '../components/signup/SignupTasteSection'
+import { isSignupTasteComplete, normalizeSignupTasteAnswers, SIGNUP_TASTE_QUESTIONS } from '../lib/signupTasteQuestions'
 
 const NICKNAME_MAX = 10
 const PASSWORD_MIN = 8
@@ -46,10 +48,20 @@ export function SignupPage() {
   const { showToast } = useUIStore()
 
   const [form, setForm] = useState({ nickname: '', email: '', password: '', birthdate: '', gender: '' })
+  const [tasteAnswers, setTasteAnswers] = useState({
+    personality_type: '',
+    matchup_role: '',
+    interest_topic: '',
+  })
   const [nicknameStatus, setNicknameStatus] = useState(null)
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState({})
   const [showPw, setShowPw] = useState(false)
+
+  const setTaste = (questionId, optionId) => {
+    setTasteAnswers((prev) => ({ ...prev, [questionId]: optionId }))
+    setErrors((e) => ({ ...e, [questionId]: null, taste: null }))
+  }
 
   const set = (key, val) => {
     setForm((f) => ({ ...f, [key]: val }))
@@ -80,6 +92,10 @@ export function SignupPage() {
     if (pwErr) errs.password = pwErr
     if (!form.birthdate) errs.birthdate = '생년월일을 입력해주세요'
     if (!form.gender) errs.gender = '성별을 선택해주세요'
+    for (const q of SIGNUP_TASTE_QUESTIONS) {
+      if (!tasteAnswers[q.id]) errs[q.id] = '하나 골라 주세요'
+    }
+    if (!isSignupTasteComplete(tasteAnswers)) errs.taste = '취향 체크 3문항을 모두 선택해 주세요'
     setErrors(errs)
     return Object.keys(errs).length === 0
   }
@@ -89,10 +105,18 @@ export function SignupPage() {
     if (!validate() || loading) return
     setLoading(true)
     try {
+      const tastePayload = normalizeSignupTasteAnswers(tasteAnswers)
       const { data: authData, error } = await supabase.auth.signUp({
         email: form.email.trim(),
         password: form.password,
-        options: { data: { nickname: form.nickname.trim(), birthdate: form.birthdate, gender: form.gender } },
+        options: {
+          data: {
+            nickname: form.nickname.trim(),
+            birthdate: form.birthdate,
+            gender: form.gender,
+            signup_taste_answers: tastePayload,
+          },
+        },
       })
       if (error) throw error
 
@@ -104,7 +128,14 @@ export function SignupPage() {
           const res = await fetch(resolveSiteUrl('/api/profiles-bootstrap-signup'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: newUser.id, email: form.email.trim(), nickname: form.nickname.trim(), birthdate: form.birthdate, gender: form.gender }),
+            body: JSON.stringify({
+              userId: newUser.id,
+              email: form.email.trim(),
+              nickname: form.nickname.trim(),
+              birthdate: form.birthdate,
+              gender: form.gender,
+              signup_taste_answers: tastePayload,
+            }),
           })
           if (!res.ok) {
             const j = await res.json().catch(() => ({}))
@@ -130,6 +161,7 @@ export function SignupPage() {
           email: form.email.trim(),
           birthdate: form.birthdate,
           gender: form.gender,
+          signup_taste_answers: tastePayload,
           points: SIGNUP_BONUS_POINTS,
         })
         if (upErr) {
@@ -137,7 +169,7 @@ export function SignupPage() {
           throw upErr
         }
         await grantSignupBonusIfNeeded(authedUser.id)
-        try { await supabase.auth.updateUser({ data: { nickname: form.nickname.trim(), birthdate: form.birthdate, gender: form.gender } }) }
+        try { await supabase.auth.updateUser({ data: { nickname: form.nickname.trim(), birthdate: form.birthdate, gender: form.gender, signup_taste_answers: tastePayload } }) }
         catch (e) { console.warn('[Signup] auth.updateUser', e?.message || e) }
         try { window.dispatchEvent(new CustomEvent('vics:adminUsers:updated')) } catch { /* ignore */ }
       }
@@ -151,7 +183,13 @@ export function SignupPage() {
     }
   }
 
-  const isValid = form.nickname.trim() && form.email.trim() && form.birthdate && form.gender && nicknameStatus === 'available'
+  const isValid =
+    form.nickname.trim() &&
+    form.email.trim() &&
+    form.birthdate &&
+    form.gender &&
+    isSignupTasteComplete(tasteAnswers) &&
+    nicknameStatus === 'available'
   const pwStrength = getPasswordStrength(form.password)
 
   if (authLoading) {
@@ -329,6 +367,19 @@ export function SignupPage() {
                   )}
                 </div>
               </div>
+
+              {/* VictorySpace 취향 체크 */}
+              <SignupTasteSection
+                answers={tasteAnswers}
+                onChange={setTaste}
+                errors={errors}
+              />
+              {errors.taste && (
+                <p className="flex items-center gap-1 text-[11px] font-bold text-rose-500 -mt-2 px-0.5">
+                  <AlertCircle size={12} />
+                  {errors.taste}
+                </p>
+              )}
 
               {/* 비밀번호 */}
               <div>

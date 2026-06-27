@@ -82,6 +82,12 @@
   status = 200
   force = true
 
+[[redirects]]
+  from = "/api/matchup-share-image"
+  to = "/.netlify/functions/matchup-share-image"
+  status = 200
+  force = true
+
 # SLA 미처리 문의 리마인드 — 매시간 Supabase RPC `check_sla_and_notify` 호출
 [functions."sla-inquiry-reminders"]
 schedule = "@hourly"

@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 
 /** 목록·작성 응답에 공통으로 쓰는 select (embed 프로필) */
 export const MATCHUP_COMMENT_SELECT =
-  'id, matchup_id, user_id, parent_id, content, created_at, updated_at, profiles:user_id(id, nickname, avatar_url, featured_badge, fandom_tier)'
+  'id, matchup_id, user_id, parent_id, content, created_at, updated_at, profiles:user_id(id, nickname, avatar_url, featured_badge, fandom_tier, founding_member_number)'
 
 /** 마이그레이션 미적용 DB용 폴백 (fandom_tier 등 없을 때) */
 export const MATCHUP_COMMENT_SELECT_FALLBACK =

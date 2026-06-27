@@ -1,6 +1,12 @@
 import { lazy, Suspense, useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, Navigate } from 'react-router-dom'
-import { fetchMainMatchupsQuick, enrichMainFeedCreatorRanks } from '../lib/mainFeed'
+import {
+  fetchMainBestFeedPage,
+  fetchMainHotFeedPage,
+  fetchMainNewFeedPage,
+  invalidateMainFeaturedFeedCache,
+} from '../lib/mainFeed'
+import { enrichMatchupsWithCreatorRankInfo } from '../lib/creatorRankSnapshot'
 import { runWhenIdle } from '../lib/runDeferred'
 import {
   MainMatchupCard,
@@ -17,53 +23,68 @@ const PAGE_SIZE = 12
 
 export function MainFeedPage() {
   const { variant } = useParams()
-  const [data, setData] = useState({ best: [], hot: [], new: [] })
-  /** 목록·썸네일용 첫 응답 대기 (스켈레톤 구간) */
-  const [quickLoading, setQuickLoading] = useState(true)
-  /** 티어 RPC 병합 중 — 카드는 유지, 상단에만 경량 표시 */
+  const [rows, setRows] = useState([])
+  const [totalCount, setTotalCount] = useState(0)
+  const [loading, setLoading] = useState(true)
   const [enriching, setEnriching] = useState(false)
   const [page, setPage] = useState(1)
 
-  const dataRef = useRef(data)
+  const rowsRef = useRef(rows)
   useEffect(() => {
-    dataRef.current = data
-  }, [data])
+    rowsRef.current = rows
+  }, [rows])
 
   const validVariant = ['best', 'hot', 'new'].includes(variant) ? variant : null
-  if (!validVariant) return <Navigate to="/feed/best" replace />
 
   const loadSeqRef = useRef(0)
 
-  const load = useCallback(async () => {
+  const loadFeed = useCallback(async () => {
+    if (!validVariant) return
     const seq = ++loadSeqRef.current
-    const d = dataRef.current
-    const hadAnyFeed =
-      (d.best?.length ?? 0) + (d.hot?.length ?? 0) + (d.new?.length ?? 0) > 0
-    if (!hadAnyFeed) setQuickLoading(true)
+    const hadRows = rowsRef.current.length > 0
+    if (!hadRows) setLoading(true)
     setEnriching(false)
-    let quick = { best: [], hot: [], new: [] }
+
+    let fetchedRows = []
+    let fetchedTotal = 0
     try {
-      quick = await fetchMainMatchupsQuick()
+      if (validVariant === 'best') {
+        const result = await fetchMainBestFeedPage({ page, pageSize: PAGE_SIZE })
+        fetchedRows = result.rows
+        fetchedTotal = result.totalCount
+      } else if (validVariant === 'hot') {
+        const result = await fetchMainHotFeedPage({ page, pageSize: PAGE_SIZE })
+        fetchedRows = result.rows
+        fetchedTotal = result.totalCount
+      } else {
+        const result = await fetchMainNewFeedPage({ page, pageSize: PAGE_SIZE })
+        fetchedRows = result.rows
+        fetchedTotal = result.totalCount
+      }
+
       if (seq !== loadSeqRef.current) return
-      setData(quick)
+      setRows(fetchedRows)
+      setTotalCount(fetchedTotal)
     } catch (err) {
       console.error(err)
       if (seq === loadSeqRef.current) {
-        setData({ best: [], hot: [], new: [] })
-        quick = { best: [], hot: [], new: [] }
+        setRows([])
+        setTotalCount(0)
+        fetchedRows = []
       }
     } finally {
-      if (seq === loadSeqRef.current) setQuickLoading(false)
+      if (seq === loadSeqRef.current) setLoading(false)
     }
-    if (seq !== loadSeqRef.current) return
+
+    if (seq !== loadSeqRef.current || !fetchedRows.length) return
     runWhenIdle(() => {
       void (async () => {
         if (seq !== loadSeqRef.current) return
         setEnriching(true)
         try {
-          const enriched = await enrichMainFeedCreatorRanks(quick)
+          const enriched = await enrichMatchupsWithCreatorRankInfo(fetchedRows)
           if (seq !== loadSeqRef.current) return
-          setData(enriched)
+          setRows(enriched)
         } catch (e) {
           console.warn('[MainFeedPage] creator rank enrich failed', e)
         } finally {
@@ -71,36 +92,39 @@ export function MainFeedPage() {
         }
       })()
     }, { timeoutMs: 1200 })
-  }, [])
+  }, [validVariant, page])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    void loadFeed()
+  }, [loadFeed])
 
   useEffect(() => {
     setPage(1)
+    setRows([])
+    setTotalCount(0)
+    setLoading(true)
   }, [validVariant])
 
   useEffect(() => {
     const on = () => {
-      void load()
+      invalidateMainFeaturedFeedCache()
+      void loadFeed()
     }
     window.addEventListener('vics:matchup-banner-highlight:updated', on)
     return () => window.removeEventListener('vics:matchup-banner-highlight:updated', on)
-  }, [load])
+  }, [loadFeed])
 
-  const currentList = data[validVariant] || []
-  const totalPages = Math.max(1, Math.ceil(currentList.length / PAGE_SIZE))
-  const pagedItems = currentList.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
 
   const goPage = (p) => {
     setPage(p)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  if (!validVariant) return <Navigate to="/feed/best" replace />
+
   return (
     <div className="min-h-screen text-[#22282E] -mx-4 -my-6 px-4 py-6 pb-24 sm:pb-8">
-      {/* ── 상단 탭 바 (독립 페이지) ── */}
       <MainTabBar currentVariant={validVariant} />
 
       <Suspense
@@ -114,15 +138,14 @@ export function MainFeedPage() {
         <LegendFeedBanner />
       </Suspense>
 
-      {enriching && !quickLoading && currentList.length > 0 && (
+      {enriching && !loading && rows.length > 0 && (
         <p className="mb-3 text-center text-[11px] font-medium text-slate-400 tabular-nums" aria-live="polite">
           크리에이터 랭크 정보 동기화 중…
         </p>
       )}
 
-      {/* ── 피드: 퀵 로드 전에는 카드 형태 스켈레톤(첫 블록은 LCP용 정적) ── */}
       <div className="space-y-4">
-        {quickLoading ? (
+        {loading ? (
           <>
             <div className="py-3">
               <MainFeedCardSkeleton variant={validVariant} staticLcp />
@@ -134,8 +157,8 @@ export function MainFeedPage() {
               <MainFeedCardSkeleton variant={validVariant} />
             </div>
           </>
-        ) : pagedItems.length > 0 ? (
-          pagedItems.map((m, i) => (
+        ) : rows.length > 0 ? (
+          rows.map((m, i) => (
             <div
               key={`${validVariant}-${page}-${m.id}`}
               className="py-3 animate-fade-in-feed-stagger"
@@ -156,8 +179,7 @@ export function MainFeedPage() {
         )}
       </div>
 
-      {/* ── 페이지네이션 (퀵 데이터만 있으면 표시 — enrich과 무관) ── */}
-      {!quickLoading && currentList.length > 0 && (
+      {!loading && totalCount > 0 && (
         <div className="mt-8 mb-6 pb-28 sm:pb-10 flex justify-center animate-fade-in-soft">
           <div className="inline-flex items-center gap-2 px-5 py-4 bg-gradient-to-b from-slate-100/95 to-slate-200/35 rounded-2xl border border-gray-200/70 shadow-md shadow-slate-200/60">
             <MainPagination current={page} total={totalPages} onPage={goPage} />

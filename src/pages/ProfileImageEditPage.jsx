@@ -74,6 +74,7 @@ export function ProfileImageEditPage() {
 
   const [avatarPreview, setAvatarPreview] = useState(null)
   const [avatarFile,    setAvatarFile]    = useState(null)
+  const [resetToDefault, setResetToDefault] = useState(false)
   const [bgEffect,      setBgEffect]      = useState('none')
   const [sheetOpen,     setSheetOpen]     = useState(false)
   /** 'menu' | 'camera' — 하단 시트에서 앨범 vs 카메라 UI 전환 */
@@ -119,6 +120,7 @@ export function ProfileImageEditPage() {
     }
     setAvatarPreview(URL.createObjectURL(file))
     setAvatarFile(file)
+    setResetToDefault(false)
     setSheetOpen(false)
     setSheetView('menu')
   }
@@ -140,17 +142,29 @@ export function ProfileImageEditPage() {
     }
   }
 
-  const resetAvatar = () => {
+  const cancelAvatarChanges = () => {
     setAvatarPreview(null)
     setAvatarFile(null)
+    setResetToDefault(false)
     setSheetOpen(false)
     setSheetView('menu')
   }
 
+  const handleResetToDefault = () => {
+    setAvatarPreview(null)
+    setAvatarFile(null)
+    setResetToDefault(true)
+    setSheetOpen(false)
+    setSheetView('menu')
+  }
+
+  const hasCustomAvatar = Boolean(profile?.avatar_url || avatarPreview || avatarFile)
+  const canResetToDefault = hasCustomAvatar && !resetToDefault
+
   const serverRing = normalizeAvatarRingEffect(profile?.avatar_ring_effect)
   const localRing = normalizeAvatarRingEffect(bgEffect)
-  /** 새 사진만 / 배경 효과만 바꿔도 저장 가능 */
-  const hasChanges = Boolean(avatarFile) || localRing !== serverRing
+  /** 새 사진 / 기본 이미지 복원 / 배경 효과 변경 */
+  const hasChanges = Boolean(avatarFile) || resetToDefault || localRing !== serverRing
 
   const handleSave = async () => {
     if (!hasChanges || saving) return
@@ -158,7 +172,9 @@ export function ProfileImageEditPage() {
     try {
       let avatarUrl = profile?.avatar_url || null
 
-      if (avatarFile) {
+      if (resetToDefault) {
+        avatarUrl = null
+      } else if (avatarFile) {
         showToast('이미지 압축 중…', 'info')
         const compressed = await compressImageContain(avatarFile, {
           maxEdge: 512,
@@ -193,12 +209,23 @@ export function ProfileImageEditPage() {
       }
 
       const payload = { avatar_ring_effect: localRing }
-      if (avatarFile) payload.avatar_url = avatarUrl
+      if (resetToDefault) {
+        payload.avatar_url = null
+      } else if (avatarFile) {
+        payload.avatar_url = avatarUrl
+      }
 
       const { error } = await updateProfile(payload)
       if (error) { showToast('저장에 실패했어요', 'error'); return }
 
-      showToast(avatarFile ? '프로필 사진이 업데이트됐어요 ✓' : '배경 효과가 저장됐어요 ✓', 'success')
+      showToast(
+        resetToDefault
+          ? '기본 이미지로 변경됐어요 ✓'
+          : avatarFile
+            ? '프로필 사진이 업데이트됐어요 ✓'
+            : '배경 효과가 저장됐어요 ✓',
+        'success',
+      )
       navigate('/mypage/edit')
       void fetchProfile(user.id, { force: true })
     } catch {
@@ -209,7 +236,7 @@ export function ProfileImageEditPage() {
   }
 
   const effectObj    = BG_EFFECTS.find((e) => e.id === localRing) || BG_EFFECTS[0]
-  const currentImage = avatarPreview || profile?.avatar_url
+  const currentImage = resetToDefault ? null : (avatarPreview || profile?.avatar_url)
 
   return (
     <div className={cn('max-w-screen-sm mx-auto min-h-screen', PAGE_BG)}>
@@ -288,13 +315,16 @@ export function ProfileImageEditPage() {
             >
               사진 변경하기
             </button>
-            {avatarPreview && (
+            {(avatarPreview || avatarFile || resetToDefault) && (
               <button
-                onClick={resetAvatar}
+                onClick={cancelAvatarChanges}
                 className="flex items-center gap-1 text-xs text-fuchsia-600/70 hover:text-red-500 transition-colors"
               >
                 <X size={11} /> 변경 취소
               </button>
+            )}
+            {resetToDefault && (
+              <p className="text-[11px] font-semibold text-red-500/90">저장하면 기본 이미지(닉네임 이니셜)로 바뀌어요</p>
             )}
           </div>
 
@@ -436,21 +466,32 @@ export function ProfileImageEditPage() {
                       </div>
                     </button>
 
-                    {/* 기본 이미지로 변경 */}
-                    {currentImage && (
-                      <button
-                        onClick={resetAvatar}
-                        className="w-full flex items-center gap-4 px-5 py-4 bg-white/80 rounded-2xl border border-red-100/60 hover:bg-red-50/80 hover:border-red-200/70 transition-all shadow-sm"
-                      >
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-rose-400 to-red-500 flex items-center justify-center flex-shrink-0 shadow-md shadow-rose-300/40">
-                          <X size={18} className="text-white" />
-                        </div>
-                        <div className="text-left">
-                          <p className="text-sm font-bold text-red-500">기본 이미지로 변경</p>
-                          <p className="text-xs text-fuchsia-700/50">프로필 사진을 초기화해요</p>
-                        </div>
-                      </button>
-                    )}
+                    {/* 기본 이미지로 하기 */}
+                    <button
+                      type="button"
+                      onClick={handleResetToDefault}
+                      disabled={!canResetToDefault}
+                      className={cn(
+                        'w-full flex items-center gap-4 px-5 py-4 bg-white/80 rounded-2xl border transition-all shadow-sm text-left',
+                        canResetToDefault
+                          ? 'border-red-100/60 hover:bg-red-50/80 hover:border-red-200/70'
+                          : 'border-slate-100/80 opacity-55 cursor-not-allowed',
+                      )}
+                    >
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-rose-400 to-red-500 flex items-center justify-center flex-shrink-0 shadow-md shadow-rose-300/40">
+                        <X size={18} className="text-white" />
+                      </div>
+                      <div className="text-left min-w-0">
+                        <p className="text-sm font-bold text-red-500">기본 이미지로 하기</p>
+                        <p className="text-xs text-fuchsia-700/50">
+                          {canResetToDefault
+                            ? '업로드한 프로필 사진을 제거해요'
+                            : resetToDefault
+                              ? '저장 버튼을 눌러 적용해 주세요'
+                              : '이미 기본 이미지예요'}
+                        </p>
+                      </div>
+                    </button>
 
                     {/* 취소 */}
                     <button

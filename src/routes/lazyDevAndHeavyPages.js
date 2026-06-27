@@ -13,6 +13,9 @@ export const DevDiamondLegendPreviewPage = lazy(() =>
 export const DevLegendFeedBannerPage = lazy(() =>
   import('../pages/DevLegendFeedBannerPage').then((m) => ({ default: m.DevLegendFeedBannerPage })),
 )
+export const DevTendencyReportPreviewPage = lazy(() =>
+  import('../pages/DevTendencyReportPreviewPage').then((m) => ({ default: m.DevTendencyReportPreviewPage })),
+)
 
 /** html-to-image, qrcode 등 무거운 의존성 */
 export const VictoryReportPage = lazy(() =>

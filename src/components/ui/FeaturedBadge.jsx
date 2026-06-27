@@ -1,10 +1,22 @@
-import { getFeaturedBadgeEmoji, getFeaturedBadgeMeta } from '../../lib/featuredBadges'
+import { getFeaturedBadgeEmoji, getFeaturedBadgeMeta, getDisplayFeaturedBadgeId } from '../../lib/featuredBadges'
 
-/** 닉네임 옆 대표 배지 이모지 (없으면 null) */
-export function FeaturedBadgeSpan({ badgeId, className = '' }) {
-  const emoji = getFeaturedBadgeEmoji(badgeId)
+/**
+ * @param {{
+ *   badgeId?: string | null
+ *   profile?: object | null
+ *   rankInfo?: object
+ *   commentCount?: number
+ *   className?: string
+ * }} props
+ */
+export function FeaturedBadgeSpan({ badgeId, profile, rankInfo, commentCount, className = '' }) {
+  const id = profile
+    ? getDisplayFeaturedBadgeId(profile, rankInfo, { commentCount })
+    : badgeId
+
+  const emoji = getFeaturedBadgeEmoji(id)
   if (!emoji) return null
-  const meta = getFeaturedBadgeMeta(badgeId)
+  const meta = getFeaturedBadgeMeta(id)
   return (
     <span
       className={`inline-flex shrink-0 items-center justify-center text-[13px] leading-none ${className}`}

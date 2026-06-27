@@ -5,6 +5,7 @@
  */
 import { supabase } from './supabase'
 import { resolveSiteUrl } from './siteApiBase'
+import { notifyTendencyVoteCast } from './tendencyReport'
 
 /**
  * @param {string} matchupId
@@ -32,7 +33,10 @@ export async function voteViaApi(matchupId, side) {
     clearTimeout(timeoutId)
 
     const json = await res.json().catch(() => ({}))
-    if (res.ok) return { ok: true }
+    if (res.ok) {
+      notifyTendencyVoteCast()
+      return { ok: true }
+    }
     // API 미사용(404 등) 시 로컬 개발 폴백
     if (res.status === 404 || res.status === 0) {
       return voteDirect(matchupId, side, session.user.id)
@@ -52,5 +56,6 @@ async function voteDirect(matchupId, side, userId) {
     if (error.message?.includes('VOTE_IP_LIMIT')) return { error: '이 기기/네트워크에서 해당 매치업에 대한 투표 한도를 초과했어요 (최대 3표)' }
     return { error: error.message || '투표 중 오류가 발생했어요' }
   }
+  notifyTendencyVoteCast()
   return { ok: true }
 }

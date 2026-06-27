@@ -3,6 +3,7 @@
  * 레거시 level_1~7은 예전 레벨 배지 선택값 표시용으로 유지합니다.
  */
 import { LEVELS, getLevel } from './utils'
+import { getTier, tierAtLeast } from './tiers'
 
 /** '얼리어답터': 이 시점 이전 가입분만 (제품 일정에 맞게 조정) */
 const EARLY_BADGE_CUTOFF_ISO = '2026-09-01T00:00:00+09:00'
@@ -79,4 +80,20 @@ export function isActivityBadgeEarned(badgeId, profile, extras = {}) {
     default:
       return false
   }
+}
+
+/**
+ * 닉네임 옆에 표시할 대표 배지 ID (Star+ & 획득 조건 충족 시만)
+ * @param {object | null | undefined} profile
+ * @param {object} [rankInfo]
+ * @param {{ commentCount?: number }} [extras]
+ * @returns {string | null}
+ */
+export function getDisplayFeaturedBadgeId(profile, rankInfo, extras = {}) {
+  const badgeId = profile?.featured_badge
+  if (!badgeId || typeof badgeId !== 'string' || !profile) return null
+  const tier = getTier(profile, rankInfo)
+  if (!tierAtLeast(tier, 'star')) return null
+  if (!isActivityBadgeEarned(badgeId, profile, extras)) return null
+  return badgeId
 }

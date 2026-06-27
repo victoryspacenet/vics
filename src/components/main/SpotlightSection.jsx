@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Clock, Film, Play, Sparkles } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { safeMediaUrl } from '../../lib/sanitize'
+import { matchupSideBadge } from '../../lib/matchupContentSide'
 import { VsBadge } from '../ui/VsBadge'
 import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
@@ -79,7 +80,7 @@ function SpotlightMedia({ side, matchup: m }) {
   const type = isLeft ? m.left_type : m.right_type
   const url = isLeft ? m.left_url : m.right_url
   const thumb = isLeft ? m.left_thumbnail_url : m.right_thumbnail_url
-  const label = isLeft ? m.left_label : m.right_label
+  const sideBadge = matchupSideBadge(side)
   const text = isLeft ? m.left_text : m.right_text
 
   const safeThumb = safeMediaUrl(thumb || '')
@@ -89,7 +90,7 @@ function SpotlightMedia({ side, matchup: m }) {
     return (
       <div className="flex h-full min-h-[5.5rem] w-full items-center justify-center bg-gradient-to-br from-slate-900/40 to-slate-800/30 p-2">
         <p className="line-clamp-3 text-center text-[11px] font-semibold leading-snug text-white/90">
-          {text || label || '—'}
+          {text || '—'}
         </p>
       </div>
     )
@@ -114,7 +115,7 @@ function SpotlightMedia({ side, matchup: m }) {
     return (
       <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-gradient-to-br from-fuchsia-950/50 to-violet-950/40 text-white/80">
         <Film size={22} className="opacity-90" />
-        <span className="text-[10px] font-bold">{label || '영상'}</span>
+        <span className="text-[10px] font-bold">{sideBadge}</span>
       </div>
     )
   }
@@ -126,7 +127,7 @@ function SpotlightMedia({ side, matchup: m }) {
 
   return (
     <div className="flex h-full w-full items-center justify-center bg-slate-800/50 text-[11px] font-semibold text-white/70">
-      {label || (isLeft ? 'LEFT' : 'RIGHT')}
+      {sideBadge}
     </div>
   )
 }

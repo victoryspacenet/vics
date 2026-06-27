@@ -5,14 +5,14 @@ import { useUIStore } from './store/uiStore'
 import { useNotificationStore } from './store/notificationStore'
 import { Layout } from './components/layout/Layout'
 import { Modal } from './components/ui/Modal'
-import { LoginModal, LoginPage } from './pages/LoginPage'
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
 import { ResetPasswordPage } from './pages/ResetPasswordPage'
-import { MainPage } from './pages/MainPage'
-import { MainFeedPage } from './pages/MainFeedPage'
+import * as LazyCore from './routes/lazyCorePages'
 import { ModerationRestrictionGate } from './components/layout/ModerationRestrictionGate'
 import { ServerMaintenanceGate } from './components/system/ServerMaintenanceGate'
 import { PushNotificationNavBridge } from './components/system/PushNotificationNavBridge'
+import { GoogleAnalyticsBridge } from './components/system/GoogleAnalyticsBridge'
+import { HubSpotBridge } from './components/system/HubSpotBridge'
 import { AdminLayout } from './components/layout/AdminLayout'
 import * as LazyAdmin from './routes/lazyAdminPages'
 import * as LazyExtra from './routes/lazyDevAndHeavyPages'
@@ -22,7 +22,7 @@ import * as LazySP from './routes/lazySecondaryPublicPages'
 import * as LazyDrawers from './routes/lazyMatchupDrawers'
 import { consumeStoredLoginReturn, getSafeReturnPath } from './lib/loginReturn'
 import { RoutePageSkeleton } from './components/ui/RoutePageSkeleton'
-import { prefetchCommonRoutes } from './lib/routePrefetch'
+import { prefetchCommonRoutes, prefetchRoute } from './lib/routePrefetch'
 import { runWhenIdle } from './lib/runDeferred'
 
 function RouteLoadingFallback() {
@@ -88,6 +88,7 @@ function App() {
 
   useEffect(() => {
     initialize()
+    prefetchRoute(window.location.pathname)
     runWhenIdle(() => {
       prefetchCommonRoutes()
       LazyDrawers.prefetchMatchupDrawers()
@@ -105,15 +106,20 @@ function App() {
     }
   }, [])
 
-  // 로그인 상태 변경 시 알림 구독 관리
+  // 로그인 상태 변경 시 알림 구독 (초기 fetch는 지연 — auth·피드와 Supabase 락 경합 완화)
   useEffect(() => {
-    if (user?.id) {
-      fetchNotifications(user.id, { force: true })
-      subscribeRealtime(user.id)
-    } else {
+    if (!user?.id) {
+      resetNotifications()
+      return undefined
+    }
+    subscribeRealtime(user.id)
+    const tid = window.setTimeout(() => {
+      void fetchNotifications(user.id)
+    }, 1800)
+    return () => {
+      window.clearTimeout(tid)
       resetNotifications()
     }
-    return () => resetNotifications()
   }, [user?.id, fetchNotifications, subscribeRealtime, resetNotifications])
 
   useEffect(() => {
@@ -150,9 +156,9 @@ function App() {
       if (reconnectTimer) window.clearTimeout(reconnectTimer)
       reconnectTimer = window.setTimeout(() => {
         reconnectTimer = null
-        fetchNotifications(user.id, { force: true })
+        void fetchNotifications(user.id)
         homeRefreshRef.current?.()
-      }, 450)
+      }, 800)
     }
 
     const onVisible = () => {
@@ -179,15 +185,17 @@ function App() {
 
   return (
     <BrowserRouter>
+      <GoogleAnalyticsBridge />
+      <HubSpotBridge />
       <PushNotificationNavBridge />
       <PostOAuthRedirect />
       <ModerationRestrictionGate />
       <ServerMaintenanceGate>
       <Layout>
         <Routes>
-          <Route path="/"              element={<MainPage />} />
+          <Route path="/"              element={<RouteSuspense Page={LazyCore.MainPage} />} />
           <Route path="/explore"       element={<Navigate to="/feed/best" replace />} />
-          <Route path="/feed/:variant" element={<MainFeedPage />} />
+          <Route path="/feed/:variant" element={<RouteSuspense Page={LazyCore.MainFeedPage} />} />
           <Route path="/matchups" element={
             <Suspense fallback={<RouteLoadingFallback />}>
               <LazySP.HomePage refreshRef={homeRefreshRef} />
@@ -214,6 +222,11 @@ function App() {
               <LazyExtra.DevFandomMilestonePreviewPage />
             </Suspense>
           } />
+          <Route path="/dev/tendency-report" element={
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <LazyExtra.DevTendencyReportPreviewPage />
+            </Suspense>
+          } />
           <Route path="/dev/fandom-bronze-badge" element={
             <Suspense fallback={<RouteLoadingFallback />}>
               <LazyExtra.DevFandomBronzeBadgePreviewPage />
@@ -234,9 +247,10 @@ function App() {
           <Route path="/hall-of-fame" element={<RouteSuspense Page={LazySP.EventsComingSoonPage} />} />
           <Route path="/profile/:userId" element={<RouteSuspense Page={LazyRMM.PublicProfilePage} />} />
           <Route path="/mypage" element={<RouteSuspense Page={LazyRMM.MyPage} />} />
+          <Route path="/report/tendency" element={<RouteSuspense Page={LazyRMM.TendencyReportPage} />} />
           <Route path="/signup" element={<RouteSuspense Page={LazySP.SignupPage} />} />
           <Route path="/welcome" element={<RouteSuspense Page={LazySP.WelcomePage} />} />
-          <Route path="/login" element={<LoginPage />} />
+          <Route path="/login" element={<RouteSuspense Page={LazyCore.LoginPage} />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/mypage/edit" element={<RouteSuspense Page={LazyRMM.ProfileEditPage} />} />
@@ -310,16 +324,20 @@ function App() {
 
       <GlobalMatchupDrawers onCreated={() => homeRefreshRef.current?.()} />
 
-      {/* 전역 로그인 모달 */}
-      <Modal
-        isOpen={isLoginModalOpen}
-        onClose={closeLoginModal}
-        title={false}
-        className="max-w-[min(22rem,calc(100vw-2rem))] overflow-visible border border-white/70 bg-transparent shadow-2xl shadow-fuchsia-500/20"
-        bodyClassName="p-0 overflow-y-auto overflow-x-hidden"
-      >
-        <LoginModal onClose={closeLoginModal} />
-      </Modal>
+      {/* 전역 로그인 모달 — 열릴 때만 청크 로드 */}
+      {isLoginModalOpen ? (
+        <Modal
+          isOpen
+          onClose={closeLoginModal}
+          title={false}
+          className="max-w-[min(22rem,calc(100vw-2rem))] overflow-visible border border-white/70 bg-transparent shadow-2xl shadow-fuchsia-500/20"
+          bodyClassName="p-0 overflow-y-auto overflow-x-hidden"
+        >
+          <Suspense fallback={null}>
+            <LazyCore.LoginModal onClose={closeLoginModal} />
+          </Suspense>
+        </Modal>
+      ) : null}
       </ServerMaintenanceGate>
     </BrowserRouter>
   )

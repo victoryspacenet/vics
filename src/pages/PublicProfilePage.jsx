@@ -15,6 +15,7 @@ import { Avatar } from '../components/ui/Avatar'
 import { TierBadge } from '../components/ui/TierBadge'
 import { FeaturedBadgeSpan } from '../components/ui/FeaturedBadge'
 import { FandomBronzeStarBadge } from '../components/fandom/FandomBronzeStarBadge'
+import { FoundingMemberBadge } from '../components/profile/FoundingMemberBadge'
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -141,7 +142,8 @@ export function PublicProfilePage() {
             <div className="min-w-0 flex-1 pt-0.5">
               <div className="flex flex-wrap items-center gap-1.5">
                 <h1 className="truncate text-lg font-black text-gray-900">{nickname}</h1>
-                <FeaturedBadgeSpan badgeId={profile.featured_badge} />
+                <FoundingMemberBadge profile={profile} />
+                <FeaturedBadgeSpan profile={profile} rankInfo={rankInfo} />
                 <FandomBronzeStarBadge tierId={profile.fandom_tier} />
               </div>
               {unlocked ? (

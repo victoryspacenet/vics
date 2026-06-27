@@ -212,7 +212,7 @@ export async function probeServerHealth({ light = false } = {}) {
     return true
   }
   const ctrl = new AbortController()
-  const tid = window.setTimeout(() => ctrl.abort(), light ? 8000 : 10000)
+  const tid = window.setTimeout(() => ctrl.abort(), light ? 3500 : 8000)
   try {
     if (!light) {
       const { error } = await supabase.from('admin_settings').select('key').limit(1)
@@ -222,7 +222,7 @@ export async function probeServerHealth({ light = false } = {}) {
       }
     }
     const res = await fetch(resolveProbeUrl(), {
-      method: 'GET',
+      method: light ? 'HEAD' : 'GET',
       cache: 'no-store',
       credentials: 'omit',
       signal: ctrl.signal,

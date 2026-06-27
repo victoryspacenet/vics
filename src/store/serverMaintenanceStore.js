@@ -146,5 +146,6 @@ export function selectServerMaintenanceActive(state) {
   if (!state.ready) return false
   if (state.config.enabled) return true
   if (!readNavigatorOnline()) return false
-  return !state.serverReachable
+  // 명시적 점검 모드가 아닐 때 헬스 프로브 실패만으로 전체 앱을 막지 않음 (배너·재시도로 처리)
+  return false
 }

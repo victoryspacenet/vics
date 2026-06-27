@@ -2,7 +2,7 @@ import { supabase } from './supabase'
 
 /** 매치업 embed 시 작성자 티어 판정에 필요한 profiles 컬럼 */
 export const MATCHUP_CREATOR_PROFILE_FIELDS =
-  'id, nickname, avatar_url, points, featured_badge, fandom_tier, total_matchups, creator_wins, vote_total, vote_hits, hit_rate'
+  'id, nickname, avatar_url, points, featured_badge, fandom_tier, founding_member_number, total_matchups, creator_wins, vote_total, vote_hits, hit_rate'
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -148,14 +148,23 @@ export async function enrichProfileRowsWithTierSnapshot(rows) {
   })
 }
 
-/** 각 매치업에 `_creatorRankInfo` 부착 (작성자 user_id 기준) */
+/** 각 매치업에 `_creatorRankInfo`·`_rightCreatorRankInfo` 부착 */
 export async function enrichMatchupsWithCreatorRankInfo(matchups) {
   if (!matchups?.length) return matchups
-  const ids = matchups.map((m) => m.user_id || m.profiles?.id).filter(Boolean)
+  const ids = [
+    ...new Set(
+      matchups.flatMap((m) => [
+        m.user_id || m.profiles?.id,
+        m.right_user_id || m.right_profiles?.id,
+      ].filter(Boolean)),
+    ),
+  ]
   const map = await fetchCreatorRankMapForIds(ids)
   return matchups.map((m) => {
     const pid = m.user_id || m.profiles?.id
+    const rid = m.right_user_id || m.right_profiles?.id
     const rankInfo = pid && map[pid] ? map[pid] : { ...EMPTY_TIER_RANK_INFO }
-    return { ...m, _creatorRankInfo: rankInfo }
+    const rightRankInfo = rid && map[rid] ? map[rid] : { ...EMPTY_TIER_RANK_INFO }
+    return { ...m, _creatorRankInfo: rankInfo, _rightCreatorRankInfo: rightRankInfo }
   })
 }
