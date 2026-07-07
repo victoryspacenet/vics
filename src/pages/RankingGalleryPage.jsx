@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Trophy, Download, Share2, Trash2, X, SortDesc, Crown, Sparkles } from 'lucide-react'
+import { ArrowLeft, Trophy, Download, Share2, Trash2, X, SortDesc, Crown, Sparkles, Loader2 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
-import { loadGallery, deleteFromGallery, markAllSeen, getBestCard } from '../lib/galleryUtils'
-import { drawCard, getPercentile, getTierInfo, formatSavedDate, CARD_W, CARD_H } from '../lib/cardDraw'
-import { safeMediaUrl } from '../lib/sanitize'
+import { fetchGallery, deleteFromGallery, markAllSeen, getBestCard, getGalleryDrawOpts, RANKING_GALLERY_UPDATED } from '../lib/galleryUtils'
+import { drawCard, getPercentile, getMatchupTierDisplay, formatSavedDate, CARD_W, CARD_H } from '../lib/cardDraw'
+import { resolveGalleryCardImageUrl } from '../lib/sanitize'
+import { shareRankingGallery } from '../lib/socialShare'
 import { cn } from '../lib/utils'
 
 const PAGE_BG =
@@ -20,10 +21,53 @@ function periodLabel(p) {
   return '전체'
 }
 
+// ── 갤러리 카드 미리보기 (data URL 썸네일 · 캔버스 폴백) ─────────────────
+function GalleryCardPreview({ card, className, style, imgClassName }) {
+  const canvasRef = useRef(null)
+  const imageUrl = resolveGalleryCardImageUrl(card?.thumbnail)
+  const canDraw = Boolean(getGalleryDrawOpts(card))
+
+  useEffect(() => {
+    if (imageUrl || !canvasRef.current || !canDraw) return
+    const opts = getGalleryDrawOpts(card)
+    if (!opts) return
+    drawCard(canvasRef.current, opts)
+  }, [imageUrl, card, canDraw])
+
+  if (imageUrl) {
+    return (
+      <img
+        src={imageUrl}
+        alt={card?.rank ? `${card.rank}위 랭킹 카드` : '랭킹 카드'}
+        className={imgClassName}
+        style={style}
+      />
+    )
+  }
+
+  if (!canDraw) {
+    return (
+      <div className={className} style={style}>
+        <span className="text-3xl">🏆</span>
+      </div>
+    )
+  }
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={180}
+      height={320}
+      className={className}
+      style={{ width: '100%', height: '100%', display: 'block', ...style }}
+    />
+  )
+}
+
 // ── 미니 카드 캔버스 썸네일 ──────────────────────────────────────────
 function CardThumbnail({ card, onClick }) {
-  const imgRef = useRef(null)
-  const tier = getTierInfo(card.rank)
+  const tier = getMatchupTierDisplay(card.matchupTierId)
+  const imageUrl = resolveGalleryCardImageUrl(card.thumbnail)
 
   return (
     <button
@@ -42,20 +86,23 @@ function CardThumbnail({ card, onClick }) {
       onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.02)' }}
       onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)' }}
     >
-      {/* 썸네일 이미지 */}
-      {card.thumbnail
-        ? <img ref={imgRef} src={safeMediaUrl(card.thumbnail)} alt={`${card.rank}위 카드`}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-        : <div style={{
-            width: '100%', height: '100%',
-            background: `linear-gradient(135deg, #0f0f20, #1a1a35)`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexDirection: 'column', gap: 6,
-          }}>
-            <span style={{ fontSize: 32 }}>{tier.emoji}</span>
-            <p style={{ color: tier.color, fontWeight: 900, fontSize: 13, margin: 0 }}>{tier.name}</p>
-          </div>
-      }
+      {imageUrl || getGalleryDrawOpts(card) ? (
+        <GalleryCardPreview
+          card={card}
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          imgClassName="h-full w-full object-cover"
+        />
+      ) : (
+        <div style={{
+          width: '100%', height: '100%',
+          background: 'linear-gradient(135deg, #0f0f20, #1a1a35)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexDirection: 'column', gap: 6,
+        }}>
+          <span style={{ fontSize: 32 }}>{tier.emoji}</span>
+          <p style={{ color: tier.color, fontWeight: 900, fontSize: 13, margin: 0 }}>{tier.name}</p>
+        </div>
+      )}
 
       {/* NEW 배지 */}
       {card.isNew && (
@@ -90,7 +137,8 @@ function CardDetailModal({ card, onClose, onDelete }) {
   const avatarRef  = useRef(null)
   const [showDeletePopup, setShowDeletePopup] = useState(false)
   const [saving,   setSaving]     = useState(false)
-  const tier = getTierInfo(card.rank)
+  const [sharing,  setSharing]    = useState(false)
+  const tier = getMatchupTierDisplay(card.matchupTierId)
 
   useEffect(() => {
     const fn = (e) => e.key === 'Escape' && onClose()
@@ -119,24 +167,21 @@ function CardDetailModal({ card, onClose, onDelete }) {
     }
   }
 
-  // ── 인스타 공유 ──────────────────────────────────────────────────
+  // ── 공유 (링크 카드 — URL 복사/공유, 카카오 SDK 미사용) ─────────────
   const handleShare = async () => {
-    const safeUrl = safeMediaUrl(card.thumbnail)
-    if (safeUrl) {
-      const res  = await fetch(safeUrl)
-      const blob = await res.blob()
-      const file = new File([blob], 'vics_ranking.png', { type: 'image/jpeg' })
-      if (navigator.share && navigator.canShare?.({ files: [file] })) {
-        try { await navigator.share({ title: 'VICS 랭킹 카드', files: [file] }) } catch (_) {}
-        return
-      }
+    if (sharing) return
+    setSharing(true)
+    try {
+      await shareRankingGallery({
+        nickname: card.nickname,
+        rank: card.rank,
+        tierName: tier.name,
+        cardId: card.id,
+        showToast,
+      })
+    } finally {
+      setSharing(false)
     }
-    // fallback
-    const link = document.createElement('a')
-    link.download = `VICS_ranking.jpg`
-    link.href = safeUrl || ''
-    link.click()
-    alert('이미지를 저장 후 인스타그램 스토리에서 공유해보세요 📸')
   }
 
   return (
@@ -199,19 +244,11 @@ function CardDetailModal({ card, onClose, onDelete }) {
                   boxShadow: `0 0 0 3px ${tier.color}55, 0 16px 40px -8px ${tier.color}44`,
                 }}
               >
-                {card.thumbnail ? (
-                  <img
-                    src={safeMediaUrl(card.thumbnail)}
-                    alt="카드"
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <div
-                    className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-900 to-fuchsia-950"
-                  >
-                    <span className="text-4xl">{tier.emoji}</span>
-                  </div>
-                )}
+                <GalleryCardPreview
+                  card={card}
+                  className="h-full w-full"
+                  imgClassName="h-full w-full object-cover"
+                />
               </div>
             </div>
 
@@ -249,11 +286,15 @@ function CardDetailModal({ card, onClose, onDelete }) {
                 </button>
                 <button
                   type="button"
-                  onClick={handleShare}
-                  className="flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-r from-violet-500 via-fuchsia-500 to-pink-500 py-3 text-[12px] font-black text-white shadow-md shadow-fuchsia-400/35 ring-1 ring-white/40 transition hover:scale-[1.02] active:scale-[0.98]"
+                  onClick={() => void handleShare()}
+                  disabled={sharing}
+                  className={cn(
+                    'flex flex-1 items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-r from-violet-500 via-fuchsia-500 to-pink-500 py-3 text-[12px] font-black text-white shadow-md shadow-fuchsia-400/35 ring-1 ring-white/40 transition hover:scale-[1.02] active:scale-[0.98]',
+                    sharing && 'cursor-wait opacity-70',
+                  )}
                 >
                   <Share2 size={14} strokeWidth={2.25} />
-                  공유하기
+                  {sharing ? '준비 중…' : '공유하기'}
                 </button>
               </div>
 
@@ -311,6 +352,7 @@ function CardDetailModal({ card, onClose, onDelete }) {
           </div>
         </div>
       )}
+
     </>
   )
 }
@@ -321,28 +363,46 @@ export function RankingGalleryPage() {
   const { user } = useAuthStore()
 
   const [cards,    setCards]    = useState([])
+  const [loading,  setLoading]  = useState(true)
   const [sortBy,   setSortBy]   = useState('date')   // 'date' | 'tier'
   const [selected, setSelected] = useState(null)      // 상세 모달
   const [galleryPage, setGalleryPage] = useState(0)
 
   const GALLERY_PAGE_SIZE = 10
 
-  const loadCards = useCallback(() => {
-    if (!user?.id) return
-    const data = loadGallery(user.id)
-    setCards(data)
+  const loadCards = useCallback(async () => {
+    if (!user?.id) {
+      setCards([])
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    try {
+      const data = await fetchGallery(user.id)
+      setCards(data)
+    } finally {
+      setLoading(false)
+    }
   }, [user?.id])
 
   useEffect(() => {
-    loadCards()
-    // 조회 시 NEW 플래그 초기화
-    if (user?.id) setTimeout(() => markAllSeen(user.id), 1500)
+    void loadCards()
+    if (!user?.id) return undefined
+    const t = window.setTimeout(() => void markAllSeen(user.id), 1500)
+    const onUpdated = () => void loadCards()
+    window.addEventListener(RANKING_GALLERY_UPDATED, onUpdated)
+    return () => {
+      window.clearTimeout(t)
+      window.removeEventListener(RANKING_GALLERY_UPDATED, onUpdated)
+    }
   }, [loadCards, user?.id])
 
-  const handleDelete = (cardId) => {
+  const handleDelete = async (cardId) => {
     if (!user?.id) return
-    deleteFromGallery(user.id, cardId)
-    setCards(prev => prev.filter(c => c.id !== cardId))
+    const res = await deleteFromGallery(user.id, cardId)
+    if (res.ok) {
+      setCards((prev) => prev.filter((c) => c.id !== cardId))
+    }
   }
 
   const sorted = [...cards].sort((a, b) => {
@@ -354,7 +414,7 @@ export function RankingGalleryPage() {
   const pagedCards = sorted.slice(galleryPage * GALLERY_PAGE_SIZE, (galleryPage + 1) * GALLERY_PAGE_SIZE)
 
   const best = getBestCard(cards)
-  const bestTier = best ? getTierInfo(best.rank) : null
+  const bestTier = best ? getMatchupTierDisplay(best.matchupTierId) : null
 
   if (!user) {
     return (
@@ -423,12 +483,11 @@ export function RankingGalleryPage() {
                 <div className="flex items-center gap-4">
                   {/* 썸네일 */}
                   <div className="w-14 shrink-0 rounded-xl overflow-hidden shadow-md" style={{ aspectRatio: '9/16', boxShadow: '0 0 0 2px rgba(255,255,255,0.25)' }}>
-                    {best.thumbnail
-                      ? <img src={safeMediaUrl(best.thumbnail)} alt="" className="w-full h-full object-cover" />
-                      : <div className="w-full h-full bg-black/30 flex items-center justify-center">
-                          <span className="text-xl">{bestTier.emoji}</span>
-                        </div>
-                    }
+                    <GalleryCardPreview
+                      card={best}
+                      className="h-full w-full"
+                      imgClassName="h-full w-full object-cover"
+                    />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
@@ -488,7 +547,14 @@ export function RankingGalleryPage() {
               </div>
 
               {/* 빈 상태 */}
-              {cards.length === 0 && (
+              {loading && (
+                <div className="flex flex-col items-center rounded-2xl border border-pink-100/50 bg-white/60 px-6 py-12 text-center">
+                  <Loader2 className="mb-3 size-8 animate-spin text-fuchsia-500" />
+                  <p className="text-sm font-semibold text-slate-500">저장된 카드 불러오는 중…</p>
+                </div>
+              )}
+
+              {!loading && cards.length === 0 && (
                 <div className="flex flex-col items-center rounded-2xl border-2 border-dashed border-fuchsia-200/50 bg-fuchsia-50/30 px-6 py-12 text-center">
                   <p className="mb-3 text-5xl leading-none">🏆</p>
                   <p className="text-base font-black text-slate-700">아직 저장된 카드가 없어요</p>
@@ -507,7 +573,7 @@ export function RankingGalleryPage() {
               )}
 
               {/* 2컬럼 그리드 */}
-              {pagedCards.length > 0 && (
+              {!loading && pagedCards.length > 0 && (
                 <div className="grid grid-cols-2 gap-3">
                   {pagedCards.map((card, i) => (
                     <div key={card.id} style={{ animation: `card-in 0.3s ${i * 0.05}s ease both` }}>

@@ -9,11 +9,16 @@ const VOTES_SELECT = `side, matchup_id, created_at, matchups(${MY_PAGE_MATCHUP_C
  * @param {string} userId
  */
 export async function fetchMyPageListsBundle(userId) {
-  const [createdRes, votesRes, tierRes] = await Promise.all([
+  const [createdRes, challengedRes, votesRes, tierRes] = await Promise.all([
     supabase
       .from('matchups')
       .select(MY_PAGE_MATCHUP_CARD_COLUMNS)
       .eq('user_id', userId)
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('matchups')
+      .select(MY_PAGE_MATCHUP_CARD_COLUMNS)
+      .eq('right_user_id', userId)
       .order('created_at', { ascending: false }),
     supabase
       .from('votes')
@@ -24,6 +29,7 @@ export async function fetchMyPageListsBundle(userId) {
   ])
 
   if (createdRes.error) throw createdRes.error
+  if (challengedRes.error) throw challengedRes.error
   if (votesRes.error) throw votesRes.error
   if (tierRes.error) throw tierRes.error
 
@@ -33,6 +39,7 @@ export async function fetchMyPageListsBundle(userId) {
 
   return {
     createdMatchups: createdRes.data || [],
+    challengedMatchups: challengedRes.data || [],
     votedMatchups: votesRes.data || [],
     stats: {
       rank,

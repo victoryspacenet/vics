@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import {
   computeTendencyReport,
+  mapVoteTendencyLabelsFromVoteRows,
   TENDENCY_REPORT_VOTE_THRESHOLD,
 } from './tendencyReportAnalysis'
 
@@ -8,6 +9,32 @@ export { TENDENCY_REPORT_VOTE_THRESHOLD, TENDENCY_TYPES, computeTendencyReport }
 
 export const TENDENCY_VOTE_CAST = 'vics:tendency-vote-cast'
 export const TENDENCY_REPORT_ACKED = 'vics:tendency-report:acked'
+export const TENDENCY_REPORT_POPUP_SEEN = 'vics:tendency-report:popup-seen'
+
+/** 탭 세션 동안 팝업 재표시 방지 (Supabase 조회 전·저장 실패 완충) */
+const tendencyPopupSeenByUser = new Map()
+
+function rememberPopupSeen(userId) {
+  if (userId) tendencyPopupSeenByUser.set(userId, true)
+}
+
+function hasPopupSeenMemory(userId) {
+  return Boolean(userId && tendencyPopupSeenByUser.get(userId))
+}
+
+async function fetchPopupSeenFromTable(userId) {
+  if (!userId) return false
+  const { data, error } = await supabase
+    .from('user_tendency_report_popup_seen')
+    .select('user_id')
+    .eq('user_id', userId)
+    .maybeSingle()
+  if (error) {
+    if (import.meta.env.DEV) console.warn('[tendencyReport] popup seen table:', error.message)
+    return false
+  }
+  return Boolean(data?.user_id)
+}
 
 const VOTES_FOR_REPORT_SELECT = `
   side,
@@ -40,9 +67,11 @@ function parseRpcJson(raw) {
 }
 
 /**
- * @returns {Promise<{ voteCount: number, eligible: boolean, acknowledged: boolean, snapshot?: object, tendencyType?: string }>}
+ * @returns {Promise<{ voteCount: number, eligible: boolean, acknowledged: boolean, popupSeen: boolean, snapshot?: object, tendencyType?: string }>}
  */
 export async function fetchTendencyReportStatus() {
+  const { data: { user } } = await supabase.auth.getUser()
+
   const { data: raw, error } = await supabase.rpc('get_user_tendency_report_status')
   if (error) {
     if (import.meta.env.DEV) console.warn('[tendencyReport] status rpc:', error.message)
@@ -50,10 +79,21 @@ export async function fetchTendencyReportStatus() {
   }
   const data = parseRpcJson(raw)
   if (!data?.ok) return fetchTendencyReportStatusFallback()
+
+  let popupSeen = Boolean(data.popup_seen)
+  if (data.popup_seen === undefined && user?.id) {
+    popupSeen = await fetchPopupSeenFromTable(user.id)
+  }
+  if (user?.id && (popupSeen || hasPopupSeenMemory(user.id))) {
+    popupSeen = true
+    rememberPopupSeen(user.id)
+  }
+
   return {
     voteCount: Number(data.vote_count || 0),
     eligible: Boolean(data.eligible),
     acknowledged: Boolean(data.acknowledged),
+    popupSeen,
     tendencyType: data.tendency_type || null,
     snapshot: data.report_snapshot || null,
   }
@@ -62,28 +102,92 @@ export async function fetchTendencyReportStatus() {
 async function fetchTendencyReportStatusFallback() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user?.id) {
-    return { voteCount: 0, eligible: false, acknowledged: false }
+    return { voteCount: 0, eligible: false, acknowledged: false, popupSeen: false }
   }
 
-  const [countRes, ackRes] = await Promise.all([
+  const [countRes, ackRes, popupRes] = await Promise.all([
     supabase.from('votes').select('id', { count: 'exact', head: true }).eq('user_id', user.id),
     supabase
       .from('user_tendency_report_ack')
       .select('tendency_type, report_snapshot')
       .eq('user_id', user.id)
       .maybeSingle(),
+    supabase
+      .from('user_tendency_report_popup_seen')
+      .select('user_id')
+      .eq('user_id', user.id)
+      .maybeSingle(),
   ])
 
   const voteCount = countRes.count ?? 0
   const ack = ackRes.data
+  const popupSeen = Boolean(popupRes.data) || Boolean(ack) || hasPopupSeenMemory(user.id)
+  if (popupSeen) rememberPopupSeen(user.id)
 
   return {
     voteCount,
     eligible: voteCount >= TENDENCY_REPORT_VOTE_THRESHOLD,
     acknowledged: Boolean(ack),
+    popupSeen,
     tendencyType: ack?.tendency_type || null,
     snapshot: ack?.report_snapshot || null,
   }
+}
+
+/**
+ * 잠금 해제 팝업 표시 완료 — 사용자당 1회
+ * @returns {Promise<{ ok: boolean, error?: string }>}
+ */
+export async function markTendencyReportPopupSeen() {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user?.id) return { ok: false, error: '로그인이 필요해요' }
+
+  const { data: raw, error } = await supabase.rpc('mark_tendency_report_popup_seen')
+  if (error) {
+    if (import.meta.env.DEV) console.warn('[tendencyReport] popup seen rpc:', error.message)
+    return markTendencyReportPopupSeenFallback()
+  }
+  const data = parseRpcJson(raw)
+  if (data?.ok === false) {
+    return { ok: false, error: typeof data.error === 'string' ? data.error : '저장에 실패했어요' }
+  }
+  rememberPopupSeen(user.id)
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(TENDENCY_REPORT_POPUP_SEEN))
+  }
+  return { ok: true }
+}
+
+async function markTendencyReportPopupSeenFallback() {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user?.id) return { ok: false, error: '로그인이 필요해요' }
+
+  const { count } = await supabase
+    .from('votes')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+
+  if ((count ?? 0) < TENDENCY_REPORT_VOTE_THRESHOLD) {
+    return { ok: false, error: '아직 10회 투표에 도달하지 않았어요' }
+  }
+
+  const { error } = await supabase.rpc('mark_tendency_report_popup_seen')
+  if (!error) {
+    rememberPopupSeen(user.id)
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(TENDENCY_REPORT_POPUP_SEEN))
+    }
+    return { ok: true }
+  }
+
+  const tableRes = await supabase
+    .from('user_tendency_report_popup_seen')
+    .upsert({ user_id: user.id }, { onConflict: 'user_id', ignoreDuplicates: true })
+
+  if (tableRes.error) return { ok: false, error: tableRes.error.message || '저장에 실패했어요' }
+
+  rememberPopupSeen(user.id)
+  return { ok: true }
 }
 
 /**
@@ -106,6 +210,33 @@ export async function buildTendencyReportForUser(userId, nickname) {
 
   const report = computeTendencyReport(data || [], { nickname })
   return { report, error: null }
+}
+
+/**
+ * 관리자 유저 상세 — 최근 투표 패턴 기반 성향 유형
+ * @param {string} userId
+ */
+export async function fetchVoteTendencySummaryForUser(userId) {
+  if (!userId) return {}
+
+  try {
+    const { data, error } = await supabase
+      .from('votes')
+      .select(VOTES_FOR_REPORT_SELECT)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(TENDENCY_REPORT_VOTE_THRESHOLD)
+
+    if (error) throw error
+
+    const rows = (data || []).slice().reverse()
+    if (!rows.length) return {}
+
+    return mapVoteTendencyLabelsFromVoteRows(rows)
+  } catch (e) {
+    console.warn('[tendencyReport] fetchVoteTendencySummaryForUser:', e?.message || e)
+    return {}
+  }
 }
 
 /**

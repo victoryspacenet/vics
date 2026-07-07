@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Helmet } from 'react-helmet-async'
+import { toPng } from 'html-to-image'
 import {
   ArrowLeft,
   BarChart3,
@@ -13,7 +16,8 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
-import { cn, copyToClipboard } from '../lib/utils'
+import { cn } from '../lib/utils'
+import { DEFAULT_OG_IMAGE_PATH, resolvePublicShareUrl } from '../lib/socialShare'
 import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../lib/layoutShellClasses'
 import {
   ackTendencyReport,
@@ -22,12 +26,19 @@ import {
   TENDENCY_REPORT_VOTE_THRESHOLD,
   TENDENCY_TYPES,
 } from '../lib/tendencyReport'
-import { stripReportMarkdown } from '../lib/tendencyReportAnalysis'
+import { stripReportMarkdown, normalizeCategoryBreakdown } from '../lib/tendencyReportAnalysis'
 import {
   buildDemoTendencyReport,
   parseDemoTendencyParam,
   DEMO_TENDENCY_LABELS,
 } from '../lib/tendencyReportDemo'
+import {
+  fetchSharedTendencyReport,
+  getTendencyReportSharePageUrl,
+  publishTendencyReportShare,
+  readTendencyShareToken,
+} from '../lib/tendencyReportShare'
+import { TendencyReportShareCard } from '../components/tendency/TendencyReportShareCard'
 
 const PAGE_BG = 'min-h-screen bg-gradient-to-br from-[#0f0c1d] via-[#1a1035] to-[#0f172a]'
 
@@ -48,33 +59,71 @@ function StatBar({ label, value, colorClass }) {
   )
 }
 
-function buildShareText(report) {
-  const meta = TENDENCY_TYPES[report.tendencyType]
-  return `나의 Vics 성향 리포트 📊\n${meta?.emoji || ''} ${meta?.title || ''} — ${report.headline}\n#VictorySpace #Vics성향리포트`
-}
-
 export function TendencyReportPage() {
   const navigate = useNavigate()
+  const { shareId: shareIdParam } = useParams()
   const [searchParams] = useSearchParams()
+  const shareToken = useMemo(
+    () => readTendencyShareToken({ shareIdParam, searchParams }),
+    [shareIdParam, searchParams],
+  )
   const isDevDemo = import.meta.env.DEV && searchParams.get('demo') === '1'
   const demoKind = searchParams.get('type') || 'trendsetter'
   const demoNicknameParam = searchParams.get('nickname')
   const { user, profile } = useAuthStore()
   const { openLoginModal, showToast } = useUIStore()
+  const shareCardRef = useRef(null)
 
   const [loading, setLoading] = useState(true)
   const [report, setReport] = useState(null)
   const [voteCount, setVoteCount] = useState(0)
   const [acknowledged, setAcknowledged] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [sharing, setSharing] = useState(false)
+  const [sharePreviewUrl, setSharePreviewUrl] = useState('')
   const [error, setError] = useState(null)
+
+  const isSharedView = Boolean(shareToken)
+
+  useEffect(() => {
+    const legacyShare = searchParams.get('share')?.trim()
+    if (legacyShare && !shareIdParam) {
+      navigate(`/report/tendency/s/${encodeURIComponent(legacyShare)}`, { replace: true })
+    }
+  }, [navigate, searchParams, shareIdParam])
 
   const meta = useMemo(
     () => (report ? TENDENCY_TYPES[report.tendencyType] : null),
     [report],
   )
 
+  const displayCategoryBreakdown = useMemo(
+    () => normalizeCategoryBreakdown(report?.categoryBreakdown, report?.voteCount),
+    [report?.categoryBreakdown, report?.voteCount],
+  )
+
   useEffect(() => {
+    if (shareToken) {
+      let cancelled = false
+      setLoading(true)
+      setError(null)
+      void fetchSharedTendencyReport(shareToken).then((res) => {
+        if (cancelled) return
+        if (!res.ok || !res.report) {
+          setReport(null)
+          setError(res.error || '공유된 리포트를 찾을 수 없어요')
+        } else {
+          setReport(res.report)
+          setVoteCount(res.report.voteCount || TENDENCY_REPORT_VOTE_THRESHOLD)
+          setAcknowledged(true)
+        }
+        setLoading(false)
+      })
+      return () => {
+        cancelled = true
+      }
+    }
+
     if (isDevDemo) {
       if (demoKind === 'progress') {
         setVoteCount(8)
@@ -144,7 +193,7 @@ export function TendencyReportPage() {
     return () => {
       cancelled = true
     }
-  }, [user?.id, profile?.nickname, isDevDemo, demoKind, demoNicknameParam])
+  }, [user?.id, profile?.nickname, isDevDemo, demoKind, demoNicknameParam, shareToken])
 
   const handleConfirm = useCallback(async () => {
     if (!report || saving) return
@@ -172,14 +221,103 @@ export function TendencyReportPage() {
     }
   }, [acknowledged, isDevDemo, navigate, report, saving, showToast])
 
-  const handleShare = useCallback(async () => {
-    if (!report) return
-    const text = buildShareText(report)
-    const ok = await copyToClipboard(text)
-    showToast(ok ? '공유 문구가 복사됐어요!' : '복사에 실패했어요', ok ? 'success' : 'error')
-  }, [report, showToast])
+  const shareUrl = useMemo(
+    () => (sharePreviewUrl || (shareToken ? getTendencyReportSharePageUrl(shareToken) : '')),
+    [sharePreviewUrl, shareToken],
+  )
+  const shareOgImage = useMemo(
+    () => (typeof window !== 'undefined' ? resolvePublicShareUrl(`${window.location.origin}${DEFAULT_OG_IMAGE_PATH}`) : ''),
+    [],
+  )
 
-  if (!user && !isDevDemo) {
+  const handleShare = useCallback(async () => {
+    if (!report || sharing) return
+    setSharing(true)
+    try {
+      let publicUrl = sharePreviewUrl
+
+      if (!publicUrl) {
+        if (isDevDemo) {
+          const demoParams = new URLSearchParams({
+            demo: '1',
+            type: report.tendencyType || 'unique',
+          })
+          if (report.nickname) demoParams.set('nickname', report.nickname)
+          publicUrl = resolvePublicShareUrl(
+            `${window.location.origin}/report/tendency?${demoParams.toString()}`,
+          )
+        } else {
+          const pub = await publishTendencyReportShare(report)
+          if (!pub.ok) {
+            showToast(pub.error || '공유 링크를 만들지 못했어요', 'error')
+            return
+          }
+          publicUrl = pub.shareUrl
+          setSharePreviewUrl(publicUrl)
+        }
+      }
+
+      flushSync(() => {
+        setSharePreviewUrl(publicUrl)
+      })
+      await new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve))
+      })
+
+      let shareFile = null
+      if (shareCardRef.current) {
+        try {
+          const dataUrl = await toPng(shareCardRef.current, {
+            pixelRatio: 2,
+            cacheBust: true,
+            skipFonts: true,
+          })
+          const blob = await (await fetch(dataUrl)).blob()
+          shareFile = new File([blob], 'vics-tendency-report.png', { type: 'image/png' })
+        } catch (e) {
+          console.warn('[TendencyReportPage] share card image:', e)
+        }
+      }
+
+      if (!shareFile) {
+        showToast('공유 카드 이미지를 만들지 못했어요', 'error')
+        return
+      }
+
+      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+        try {
+          const payload = { files: [shareFile] }
+          if (!navigator.canShare || navigator.canShare(payload)) {
+            await navigator.share(payload)
+            showToast('공유 카드 이미지가 준비됐어요!', 'success')
+            return
+          }
+        } catch (e) {
+          if (e?.name === 'AbortError') return
+        }
+      }
+
+      const objectUrl = URL.createObjectURL(shareFile)
+      try {
+        const anchor = document.createElement('a')
+        anchor.href = objectUrl
+        anchor.download = shareFile.name
+        anchor.rel = 'noopener'
+        document.body.appendChild(anchor)
+        anchor.click()
+        anchor.remove()
+        showToast('공유 카드 이미지가 저장됐어요. 카카오톡에 보내주세요', 'success')
+      } finally {
+        URL.revokeObjectURL(objectUrl)
+      }
+    } catch {
+      showToast('공유에 실패했어요', 'error')
+    } finally {
+      setSharing(false)
+    }
+  }, [isDevDemo, report, sharePreviewUrl, sharing, showToast])
+
+  if (!user && !isDevDemo && !isSharedView) {
     return (
       <div className={cn(PAGE_BG, 'flex flex-col items-center justify-center px-6 py-20 text-center')}>
         <Sparkles className="size-10 text-violet-400 mb-4" />
@@ -198,6 +336,17 @@ export function TendencyReportPage() {
 
   return (
     <div className={PAGE_BG}>
+      <Helmet>
+        <title>Vics 성향 리포트</title>
+        <meta name="description" content="10회 투표 후 열리는 나만의 Vics 투표 성향 리포트" />
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content="Vics 성향 리포트" />
+        <meta property="og:description" content={isSharedView ? '친구가 공유한 Vics 투표 성향 리포트' : '10회 투표 후 열리는 나만의 Vics 투표 성향 리포트'} />
+        {shareUrl ? <meta property="og:url" content={shareUrl} /> : null}
+        {shareOgImage ? <meta property="og:image" content={shareOgImage} /> : null}
+        <meta name="twitter:card" content="summary_large_image" />
+        {shareUrl ? <meta name="twitter:url" content={shareUrl} /> : null}
+      </Helmet>
       <div className={cn('mx-auto w-full min-w-0 px-4 pb-24 pt-4', LAYOUT_CONTENT_MAX_WIDTH_CLASS)}>
         {/* 헤더 */}
         <div className="mb-6 flex items-center gap-3">
@@ -215,14 +364,15 @@ export function TendencyReportPage() {
             </p>
             <h1 className="truncate text-lg font-black text-white">성향 리포트</h1>
           </div>
-          {report && (
+          {report && !isSharedView && (
             <button
               type="button"
               onClick={() => void handleShare()}
-              className="flex size-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-violet-200 hover:bg-white/10 transition-colors"
+              disabled={sharing}
+              className="flex size-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-violet-200 hover:bg-white/10 transition-colors disabled:opacity-50"
               aria-label="공유"
             >
-              <Share2 size={18} />
+              {sharing ? <Loader2 size={18} className="animate-spin" /> : <Share2 size={18} />}
             </button>
           )}
         </div>
@@ -250,6 +400,11 @@ export function TendencyReportPage() {
 
         {!loading && report && meta && (
           <div className="space-y-5">
+            {isSharedView && (
+              <p className="rounded-xl border border-cyan-400/25 bg-cyan-500/10 px-3 py-2 text-center text-xs font-bold text-cyan-100/90">
+                친구가 공유한 성향 리포트예요 · 로그인 없이 볼 수 있어요
+              </p>
+            )}
             {isDevDemo && (
               <p className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-center text-xs font-bold text-amber-200/90">
                 개발 미리보기 · {DEMO_TENDENCY_LABELS[report.tendencyType] || report.tendencyType} 샘플
@@ -331,14 +486,14 @@ export function TendencyReportPage() {
             </div>
 
             {/* 카테고리 */}
-            {report.categoryBreakdown?.length > 0 && (
+            {displayCategoryBreakdown.length > 0 && (
               <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm">
                 <div className="mb-4 flex items-center gap-2 text-sm font-black text-white">
                   <Users size={16} className="text-fuchsia-400" />
                   관심 카테고리
                 </div>
                 <div className="space-y-2.5">
-                  {report.categoryBreakdown.slice(0, 5).map((c) => (
+                  {displayCategoryBreakdown.slice(0, 5).map((c) => (
                     <div key={c.id} className="flex items-center gap-3">
                       <span className="text-lg">{c.emoji}</span>
                       <div className="min-w-0 flex-1">
@@ -385,26 +540,39 @@ export function TendencyReportPage() {
               </div>
             )}
 
-            {/* CTA */}
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => void handleConfirm()}
-              className={cn(
-                'w-full rounded-2xl border border-violet-400/40 bg-gradient-to-r from-violet-600 via-fuchsia-600 to-cyan-600 py-4 text-sm font-black text-white shadow-lg shadow-violet-600/25 transition hover:brightness-110 disabled:opacity-60',
-              )}
-            >
-              {saving ? '저장 중…' : acknowledged ? '마이페이지로' : '리포트 확인 완료'}
-            </button>
+            {isSharedView ? (
+              <Link
+                to="/matchups"
+                className="block w-full rounded-2xl border border-violet-400/40 bg-gradient-to-r from-violet-600 via-fuchsia-600 to-cyan-600 py-4 text-center text-sm font-black text-white shadow-lg shadow-violet-600/25 transition hover:brightness-110"
+              >
+                나도 매치업 투표하고 리포트 받기
+              </Link>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => void handleConfirm()}
+                  className={cn(
+                    'w-full rounded-2xl border border-violet-400/40 bg-gradient-to-r from-violet-600 via-fuchsia-600 to-cyan-600 py-4 text-sm font-black text-white shadow-lg shadow-violet-600/25 transition hover:brightness-110 disabled:opacity-60',
+                  )}
+                >
+                  {saving ? '저장 중…' : acknowledged ? '마이페이지로' : '리포트 확인 완료'}
+                </button>
 
-            {!acknowledged && (
-              <p className="text-center text-[10px] font-medium text-slate-500">
-                확인 완료 후 마이페이지에서 다시 볼 수 있어요 · 투표 {voteCount}회 달성 이벤트
-              </p>
+                {!acknowledged && (
+                  <p className="text-center text-[10px] font-medium text-slate-500">
+                    확인 완료 후 마이페이지에서 다시 볼 수 있어요 · 투표 {TENDENCY_REPORT_VOTE_THRESHOLD}회 달성 이벤트
+                  </p>
+                )}
+              </>
             )}
           </div>
         )}
       </div>
+      {report && shareUrl ? (
+        <TendencyReportShareCard ref={shareCardRef} report={report} shareUrl={shareUrl} />
+      ) : null}
     </div>
   )
 }

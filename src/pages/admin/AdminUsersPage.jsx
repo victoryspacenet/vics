@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { Search } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import {
@@ -8,6 +8,13 @@ import {
   REPORT_SORT_OPTIONS,
   ACTIVITY_SORT_OPTIONS,
 } from '../../lib/userAdminStorage'
+import {
+  adminUsersListReturnTo,
+  patchAdminUsersSearchParams,
+  readAdminUsersListState,
+  rememberAdminUsersListReturnTo,
+  rememberAdminUsersDetailEntry,
+} from '../../lib/adminUsersListNav'
 
 const PAGE_SIZE = 10
 
@@ -32,42 +39,77 @@ const STATUS_LABEL = {
 }
 
 export function AdminUsersPage() {
+  const location = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const listState = useMemo(() => readAdminUsersListState(searchParams), [searchParams])
+  const { page, statusFilter, sortBy, searchQ } = listState
+
+  const listReturnTo = useMemo(
+    () => adminUsersListReturnTo(location.pathname, location.search),
+    [location.pathname, location.search],
+  )
+
+  useEffect(() => {
+    rememberAdminUsersListReturnTo(listReturnTo)
+  }, [listReturnTo])
+
   const [users, setUsers] = useState([])
   const [totalCount, setTotalCount] = useState(0)
   const [listLoading, setListLoading] = useState(true)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [sortBy, setSortBy] = useState('')
-  const [page, setPage] = useState(1)
+  const [searchInput, setSearchInput] = useState(searchQ)
   const [fullListFallback, setFullListFallback] = useState(false)
 
+  const searchDebounceRef = useRef(null)
+  const loadSeqRef = useRef(0)
+  const hasLoadedOnceRef = useRef(false)
+
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300)
-    return () => clearTimeout(t)
-  }, [searchQuery])
+    setSearchInput(searchQ)
+  }, [searchQ])
+
+  useEffect(
+    () => () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
+    },
+    [],
+  )
+
+  const handleSearchChange = (value) => {
+    setSearchInput(value)
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
+    searchDebounceRef.current = setTimeout(() => {
+      const trimmed = value.trim()
+      if (trimmed === searchQ) return
+      patchAdminUsersSearchParams(setSearchParams, { q: trimmed || null, page: null })
+    }, 300)
+  }
 
   const loadList = useCallback(async () => {
+    const seq = ++loadSeqRef.current
     setListLoading(true)
     try {
       const res = await getUsersPaged({
         page,
         pageSize: PAGE_SIZE,
-        searchTrim: debouncedSearch,
+        searchTrim: searchQ,
         statusFilter,
         sortBy,
       })
+      if (seq !== loadSeqRef.current) return
       setUsers(res.users || [])
       setTotalCount(typeof res.totalCount === 'number' ? res.totalCount : 0)
       setFullListFallback(Boolean(res.usedFullListFallback))
+      hasLoadedOnceRef.current = true
     } catch {
+      if (seq !== loadSeqRef.current) return
       setUsers([])
       setTotalCount(0)
       setFullListFallback(false)
+      hasLoadedOnceRef.current = true
     } finally {
-      setListLoading(false)
+      if (seq === loadSeqRef.current) setListLoading(false)
     }
-  }, [page, debouncedSearch, statusFilter, sortBy])
+  }, [page, searchQ, statusFilter, sortBy])
 
   useEffect(() => {
     void loadList()
@@ -81,15 +123,26 @@ export function AdminUsersPage() {
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
 
   useEffect(() => {
-    if (page > totalPages) setPage(totalPages)
-  }, [page, totalPages])
+    if (!hasLoadedOnceRef.current || listLoading) return
+    if (page > totalPages) {
+      patchAdminUsersSearchParams(setSearchParams, { page: totalPages <= 1 ? null : totalPages })
+    }
+  }, [page, totalPages, listLoading, setSearchParams])
 
   const isReportSort = ['reports_desc', 'reports_asc'].includes(sortBy)
   const isActivitySort = ['created_desc', 'created_asc', 'votes_desc', 'votes_asc'].includes(sortBy)
 
   const formatPointCell = (n) => `${(n ?? 0).toLocaleString()}P`
 
-  if (listLoading && users.length === 0 && totalCount === 0) {
+  const goToPage = (nextPage) => {
+    patchAdminUsersSearchParams(
+      setSearchParams,
+      { page: nextPage <= 1 ? null : nextPage },
+      { replace: false },
+    )
+  }
+
+  if (listLoading && users.length === 0 && totalCount === 0 && !hasLoadedOnceRef.current) {
     return (
       <div className="max-w-6xl py-12 text-center text-gray-500">불러오는 중…</div>
     )
@@ -112,11 +165,8 @@ export function AdminUsersPage() {
           <Search size={16} className="absolute left-3.5 top-1/2 z-[1] -translate-y-1/2 text-emerald-600/80" />
           <input
             type="text"
-            value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value)
-              setPage(1)
-            }}
+            value={searchInput}
+            onChange={(e) => handleSearchChange(e.target.value)}
             placeholder="검색: 닉네임/이메일"
             className="w-full rounded-xl border-2 border-emerald-300/80 bg-gradient-to-r from-emerald-50/90 via-white to-teal-50/70 py-2.5 pl-10 pr-4 text-sm font-semibold text-[#22282E] shadow-sm placeholder:text-emerald-800/35 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-400/35"
           />
@@ -125,8 +175,10 @@ export function AdminUsersPage() {
           className={cn(USER_FILTER_SELECT_BASE, USER_FILTER_SELECT_STYLES.status)}
           value={statusFilter}
           onChange={(e) => {
-            setStatusFilter(e.target.value)
-            setPage(1)
+            patchAdminUsersSearchParams(setSearchParams, {
+              status: e.target.value === 'all' ? null : e.target.value,
+              page: null,
+            })
           }}
         >
           {STATUS_OPTIONS.map((o) => (
@@ -139,8 +191,10 @@ export function AdminUsersPage() {
           className={cn(USER_FILTER_SELECT_BASE, USER_FILTER_SELECT_STYLES.reportSort)}
           value={isReportSort ? sortBy : ''}
           onChange={(e) => {
-            setSortBy(e.target.value || '')
-            setPage(1)
+            patchAdminUsersSearchParams(setSearchParams, {
+              sort: e.target.value || null,
+              page: null,
+            })
           }}
           aria-label="신고 수 정렬"
         >
@@ -155,8 +209,10 @@ export function AdminUsersPage() {
           className={cn(USER_FILTER_SELECT_BASE, USER_FILTER_SELECT_STYLES.pointsSort)}
           value={isActivitySort ? sortBy : ''}
           onChange={(e) => {
-            setSortBy(e.target.value || '')
-            setPage(1)
+            patchAdminUsersSearchParams(setSearchParams, {
+              sort: e.target.value || null,
+              page: null,
+            })
           }}
           aria-label="생성·투표 포인트 정렬"
         >
@@ -197,7 +253,12 @@ export function AdminUsersPage() {
                   }`}
                 >
                   <td className="px-4 py-3 font-medium">
-                    <Link to={`/admin/users/${u.id}`} className="hover:underline text-[#22282E]">
+                    <Link
+                      to={`/admin/users/${u.id}`}
+                      state={{ adminUsersReturnTo: listReturnTo }}
+                      onClick={() => rememberAdminUsersDetailEntry(u.id, listReturnTo)}
+                      className="hover:underline text-[#22282E]"
+                    >
                       {u.nickname}
                     </Link>
                   </td>
@@ -233,7 +294,7 @@ export function AdminUsersPage() {
             </tbody>
           </table>
         </div>
-        {users.length === 0 && (
+        {users.length === 0 && !listLoading && (
           <div className="py-12 text-center text-gray-500 text-sm">검색 결과가 없습니다.</div>
         )}
       </div>
@@ -242,8 +303,8 @@ export function AdminUsersPage() {
       <div className="flex justify-center gap-1">
         <button
           type="button"
-          onClick={() => setPage((p) => Math.max(1, p - 1))}
-          disabled={page <= 1}
+          onClick={() => goToPage(page - 1)}
+          disabled={page <= 1 || listLoading}
           className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
         >
           &lt;
@@ -255,7 +316,8 @@ export function AdminUsersPage() {
             <button
               type="button"
               key={p}
-              onClick={() => setPage(p)}
+              onClick={() => goToPage(p)}
+              disabled={listLoading}
               className={`px-3 py-1.5 rounded-lg text-sm font-bold ${
                 p === page ? 'bg-emerald-600 text-white' : 'border border-gray-200 hover:bg-gray-50'
               }`}
@@ -266,8 +328,8 @@ export function AdminUsersPage() {
         })}
         <button
           type="button"
-          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-          disabled={page >= totalPages}
+          onClick={() => goToPage(page + 1)}
+          disabled={page >= totalPages || listLoading}
           className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
         >
           &gt;

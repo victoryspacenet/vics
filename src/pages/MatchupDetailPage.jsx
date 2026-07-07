@@ -14,7 +14,8 @@ import { voteViaApi } from '../lib/voteApi'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
 import { Avatar } from '../components/ui/Avatar'
-import { formatDate, formatNumber, calcPercent, copyToClipboard, cn } from '../lib/utils'
+import { formatDate, formatNumber, calcPercent, cn } from '../lib/utils'
+import { toPng } from 'html-to-image'
 import { sanitizeText, safeMediaUrl, reportSuspiciousInputIfNeeded } from '../lib/sanitize'
 import { getTier, tierAtLeast } from '../lib/tiers'
 import { VsBadge } from '../components/ui/VsBadge'
@@ -25,7 +26,15 @@ import { MatchupVoteStatsSection } from '../components/matchup/MatchupVoteStatsS
 import { VoteFireworks } from '../components/ui/VoteFireworks'
 import { MAX_IMAGE_MB, MAX_VIDEO_MB, MAX_VIDEO_SECONDS, IMAGE_RECOMMENDED, VIDEO_RECOMMENDED } from '../lib/mediaSpec'
 import { getCategoryLabelById } from '../lib/categoryAdminStorage'
-import { shareMatchupToSns, getMatchupShareImageUrl } from '../lib/socialShare'
+import {
+  shareMatchupToSns,
+  getMatchupShareImageUrl,
+  getMatchupSharePageUrl,
+  copyMatchupShareLink,
+  tryOpenInstagramApp,
+  isNativeCapacitorApp,
+  saveImageBlobToNativeGallery,
+} from '../lib/socialShare'
 import { fandomTierHasGoldCommentAura, fandomTierFromClaps } from '../lib/fandomTiers'
 import { FANDOM_POINTS_PER_CLAP } from '../lib/fandomPoints'
 import { FandomBronzeStarBadge } from '../components/fandom/FandomBronzeStarBadge'
@@ -271,6 +280,65 @@ function useCountdown(expiresAt) {
   return { h, m, s, expired: remaining === 0 }
 }
 
+/** 투표 결과 스토리 카드 → JPEG 공유 파일 */
+async function captureStoryCardShareFile(cardEl, matchupId) {
+  const dataUrl = await toPng(cardEl, {
+    pixelRatio: 2,
+    cacheBust: true,
+    skipFonts: true,
+  })
+  const jpegBlob = await new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth
+      canvas.height = img.naturalHeight
+      canvas.getContext('2d').drawImage(img, 0, 0)
+      canvas.toBlob(
+        (blob) => (blob ? resolve(blob) : reject(new Error('jpeg encode failed'))),
+        'image/jpeg',
+        0.92,
+      )
+    }
+    img.onerror = () => reject(new Error('image load failed'))
+    img.src = dataUrl
+  })
+  const fileName = `VICS-matchup-${matchupId || 'share'}.jpg`
+  return {
+    file: new File([jpegBlob], fileName, { type: 'image/jpeg' }),
+    dataUrl,
+    fileName,
+  }
+}
+
+/** Web Share API — `canShare` false여도 실제 share는 될 수 있어 직접 시도 */
+async function tryShareStoryImageFile(file) {
+  if (typeof navigator === 'undefined' || typeof navigator.share !== 'function') return false
+
+  const payload = { files: [file] }
+  try {
+    if (typeof navigator.canShare !== 'function' || navigator.canShare(payload)) {
+      await navigator.share(payload)
+      return true
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError') return true
+  }
+
+  try {
+    await navigator.share(payload)
+    return true
+  } catch (err) {
+    if (err?.name === 'AbortError') return true
+    return false
+  }
+}
+
+function isMobileShareDevice() {
+  if (typeof navigator === 'undefined') return false
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+}
+
 // ── SNS 공유 설정 ─────────────────────────────────────────────────
 const SNS_LIST = [
   {
@@ -384,7 +452,7 @@ export function MatchupDetailPage() {
       await shareMatchupToSns(platformId, {
         title: matchup.title,
         description: matchup.description || '',
-        url: typeof window !== 'undefined' ? window.location.href : '',
+        url: getMatchupSharePageUrl(matchup.id),
         imageUrl: getMatchupShareImageUrl(matchup, safeMediaUrl),
         matchup,
         safeMediaUrlFn: safeMediaUrl,
@@ -843,10 +911,11 @@ export function MatchupDetailPage() {
   }
 
   const handleCopyLink = async () => {
-    await copyToClipboard(window.location.href)
-    setLinkCopied(true)
-    showToast('링크가 복사됐어요!', 'success')
-    setTimeout(() => setLinkCopied(false), 2500)
+    const ok = await copyMatchupShareLink({ matchupId: matchup?.id || id, showToast })
+    if (ok) {
+      setLinkCopied(true)
+      setTimeout(() => setLinkCopied(false), 2500)
+    }
   }
 
   const openReportModal = useCallback((side) => {
@@ -957,7 +1026,7 @@ export function MatchupDetailPage() {
   const ogTitle = `${leftLabel} vs ${rightLabel} 경쟁 중!`
   const ogDesc = `누가 누구와 경쟁 중! ${leftLabel}와 ${rightLabel}, VICS에서 투표해보세요`
   const ogImage = getMatchupShareImageUrl(matchup, safeMediaUrl)
-  const ogUrl = typeof window !== 'undefined' ? window.location.href : ''
+  const ogUrl = matchup?.id ? getMatchupSharePageUrl(matchup.id) : ''
 
   const newMatchupAuthorPanel = !isComplete ? (
     <div
@@ -1188,10 +1257,6 @@ export function MatchupDetailPage() {
           userNickname={myProfile?.nickname}
           onClose={() => setShowResultModal(false)}
           onNavigateNext={() => { setShowResultModal(false); navigate('/matchups') }}
-          onShare={() => {
-            handleCopyLink()
-            setShowResultModal(false)
-          }}
         />
       )}
 
@@ -2330,12 +2395,16 @@ function ChallengerSlot({ user, isMyMatchup, onChallenge, onLogin }) {
 }
 
 // ── 투표 결과 모달 ───────────────────────────────────────────────
-function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, onClose, onNavigateNext, onShare }) {
+function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, onClose, onNavigateNext }) {
   const navigate        = useNavigate()
-  const { openCreateDrawer } = useUIStore()
+  const { openCreateDrawer, showToast } = useUIStore()
   const [animated, setAnimated] = useState(false)
   const [visible, setVisible]   = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [shareReady, setShareReady] = useState(false)
   const cardRef = useRef(null)
+  const shareFileRef = useRef(null)
+  const shareExportPromiseRef = useRef(null)
 
   const leftLabel  = matchup.left_label  || 'A'
   const rightLabel = matchup.right_label || 'B'
@@ -2365,13 +2434,67 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
   }
   const handleNextMatchup = () => { setVisible(false); setTimeout(() => navigate('/matchups'), 300) }
 
+  const ensureShareFile = useCallback(async () => {
+    if (shareFileRef.current) return shareFileRef.current
+    if (shareExportPromiseRef.current) return shareExportPromiseRef.current
+    if (!cardRef.current) throw new Error('story card not ready')
+
+    shareExportPromiseRef.current = captureStoryCardShareFile(cardRef.current, matchup.id)
+      .then((result) => {
+        shareFileRef.current = result
+        return result
+      })
+      .finally(() => {
+        shareExportPromiseRef.current = null
+      })
+
+    return shareExportPromiseRef.current
+  }, [matchup.id])
+
   const handleShareStory = async () => {
-    const shareData = { title: matchup.title, text: aiInsight, url: window.location.href }
-    if (navigator.share && navigator.canShare?.(shareData)) {
-      try { await navigator.share(shareData); return } catch {}
+    setExporting(true)
+    try {
+      if (!animated) {
+        setAnimated(true)
+        await new Promise((resolve) => setTimeout(resolve, 400))
+      }
+
+      const { file, dataUrl, fileName } = await ensureShareFile()
+
+      // 네이티브 앱(Capacitor WebView)에서는 파일 공유 시트·다운로드 링크가 불안정해서
+      // 사진첩에 직접 저장한 뒤 인스타 스토리로 딥링크한다.
+      if (await isNativeCapacitorApp()) {
+        const saved = await saveImageBlobToNativeGallery(file, { fileName: 'vics-vote-story' })
+        if (saved.ok) {
+          showToast('스토리 카드를 사진첩에 저장했어요! 인스타 스토리에서 방금 저장한 사진을 선택해 올려 주세요 📸', 'info')
+          void tryOpenInstagramApp({ preferStory: true })
+          return
+        }
+        console.warn('[VoteResultModal] native gallery save failed', saved.reason)
+      }
+
+      if (await tryShareStoryImageFile(file)) {
+        showToast('공유 메뉴가 열렸어요. 인스타그램 → 스토리를 선택해 주세요!', 'success')
+        return
+      }
+
+      const a = document.createElement('a')
+      a.href = dataUrl
+      a.download = fileName
+      a.click()
+
+      if (isMobileShareDevice()) {
+        showToast('스토리 카드 이미지를 저장했어요. 인스타 앱 → 스토리 → 갤러리에서 선택해 올려 주세요.', 'info')
+        void tryOpenInstagramApp({ preferStory: true })
+      } else {
+        showToast('이미지를 다운로드했어요. 폰으로 옮긴 뒤 인스타 스토리에 올려 주세요.', 'info')
+      }
+    } catch (err) {
+      console.error('[VoteResultModal] story share:', err)
+      showToast('공유 이미지를 만들지 못했어요. 위 카드를 스크린샷 후 스토리에 올려 주세요.', 'error')
+    } finally {
+      setExporting(false)
     }
-    copyToClipboard(window.location.href)
-    onShare()
   }
 
   // 슬라이드업 + 게이지 애니메이션
@@ -2381,6 +2504,22 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
       setTimeout(() => setAnimated(true), 100)
     })
   }, [])
+
+  /** 버튼 탭 시 PNG 생성 대기 없이 바로 공유 시트 — 모달 표시 후 미리 JPEG 생성 */
+  useEffect(() => {
+    if (!animated || !cardRef.current) return undefined
+    shareFileRef.current = null
+    setShareReady(false)
+    const t = window.setTimeout(() => {
+      void ensureShareFile()
+        .then(() => setShareReady(true))
+        .catch((e) => {
+          console.warn('[VoteResultModal] share preload failed', e)
+          setShareReady(false)
+        })
+    }, 550)
+    return () => window.clearTimeout(t)
+  }, [animated, ensureShareFile, leftPct, rightPct, votedSide, isDraw, aiInsight])
 
   return (
     <div
@@ -2443,6 +2582,7 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
                   text={matchup.left_text}
                   label={leftLabel}
                   pct={leftPct}
+                  isDraw={isDraw}
                   isWin={!isDraw && winSide === 'left'}
                   isVoted={votedSide === 'left'}
                   animated={animated}
@@ -2454,6 +2594,7 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
                   text={matchup.right_text}
                   label={rightLabel}
                   pct={rightPct}
+                  isDraw={isDraw}
                   isWin={!isDraw && winSide === 'right'}
                   isVoted={votedSide === 'right'}
                   animated={animated}
@@ -2516,14 +2657,16 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
           <div className="px-5 pt-4 pb-6 space-y-2.5">
             {/* Primary: 인스타 스토리 공유 (네온 그라데이션) */}
             <button
-              onClick={handleShareStory}
+              type="button"
+              onClick={() => { void handleShareStory() }}
+              disabled={exporting}
               className="w-full py-4 rounded-2xl text-sm font-black tracking-wide flex items-center justify-center gap-2
                 bg-gradient-to-r from-lime-400 to-emerald-400 text-[#0f1f0f]
                 shadow-[0_0_28px_rgba(132,204,22,0.55)] hover:shadow-[0_0_44px_rgba(132,204,22,0.75)]
-                hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
+                hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 disabled:opacity-60 disabled:pointer-events-none"
             >
               <Zap size={16} className="fill-current" />
-              📸 인스타그램 스토리에 자랑하기
+              {exporting ? '이미지 만드는 중…' : !shareReady ? '공유 준비 중…' : '📸 인스타그램 스토리에 자랑하기'}
             </button>
 
             {/* Secondary: 다른 라이벌과 재경쟁 (아웃라인) */}
@@ -2562,15 +2705,24 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
 }
 
 // ── 스토리 카드 개별 사이드 ──────────────────────────────────────
-function StoryCardSide({ type, url, text, label, pct, isWin, isVoted, animated, alignRight }) {
+function StoryCardSide({ type, url, text, label, pct, isDraw, isWin, isVoted, animated, alignRight }) {
+  const dimmed = !isDraw && !isWin
+  const pctBarClass = isDraw
+    ? alignRight
+      ? 'bg-gradient-to-r from-sky-400 to-indigo-500'
+      : 'bg-gradient-to-r from-fuchsia-500 to-rose-400'
+    : isWin
+      ? 'bg-gradient-to-r from-lime-400 to-emerald-400'
+      : 'bg-white/30'
+
   return (
     <div className="relative">
       {/* 미디어 영역 */}
       <div className="aspect-square relative overflow-hidden">
         {type === 'image' && url ? (
-          <img src={safeMediaUrl(url)} alt={label} className={`absolute inset-0 w-full h-full object-cover transition-all duration-500 ${isWin ? '' : 'brightness-50 saturate-50'}`} />
+          <img src={safeMediaUrl(url)} alt={label} className={`absolute inset-0 w-full h-full object-cover transition-all duration-500 ${dimmed ? 'brightness-50 saturate-50' : ''}`} />
         ) : type === 'text' ? (
-          <div className="absolute inset-0 bg-white/10 flex items-center justify-center p-3">
+          <div className={`absolute inset-0 flex items-center justify-center p-3 ${isDraw ? 'bg-violet-500/20' : 'bg-white/10'}`}>
             <p className="text-white text-xs font-bold text-center leading-snug">{text}</p>
           </div>
         ) : (
@@ -2579,11 +2731,15 @@ function StoryCardSide({ type, url, text, label, pct, isWin, isVoted, animated, 
           </div>
         )}
         {/* 그라데이션 오버레이 */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+        <div className={`absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent ${isDraw ? 'via-violet-900/15' : ''}`} />
 
-        {/* WIN / LOSE 배지 */}
+        {/* WIN / LOSE / 무승부 배지 */}
         <div className={`absolute top-2 ${alignRight ? 'right-2' : 'left-2'}`}>
-          {isWin ? (
+          {isDraw ? (
+            <span className="bg-gradient-to-r from-violet-400/95 to-slate-400/95 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-[0_0_10px_rgba(139,92,246,0.45)]">
+              🤝 무승부
+            </span>
+          ) : isWin ? (
             <span className="bg-gradient-to-r from-lime-400 to-emerald-400 text-[#0f1f0f] text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg">
               WIN
             </span>
@@ -2605,12 +2761,12 @@ function StoryCardSide({ type, url, text, label, pct, isWin, isVoted, animated, 
 
         {/* % 수치 */}
         <div className="absolute bottom-0 left-0 right-0 px-3 pb-2.5">
-          <div className={`text-3xl font-black leading-none ${isWin ? 'text-white' : 'text-white/50'}`}>
+          <div className={`text-3xl font-black leading-none ${dimmed ? 'text-white/50' : 'text-white'}`}>
             {pct}%
           </div>
           <div className="h-1.5 bg-white/20 rounded-full overflow-hidden mt-1.5">
             <div
-              className={`h-full rounded-full ${isWin ? 'bg-gradient-to-r from-lime-400 to-emerald-400' : 'bg-white/30'} ${animated ? (alignRight ? 'animate-vote-bar-rise-delayed' : 'animate-vote-bar-rise') : ''}`}
+              className={`h-full rounded-full ${pctBarClass} ${animated ? (alignRight ? 'animate-vote-bar-rise-delayed' : 'animate-vote-bar-rise') : ''}`}
               style={{ width: animated ? `${pct}%` : '0%' }}
             />
           </div>

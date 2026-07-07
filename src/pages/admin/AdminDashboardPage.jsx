@@ -5,7 +5,7 @@ import { MainPagination } from '../../components/main/MainPagination'
 import { Modal } from '../../components/ui/Modal'
 import { useUIStore } from '../../store/uiStore'
 import { cn } from '../../lib/utils'
-import { countProfilesCreatedSince, fetchAdminMemberStats } from '../../lib/userAdminStorage'
+import { countProfilesCreatedSince, countVotesCreatedSince, countWithdrawalsSince, fetchAdminMemberStats } from '../../lib/userAdminStorage'
 import {
   fetchPendingModerationAlerts,
   resolveModerationAlert,
@@ -23,15 +23,14 @@ const STATS_BASE = [
     href: '/admin/users',
   },
   {
-    label: '탈퇴 회원',
+    label: '탈퇴 회원 (오늘)',
     value: null,
     unit: '명',
     color: 'border-gray-300 bg-gray-100',
-    statKey: 'withdrawnMembers',
+    statKey: 'withdrawnToday',
   },
   { label: '신규 가입', value: null, unit: '명', color: 'border-violet-200 bg-violet-50', statKey: 'newSignupsToday' },
-  { label: '진행중 매치업', value: null, unit: '건', color: 'border-blue-200 bg-blue-50' },
-  { label: '오늘의 투표', value: null, unit: '표', color: 'border-emerald-200 bg-emerald-50' },
+  { label: '오늘의 투표', value: null, unit: '표', color: 'border-emerald-200 bg-emerald-50', statKey: 'votesToday' },
   {
     label: '긴급신고',
     value: null,
@@ -118,8 +117,9 @@ export function AdminDashboardPage() {
   const [monitoringLoading, setMonitoringLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
   const [newSignupsToday, setNewSignupsToday] = useState(null)
+  const [votesToday, setVotesToday] = useState(null)
   const [totalMembers, setTotalMembers] = useState(null)
-  const [withdrawnMembers, setWithdrawnMembers] = useState(null)
+  const [withdrawnToday, setWithdrawnToday] = useState(null)
 
   const loadMonitoring = useCallback(async () => {
     setMonitoringLoading(true)
@@ -156,24 +156,43 @@ export function AdminDashboardPage() {
       })
     }
 
+    const loadVotesToday = () => {
+      void countVotesCreatedSince(start.toISOString()).then((n) => {
+        if (!cancelled) setVotesToday(n)
+      })
+    }
+
+    const loadWithdrawnToday = () => {
+      void countWithdrawalsSince(start.toISOString()).then((n) => {
+        if (!cancelled) setWithdrawnToday(n)
+      })
+    }
+
     const loadMemberStats = () => {
       void fetchAdminMemberStats().then((res) => {
         if (cancelled) return
         setTotalMembers(res.totalMembers)
-        setWithdrawnMembers(res.withdrawnMembers)
       })
     }
 
     loadSignups()
+    loadVotesToday()
+    loadWithdrawnToday()
     loadMemberStats()
     const onUsers = () => {
       loadSignups()
+      loadWithdrawnToday()
       loadMemberStats()
     }
+    const onVote = () => loadVotesToday()
     window.addEventListener('vics:adminUsers:updated', onUsers)
+    window.addEventListener('vics:tendency-vote-cast', onVote)
+    const votePoll = setInterval(loadVotesToday, 60_000)
     return () => {
       cancelled = true
       window.removeEventListener('vics:adminUsers:updated', onUsers)
+      window.removeEventListener('vics:tendency-vote-cast', onVote)
+      clearInterval(votePoll)
     }
   }, [])
 
@@ -199,15 +218,18 @@ export function AdminDashboardPage() {
       if (s.statKey === 'newSignupsToday' && newSignupsToday != null) {
         return { ...s, value: String(newSignupsToday) }
       }
+      if (s.statKey === 'votesToday' && votesToday != null) {
+        return { ...s, value: String(votesToday) }
+      }
       if (s.statKey === 'totalMembers' && totalMembers != null) {
         return { ...s, value: String(totalMembers) }
       }
-      if (s.statKey === 'withdrawnMembers' && withdrawnMembers != null) {
-        return { ...s, value: String(withdrawnMembers) }
+      if (s.statKey === 'withdrawnToday' && withdrawnToday != null) {
+        return { ...s, value: String(withdrawnToday) }
       }
       return s
     })
-  }, [monitoringTotal, newSignupsToday, totalMembers, withdrawnMembers])
+  }, [monitoringTotal, newSignupsToday, votesToday, totalMembers, withdrawnToday])
 
   const closeModal = () => setConfirmModal(null)
 
@@ -244,7 +266,7 @@ export function AdminDashboardPage() {
         <h2 className="text-lg font-bold text-[#22282E] mb-4">
           실시간 현황 <span className="text-sm font-normal text-gray-500">({formatToday()})</span>
         </h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
           {stats.map((stat) => {
             const inner = (
               <>
@@ -255,9 +277,6 @@ export function AdminDashboardPage() {
                     <span className="text-sm font-normal text-gray-500 ml-1">{stat.unit}</span>
                   )}
                 </p>
-                {stat.statKey === 'withdrawnMembers' && (
-                  <p className="mt-1 text-[10px] text-gray-500 leading-snug">프로필 삭제(탈퇴) 누적</p>
-                )}
                 {stat.badge && monitoringTotal > 0 && (
                   <span className="inline-block mt-1 text-[10px] font-bold text-red-600">🔴</span>
                 )}

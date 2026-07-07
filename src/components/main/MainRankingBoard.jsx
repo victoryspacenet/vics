@@ -5,16 +5,26 @@ import { supabase } from '../../lib/supabase'
 import { formatNumber } from '../../lib/utils'
 import { safeMediaUrl, encodeForUrl } from '../../lib/sanitize'
 import { getCurrentSeason, getRankColumns } from '../../lib/season'
+import {
+  RANKING_PROFILE_SELECT,
+  getRankingPageSortConfig,
+  getRankingSortValue,
+  applyRankingQueryFilters,
+  getRankingOrderColFallback,
+  isMissingTrackPointsColumnError,
+} from '../../lib/rankingPageSort'
 import { getCachedRanking, setCachedRanking } from '../../lib/rankingCache'
 import { getRankingEligibleProfileIds, RANKING_ELIGIBLE_CACHE_TAG } from '../../lib/rankingEligibleProfiles'
+import { getOracleRankingCandidateIds } from '../../lib/rankingOracleCandidates'
 import { enrichProfileRowsWithTierSnapshot, EMPTY_TIER_RANK_INFO } from '../../lib/creatorRankSnapshot'
+import { attachCreatorMatchupCounts } from '../../lib/creatorMatchupCounts'
 import { attachCompetitionRanksInMemory } from '../../lib/rankingCompetitionRank'
 import { FeaturedBadgeSpan } from '../ui/FeaturedBadge'
 import { FoundingMemberBadge } from '../profile/FoundingMemberBadge'
 import { TierBadge } from '../ui/TierBadge'
 
 /** 메인 랭킹 위젯 캐시 — 티어 스냅샷 포함 */
-const MAIN_RANKING_TIER_CACHE_VER = 't2'
+const MAIN_RANKING_TIER_CACHE_VER = 't6-matchup-counts'
 
 const MODE_TABS = [
   { id: 'all', label: '전체' },
@@ -75,24 +85,66 @@ export function MainRankingBoard() {
       }
 
       const isCreator = typeTab === 'creator'
-      const orderCol =
-        isCreator
-          ? (currentSort === 'votes' ? cols.total_votes_received : cols.points)
-          : (currentSort === 'hitrate' ? cols.hit_rate : cols.points)
-      const selectCols = `id, nickname, avatar_url, points, season_points, total_matchups, creator_wins, total_votes_received, season_total_votes_received, vote_hits, vote_total, season_vote_hits, season_vote_total, hit_rate, season_hit_rate, featured_badge, founding_member_number`
+      const useSeason = mode === 'season'
+      const pageSortBy = isCreator
+        ? (currentSort === 'votes' ? 'votes' : 'points')
+        : (currentSort === 'hitrate' ? 'hitrate' : 'points')
+      const sortConfig = getRankingPageSortConfig(typeTab, pageSortBy)
+      const orderCol = useSeason
+        ? (sortConfig.isCreator
+          ? (sortConfig.kind === 'votes' ? cols.total_votes_received : 'season_champion_points')
+          : (sortConfig.kind === 'hit_rate' ? cols.hit_rate : 'season_oracle_points'))
+        : sortConfig.orderCol
+      const selectCols = `${RANKING_PROFILE_SELECT}, season_champion_points, season_oracle_points, season_points, season_total_votes_received, season_vote_hits, season_vote_total, season_hit_rate`
 
-      let query = supabase
-        .from('profiles')
-        .select(selectCols)
-        .order(orderCol, { ascending: false, nullsFirst: false })
-        .limit(5)
+      const buildQuery = (col) => {
+        let q = supabase
+          .from('profiles')
+          .select(selectCols)
+          .order(col, { ascending: false, nullsFirst: false })
+          .order('id', { ascending: true })
+          .limit(5)
+        q = applyRankingQueryFilters(q, sortConfig)
+        return q
+      }
 
-      if (!isCreator) query = query.gte(cols.vote_total, 1)
-      if (eligibleIds?.length) query = query.in('id', eligibleIds)
+      let voterFilterIds = null
+      if (!isCreator) {
+        voterFilterIds = await getOracleRankingCandidateIds({
+          hitrateOnly: sortConfig.kind === 'hit_rate',
+          eligibleIds,
+        })
+        if (voterFilterIds.length === 0) {
+          setRankings([])
+          setCachedRanking(cacheKey, [])
+          return
+        }
+      }
 
-      const { data } = await query
-      const enriched = await enrichProfileRowsWithTierSnapshot(data || [])
-      const list = attachCompetitionRanksInMemory(enriched, orderCol)
+      const applyIdFilter = async (col) => {
+        let q = buildQuery(col)
+        if (voterFilterIds?.length) q = q.in('id', voterFilterIds)
+        else if (eligibleIds?.length) q = q.in('id', eligibleIds)
+        return q
+      }
+
+      let { data, error } = await applyIdFilter(orderCol)
+      if (error && isMissingTrackPointsColumnError(error)) {
+        ;({ data, error } = await applyIdFilter(getRankingOrderColFallback(sortConfig)))
+      }
+      if (error) throw error
+      let enriched = await enrichProfileRowsWithTierSnapshot(data || [])
+      if (isCreator) {
+        enriched = await attachCreatorMatchupCounts(enriched, { seasonOnly: useSeason })
+      }
+      const displayConfig = useSeason
+        ? {
+            ...sortConfig,
+            orderCol,
+            kind: sortConfig.kind === 'champion_points' ? 'champion_points' : sortConfig.kind === 'oracle_points' ? 'oracle_points' : sortConfig.kind,
+          }
+        : sortConfig
+      const list = attachCompetitionRanksInMemory(enriched, displayConfig)
       setRankings(list)
       setCachedRanking(cacheKey, list)
     } catch (err) {
@@ -104,6 +156,10 @@ export function MainRankingBoard() {
 
   const MEDALS = ['🥇', '🥈', '🥉']
   const isCreator = typeTab === 'creator'
+  const pageSortBy = isCreator
+    ? (currentSort === 'votes' ? 'votes' : 'points')
+    : (currentSort === 'hitrate' ? 'hitrate' : 'points')
+  const sortConfig = getRankingPageSortConfig(typeTab, pageSortBy)
 
   // Champion: 1열=정렬기준값, 2열=게시물
   // Oracle: 1열=정렬기준값, 2열=투표수
@@ -113,18 +169,28 @@ export function MainRankingBoard() {
   const col2Label = isCreator ? '게시물' : '투표수'
 
   const getCol1 = (p) => {
-    if (isCreator) {
-      const val = currentSort === 'votes' ? (p[cols.total_votes_received] ?? p.total_votes_received) : (p[cols.points] ?? p.points)
-      return formatNumber(val || 0)
+    const displayConfig = mode === 'season'
+      ? {
+          ...sortConfig,
+          orderCol: isCreator
+            ? (currentSort === 'votes' ? cols.total_votes_received : 'season_champion_points')
+            : (currentSort === 'hitrate' ? cols.hit_rate : 'season_oracle_points'),
+        }
+      : sortConfig
+    if (isCreator && currentSort === 'votes') {
+      return formatNumber(getRankingSortValue(p, { ...displayConfig, orderCol: cols.total_votes_received, kind: 'votes' }))
     }
-    if (currentSort === 'hitrate') {
-      const rate = p[cols.hit_rate] ?? p.hit_rate ?? calcHitRate(p[cols.vote_hits] ?? p.vote_hits, p[cols.vote_total] ?? p.vote_total)
-      return `${rate ?? 0}%`
+    if (!isCreator && currentSort === 'hitrate') {
+      const rate = getRankingSortValue(p, { ...displayConfig, orderCol: cols.hit_rate, kind: 'hit_rate' })
+      return rate < 0 ? '0%' : `${Math.round(rate)}%`
     }
-    return formatNumber((p[cols.points] ?? p.points) || 0)
+    return formatNumber(getRankingSortValue(p, displayConfig))
   }
   const getCol2 = (p) => {
-    if (isCreator) return p.total_matchups || 0
+    if (isCreator) {
+      const n = p._creatorMatchupCount ?? p.total_matchups ?? 0
+      return formatNumber(n)
+    }
     return formatNumber((p[cols.vote_total] ?? p.vote_total) || 0)
   }
 

@@ -108,18 +108,12 @@ export function AdminMatchupsPage() {
     [matchups]
   )
 
-  const parseCreatedAt = (createdAt) => {
-    if (!createdAt) return null
-    const s = String(createdAt)
-    const isoMs = Date.parse(s)
-    if (!Number.isNaN(isoMs) && (s.includes('T') || /^\d{4}-\d{2}-\d{2}/.test(s))) {
-      return new Date(isoMs)
-    }
-    const match = s.match(/^(\d{1,2})\.(\d{1,2})/)
-    if (!match) return null
-    const [, month, day] = match
-    const year = new Date().getFullYear()
-    return new Date(year, Number(month) - 1, Number(day))
+  const parseRegisteredAt = (m) => {
+    const iso = m.registeredAtIso || m.authorCreatedAtIso
+    if (!iso) return null
+    const ms = Date.parse(String(iso))
+    if (!Number.isNaN(ms)) return new Date(ms)
+    return null
   }
 
   const filtered = useMemo(() => {
@@ -132,7 +126,7 @@ export function AdminMatchupsPage() {
     if (dateFrom) {
       const from = new Date(dateFrom)
       list = list.filter((m) => {
-        const d = parseCreatedAt(m.createdAt)
+        const d = parseRegisteredAt(m)
         return d && d >= from
       })
     }
@@ -140,7 +134,7 @@ export function AdminMatchupsPage() {
       const to = new Date(dateTo)
       to.setHours(23, 59, 59, 999)
       list = list.filter((m) => {
-        const d = parseCreatedAt(m.createdAt)
+        const d = parseRegisteredAt(m)
         return d && d <= to
       })
     }
@@ -148,8 +142,8 @@ export function AdminMatchupsPage() {
       list = [...list].sort((a, b) => (b.reports ?? 0) - (a.reports ?? 0))
     } else {
       list = [...list].sort((a, b) => {
-        const da = parseCreatedAt(a.createdAt)?.getTime() ?? 0
-        const db = parseCreatedAt(b.createdAt)?.getTime() ?? 0
+        const da = parseRegisteredAt(a)?.getTime() ?? 0
+        const db = parseRegisteredAt(b)?.getTime() ?? 0
         return db - da
       })
     }
@@ -370,7 +364,7 @@ export function AdminMatchupsPage() {
                 <th className="px-4 py-3 text-left font-bold text-gray-600 w-48 max-w-48">매치업 타이틀 (A vs B)</th>
                 <th className="px-4 py-3 text-left font-bold text-gray-600 w-20">신고</th>
                 <th className="px-4 py-3 text-left font-bold text-gray-600 w-16">상태</th>
-                <th className="px-4 py-3 text-left font-bold text-gray-600 w-28 whitespace-nowrap">등록일</th>
+                <th className="px-4 py-3 text-left font-bold text-gray-600 w-28 whitespace-nowrap">최종매치업등록일</th>
               </tr>
             </thead>
             <tbody>
@@ -427,7 +421,7 @@ export function AdminMatchupsPage() {
                       {getMatchupStatusLabel(m.status)}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{m.createdAt}</td>
+                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{m.registeredAt}</td>
                 </tr>
               ))}
             </tbody>

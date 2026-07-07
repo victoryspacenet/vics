@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Upload, X, Image, Video, Type, AlertCircle, AlertTriangle, CheckCircle, Hash, Zap, Share2, Link2, Camera } from 'lucide-react'
+import { Upload, X, Image, Video, Type, AlertCircle, AlertTriangle, CheckCircle, Hash, Zap, Camera } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
@@ -8,7 +8,7 @@ import { Drawer } from '../ui/Drawer'
 import { Modal } from '../ui/Modal'
 import { VsBadge } from '../ui/VsBadge'
 import { Avatar } from '../ui/Avatar'
-import { cn, copyToClipboard } from '../../lib/utils'
+import { cn } from '../../lib/utils'
 import { safeMediaUrl } from '../../lib/sanitize'
 import { compressAndCropImage } from '../../lib/mediaCrop'
 import { getClipboardMediaFiles } from '../../lib/clipboardPasteFiles'
@@ -37,6 +37,7 @@ import { cameraPhotoToFile } from '../../lib/cameraPhotoToFile'
 import { uploadMatchupMediaValidated, warmupMatchupMediaUploadSession } from '../../lib/matchupMediaBucketUpload'
 import { SmartphoneCameraCapture } from '../mobile/SmartphoneCameraCapture'
 import { checkMatchupChallengeSimilarity } from '../../lib/matchupChallengeSimilarityApi'
+import { getCategoryLabelById } from '../../lib/categoryAdminStorage'
 import {
   assertMatchupSideTypeEquals,
   isMatchupSideType,
@@ -101,14 +102,13 @@ function challengerFormEquals(rightDescription, rightContent, snap) {
 export function ChallengeDrawer() {
   const navigate = useNavigate()
   const { user, profile } = useAuthStore()
-  const { challengeMatchup, challengeMatchupEdit, closeChallengeDrawer, showToast, openLoginModal } =
+  const { challengeMatchup, challengeMatchupEdit, closeChallengeDrawer, showToast, openLoginModal, openChallengeCompleteShare } =
     useUIStore()
 
   const [rightDescription, setRightDescription] = useState('')
   const [rightContent, setRightContent] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [uploadStep, setUploadStep] = useState('')
-  const [shareModal, setShareModal] = useState(null) // { matchupId, title }
   const [boxKey, setBoxKey] = useState(0)
   const [linkCopied, setLinkCopied] = useState(false)
   const [showRestorePrompt, setShowRestorePrompt] = useState(false)
@@ -391,9 +391,11 @@ export function ChallengeDrawer() {
       }
 
       setUploadStep('콘텐츠 유사도 검사 중...')
-      await checkMatchupChallengeSimilarity({
+      const simResult = await checkMatchupChallengeSimilarity({
         matchupId: challengeMatchup.id,
         mode: isEditRun ? 'edit' : 'create',
+        category: challengeMatchup.category || null,
+        categoryLabel: challengeMatchup.category ? getCategoryLabelById(challengeMatchup.category) : null,
         right:
           rightContent.type === 'text'
             ? { type: 'text', text: (rightContent.text || '').trim() }
@@ -403,6 +405,9 @@ export function ChallengeDrawer() {
                 thumb: rightThumbnail ?? rightUrl,
               },
       })
+      if (simResult.skipped) {
+        showToast('유사도 검사를 건너뛰었어요(개발 모드). 운영에서는 검사가 필수예요.', 'info')
+      }
 
       setUploadStep(isEditRun ? '수정 저장 중...' : '매치업 완성 중...')
 
@@ -459,6 +464,7 @@ export function ChallengeDrawer() {
             right_label: profile?.nickname || 'B',
             right_user_id: user.id,
             is_complete: true,
+            challenger_joined_at: new Date().toISOString(),
             ...(freshExpiresAt ? { expires_at: freshExpiresAt } : {}),
           }
 
@@ -505,12 +511,16 @@ export function ChallengeDrawer() {
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('vics:matchup:updated', { detail: { matchupId } }))
         }
-        navigate(`/matchup/${matchupId}`)
+        navigate(`/matchup/${matchupId}`, { replace: true })
         return
       }
 
       showToast('매치업이 성공적으로 완성됐어요! 🎉', 'success')
-      setShareModal({ matchupId, matchupTitle })
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('vics:matchup:updated', { detail: { matchupId } }))
+      }
+      navigate(`/matchup/${matchupId}`, { replace: true })
+      openChallengeCompleteShare({ matchupId, matchupTitle })
     } catch (err) {
       console.error('[ChallengeDrawer]', err)
       showToast(err.message || '도전 중 오류가 발생했어요. 다시 시도해주세요.', 'error')
@@ -518,22 +528,6 @@ export function ChallengeDrawer() {
       setUploading(false)
       setUploadStep('')
     }
-  }
-
-  const handleShareAndGo = async () => {
-    if (!shareModal) return
-    const url = `${window.location.origin}/matchup/${shareModal.matchupId}`
-    await copyToClipboard(url)
-    showToast('링크가 복사됐어요! 친구들에게 공유해보세요 🔗', 'success')
-    setShareModal(null)
-    navigate(`/matchup/${shareModal.matchupId}`)
-  }
-
-  const handleGoWithoutShare = () => {
-    if (!shareModal) return
-    const id = shareModal.matchupId
-    setShareModal(null)
-    navigate(`/matchup/${id}`)
   }
 
   const matchup = challengeMatchup
@@ -820,49 +814,6 @@ export function ChallengeDrawer() {
           </div>
         </div>
       </Modal>
-
-      {shareModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/55 backdrop-blur-sm" onClick={handleGoWithoutShare} />
-          <div className="relative bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl z-10 text-center space-y-4 overflow-hidden">
-            {/* 상단 그라디언트 바 */}
-            <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-emerald-400 via-teal-500 to-cyan-400 rounded-t-3xl" />
-            {/* 이모지 */}
-            <div className="text-5xl mt-2">🎉</div>
-            <div>
-              <h3 className="text-lg font-black bg-gradient-to-r from-emerald-700 via-teal-700 to-cyan-600 bg-clip-text text-transparent">경쟁이 시작됐어요!</h3>
-              <p className="text-sm text-gray-500 mt-1.5 leading-relaxed">
-                당신의 도전이 성공적으로 등록됐어요!<br />
-                친구들에게 투표를 부탁해보세요.
-              </p>
-            </div>
-
-            {/* 매치업 제목 미리보기 */}
-            <div className="px-3 py-2 bg-gradient-to-r from-emerald-50/80 to-teal-50/60 border border-emerald-100/70 rounded-xl">
-              <p className="text-sm font-bold text-emerald-800 line-clamp-1">⚔️ "{shareModal.matchupTitle}"</p>
-            </div>
-
-            <div className="space-y-2 pt-1">
-              {/* 링크 복사 + 이동 */}
-              <button
-                onClick={handleShareAndGo}
-                className="w-full flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-white rounded-2xl text-sm font-bold shadow-[0_4px_18px_-4px_rgba(20,184,166,0.55)] hover:shadow-[0_6px_24px_-4px_rgba(20,184,166,0.7)] hover:-translate-y-0.5 transition-all"
-              >
-                <Link2 size={16} />
-                링크 복사하고 경쟁 보기
-              </button>
-
-              {/* 바로 이동 */}
-              <button
-                onClick={handleGoWithoutShare}
-                className="w-full py-3 text-sm text-teal-500/70 hover:text-teal-700 transition-colors font-semibold"
-              >
-                공유 없이 경쟁 보기
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   )
 }

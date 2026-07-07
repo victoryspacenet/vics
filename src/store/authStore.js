@@ -12,6 +12,7 @@ import {
 import { useUIStore } from './uiStore'
 import { useAdminPermissionStore } from './adminPermissionStore'
 import { SIGNUP_BONUS_POINTS, grantSignupBonusIfNeeded } from '../lib/signupRewards'
+import { touchProfileLastVisit } from '../lib/profileLastVisit'
 
 /** 새 비밀번호 설정 페이지: auth Mutex 경합 줄이려 프로필·푸시 부가 작업 건너뜀(로그인 후 로드됨). */
 function skipHeavyAuthHooksOnResetPasswordPage() {
@@ -110,6 +111,19 @@ async function ensureProfile(user) {
         }
       }
       await grantSignupBonusIfNeeded(user.id)
+      return
+    }
+
+    // 소셜 로그인은 이미 회원가입(이메일/비밀번호)한 유저만 사용 가능 — 여기서 프로필이
+    // 없다는 건 이 계정으로 한 번도 가입한 적이 없다는 뜻이라, 자동 가입시키지 않고 차단.
+    const provider = user.app_metadata?.provider
+    if (provider && provider !== 'email') {
+      console.warn('[ensureProfile] blocked unregistered social login:', { provider, userId: user.id })
+      await useAuthStore.getState().signOut()
+      useUIStore.getState().showToast(
+        '아직 가입되지 않은 계정이에요. 먼저 이메일로 회원가입을 진행해 주세요.',
+        'error',
+      )
       return
     }
 
@@ -259,6 +273,9 @@ export const useAuthStore = create((set, get) => ({
                       await ensureProfile(session.user)
                     }
                     if (gen !== authInitGeneration) return
+                    if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+                      void touchProfileLastVisit(session.user.id)
+                    }
                     if (event !== 'TOKEN_REFRESHED') {
                       const forceProfile =
                         event === 'INITIAL_SESSION' ||

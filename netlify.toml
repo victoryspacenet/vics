@@ -6,6 +6,7 @@
 [build]
   command = "npm run build"
   publish = "dist"
+  functions = "netlify/functions"
 
 # 로컬 `npm run dev:netlify` — 브라우저는 http://localhost:8888
 # (Vite만 쓸 때는 `npm run dev` → http://localhost:5173)
@@ -77,8 +78,20 @@
   force = true
 
 [[redirects]]
+  from = "/api/matchup-category-similarity"
+  to = "/.netlify/functions/matchup-category-similarity"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/api/matchup-report-moderation"
   to = "/.netlify/functions/matchup-report-moderation"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/ranking-share-image"
+  to = "/.netlify/functions/ranking-share-image"
   status = 200
   force = true
 
@@ -88,9 +101,21 @@
   status = 200
   force = true
 
+[[redirects]]
+  from = "/api/site-og-image"
+  to = "/.netlify/functions/site-og-image"
+  status = 200
+  force = true
+
 # SLA 미처리 문의 리마인드 — 매시간 Supabase RPC `check_sla_and_notify` 호출
 [functions."sla-inquiry-reminders"]
 schedule = "@hourly"
+
+[[redirects]]
+  from = "/ranking/share"
+  to = "/.netlify/functions/ranking-og"
+  status = 200
+  force = true
 
 [[redirects]]
   from = "/matchup/*"

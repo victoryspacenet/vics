@@ -4,6 +4,9 @@
  */
 import { getAdminUiJson, setAdminUiJson } from './adminUiConfig'
 import { supabase } from './supabase'
+import { mapPrimaryActivityFromCounts } from './userPrimaryActivity'
+import { fetchVoteTendencySummaryForUser } from './tendencyReport'
+import { fetchAdminUserPrimaryCategory, derivePrimaryCategoryFromTopCategories } from './userPrimaryCategory'
 
 /** @deprecated 레거시 전체 목록 저장(마이그레이션 시 UUID 행만 오버레이로 승격) */
 const ADMIN_USERS_KEY = 'admin_users_v1'
@@ -89,10 +92,10 @@ const MOCK_USER_DETAILS = {
 
 /** 관리자 UI용 profiles 컬럼 (없는 컬럼이면 fetchProfilesForAdmin에서 축소 재시도) */
 const PROFILE_ADMIN_FIELDS_FULL =
-  'id, nickname, email, points, oracle_points, creator_wins, total_matchups, total_votes_received, vote_total, vote_hits, wins, losses, reports_received_count, created_at'
+  'id, nickname, email, points, oracle_points, creator_wins, total_matchups, total_votes_received, vote_total, vote_hits, wins, losses, reports_received_count, created_at, birthdate, gender'
 
 const PROFILE_ADMIN_FIELDS_MIN =
-  'id, nickname, email, points, total_matchups, wins, losses, reports_received_count, created_at'
+  'id, nickname, email, points, total_matchups, wins, losses, reports_received_count, created_at, birthdate, gender'
 
 /** 목록 전용 — 상세·수정에 필요한 컬럼은 `getUserDetail` 등에서 조회 */
 const PROFILE_ADMIN_LIST_FIELDS = PROFILE_ADMIN_FIELDS_FULL
@@ -470,6 +473,56 @@ function formatJoinedAt(iso) {
   return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`
 }
 
+async function fetchAdminUserLastVisitedAt(userId) {
+  try {
+    const { data, error } = await supabase.rpc('get_admin_user_visit_activity', {
+      p_user_id: userId,
+    })
+    if (error) throw error
+    const iso = data?.last_visit_at || data?.last_sign_in_at
+    return formatJoinedAt(iso)
+  } catch (e) {
+    console.warn('[userAdminStorage] get_admin_user_visit_activity:', e?.message || e)
+    return ''
+  }
+}
+
+async function fetchAdminUserPrimaryActivity(userId, profileRow = null) {
+  try {
+    const { data, error } = await supabase.rpc('get_admin_user_primary_activity', {
+      p_user_id: userId,
+    })
+    if (error) throw error
+    if (data && typeof data === 'object') {
+      return mapPrimaryActivityFromCounts({
+        voteCount: data.vote_count,
+        uploadCount: data.upload_count,
+        shareCount: data.share_count,
+      })
+    }
+  } catch (e) {
+    console.warn('[userAdminStorage] get_admin_user_primary_activity:', e?.message || e)
+  }
+
+  if (profileRow) {
+    return mapPrimaryActivityFromCounts({
+      voteCount: profileRow.vote_total,
+      uploadCount: profileRow.total_matchups,
+      shareCount: 0,
+    })
+  }
+  return {}
+}
+
+function derivePrimaryActivityFromAdminUser(user) {
+  if (!user || typeof user !== 'object') return {}
+  const voteCount =
+    Math.max(0, Math.floor(Number(user.voteWins) || 0) + Math.floor(Number(user.voteLosses) || 0)) ||
+    Math.max(0, Math.floor(Number(user.totalVotes) || 0))
+  const uploadCount = Math.max(0, Math.floor(Number(user.matchupsCreated) || 0))
+  return mapPrimaryActivityFromCounts({ voteCount, uploadCount, shareCount: 0 })
+}
+
 function pickOverlayFields(row) {
   const o = {}
   if (row.status) o.status = row.status
@@ -520,6 +573,8 @@ function mapProfileRowToAdminUser(row, overlay = {}) {
     ...(cautionUntil !== undefined ? { cautionUntil } : {}),
     joinedAt: formatJoinedAt(row.created_at),
     social: '앱',
+    birthdate: row.birthdate || null,
+    gender: row.gender || null,
   }
 }
 
@@ -703,6 +758,36 @@ export async function countProfilesCreatedSince(isoStart) {
   }
 }
 
+/** 오늘 00:00 이후 투표 수 (대시보드 등) */
+export async function countVotesCreatedSince(isoStart) {
+  try {
+    const { count, error } = await supabase
+      .from('votes')
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', isoStart)
+    if (error) throw error
+    return count ?? 0
+  } catch (e) {
+    console.warn('[userAdminStorage] countVotesCreatedSince', e)
+    return null
+  }
+}
+
+/** 오늘 00:00 이후 탈퇴 수 (대시보드 등) — RPC (account_withdrawal_cooldowns RLS) */
+export async function countWithdrawalsSince(isoStart) {
+  try {
+    const { data, error } = await supabase.rpc('count_admin_withdrawals_since', {
+      p_since: isoStart,
+    })
+    if (error) throw error
+    const n = typeof data === 'number' ? data : Number(data)
+    return Number.isFinite(n) ? n : 0
+  } catch (e) {
+    console.warn('[userAdminStorage] countWithdrawalsSince', e?.message || e)
+    return null
+  }
+}
+
 /** 전체 유저 목록 */
 export async function getUsers() {
   return readUsers()
@@ -749,7 +834,19 @@ export async function getUserDetail(id) {
     }
     if (row) {
       if (isExcludedVirtualAdminUser(row)) return null
-      const user = mapProfileRowToAdminUser(row, overrides[id] || {})
+      const [lastVisitedAt, primaryActivity, voteTendency, primaryCategory] = await Promise.all([
+        fetchAdminUserLastVisitedAt(id),
+        fetchAdminUserPrimaryActivity(id, row),
+        fetchVoteTendencySummaryForUser(id),
+        fetchAdminUserPrimaryCategory(id),
+      ])
+      const user = {
+        ...mapProfileRowToAdminUser(row, overrides[id] || {}),
+        ...(lastVisitedAt ? { lastVisitedAt } : {}),
+        ...primaryActivity,
+        ...voteTendency,
+        ...primaryCategory,
+      }
       const detail = MOCK_USER_DETAILS[user.id] || null
       return buildResult(user, detail)
     }
@@ -768,7 +865,14 @@ export async function getUserDetail(id) {
     sanctions: [],
     adminMemo: '',
   }
-  return buildResult(user, detail)
+  return buildResult(
+    {
+      ...user,
+      ...derivePrimaryActivityFromAdminUser(user),
+      ...derivePrimaryCategoryFromTopCategories(detail?.topCategories),
+    },
+    detail,
+  )
 }
 
 export async function updateUserStatus(id, status) {

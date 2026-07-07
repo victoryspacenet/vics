@@ -41,12 +41,22 @@ import { uploadMatchupMediaValidated, warmupMatchupMediaUploadSession } from '..
 import { mediaFileMatchesMatchupSideType } from '../../lib/matchupSideType'
 import { SmartphoneCameraCapture } from '../mobile/SmartphoneCameraCapture'
 import { getMatchupCategories } from '../../lib/categoryAdminStorage'
+import { checkMatchupCategorySimilarity } from '../../lib/matchupCategorySimilarityApi'
 const MAX_TAGS = 3
 const TITLE_MAX = 60
 
 function clampMatchupTags(arr) {
   if (!Array.isArray(arr)) return []
   return arr.slice(0, MAX_TAGS)
+}
+
+/** select에 표시되는 라벨은 이모지 접두어가 붙어있어 AI 프롬프트용으로 순수 텍스트만 추출 */
+function cleanCategoryLabel(categoryValue, categories) {
+  const raw = categories?.find((c) => c.value === categoryValue)?.label || categoryValue || ''
+  return String(raw)
+    .normalize('NFC')
+    .replace(/^[^\p{L}\p{N}]+/u, '')
+    .trim()
 }
 
 /** 한글은 NFD(자모 분해)로 들어올 수 있어 NFC로 맞춘 뒤 필터 (완성형 가-힣·영숫자만) */
@@ -556,6 +566,22 @@ export function CreateMatchupDrawer({ onCreated }) {
           showToast('매치업이 완료된 뒤에는 수정할 수 없어요.', 'info')
           return
         }
+      }
+
+      setUploadStep('카테고리·콘텐츠 유사도 검사 중...')
+      await checkMatchupCategorySimilarity({
+        matchupId: editRow?.id || null,
+        title: title.trim(),
+        description: description.trim() || null,
+        category: category || null,
+        categoryLabel: cleanCategoryLabel(category, CATEGORIES),
+        left:
+          leftContent.type === 'text'
+            ? { type: 'text', text: (leftContent.text || '').trim() }
+            : { type: leftContent.type, url: leftUrl, thumb: leftThumb ?? leftUrl },
+      })
+
+      if (editRow?.id) {
         setUploadStep('매치업 수정 중...')
         const patch = {
           title: title.trim(),
@@ -754,6 +780,7 @@ export function CreateMatchupDrawer({ onCreated }) {
                     content={leftContent}
                     onChange={handleLeftChange}
                     disabled={uploading}
+                    locked={!category}
                     sideLabel="A"
                     categories={CATEGORIES}
                   />
@@ -792,15 +819,16 @@ export function CreateMatchupDrawer({ onCreated }) {
                 <VsBadge variant="minimal" size="sm" animated={false} />
               </div>
             </div>
-            {!leftContent && (
-              <p className="text-xs font-bold text-fuchsia-500/70 text-center mt-1">
-                👆 A 콘텐츠를 먼저 올려주세요
-              </p>
-            )}
-            {!category && (
+            {!category ? (
               <p className="text-xs font-bold text-amber-600/80 text-center mt-1">
-                📂 위에서 카테고리를 선택해주세요
+                📂 위에서 카테고리를 먼저 선택해주세요
               </p>
+            ) : (
+              !leftContent && (
+                <p className="text-xs font-bold text-fuchsia-500/70 text-center mt-1">
+                  👆 A 콘텐츠를 먼저 올려주세요
+                </p>
+              )
             )}
           </FormSection>
 
@@ -1038,7 +1066,7 @@ function FormSection({ label, required, hint, children }) {
 }
 
 // ── ContentBox (A/B 공용) ─────────────────────────────────────────
-function ContentBox({ content, onChange, disabled, sideLabel, optional, requiredType, requiredCategory, categories = [] }) {
+function ContentBox({ content, onChange, disabled, sideLabel, optional, requiredType, requiredCategory, categories = [], locked = false }) {
   const fileRef = useRef(null)
   const [contentType, setContentType] = useState('image')
   const effectiveType = requiredType ?? contentType
@@ -1049,6 +1077,8 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
   const [processingLabel, setProcessingLabel] = useState('')
   const [showCamera, setShowCamera] = useState(false)
   const mediaBusy = Boolean(processingLabel)
+  /** 카테고리 미선택 등으로 신규 업로드(선택·드롭·붙여넣기)만 잠금 — 이미 담긴 콘텐츠 제거는 계속 허용 */
+  const inputLocked = disabled || locked
 
   useEffect(() => {
     if (!content) return
@@ -1137,6 +1167,7 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
   }
 
   const handleCameraCapture = async (photo) => {
+    if (inputLocked) { setShowCamera(false); return }
     setSizeError('')
     try {
       const file = await cameraPhotoToFile(photo, 'matchup-a.jpg')
@@ -1157,13 +1188,13 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
             key={id}
             type="button"
             onClick={() => switchType(id)}
-            disabled={disabled}
+            disabled={inputLocked}
             className={cn(
               'flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold rounded-lg transition-all',
               contentType === id
                 ? 'bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white shadow-[0_2px_8px_-2px_rgba(192,38,211,0.5)]'
                 : 'text-fuchsia-500/70 hover:text-fuchsia-800 hover:bg-fuchsia-50/60 border border-fuchsia-100/60',
-              disabled && 'opacity-40 cursor-not-allowed'
+              inputLocked && 'opacity-40 cursor-not-allowed'
             )}
           >
             <Icon size={10} />
@@ -1190,9 +1221,9 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
               const base = e.target.value.trim() ? { type: 'text', text: e.target.value.trim() } : null
               onChange(base ? (requiredCategory ? { ...base, category: requiredCategory } : base) : null)
             }}
-            placeholder="내 의견을 입력하세요"
+            placeholder={locked ? '먼저 카테고리를 선택해주세요' : '내 의견을 입력하세요'}
             maxLength={200}
-            disabled={disabled}
+            disabled={inputLocked}
             className="absolute inset-0 h-full w-full resize-none rounded-xl border-0 bg-transparent px-3 py-3 text-left text-xs outline-none ring-0 transition-all focus:ring-2 focus:ring-teal-400/40 placeholder:text-teal-600/65 disabled:opacity-60"
           />
           <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-md bg-[#22282E]/70 px-1.5 py-0.5 text-[10px] font-black text-white">
@@ -1203,16 +1234,16 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
         /* 드롭박스 — 클립보드 이미지·영상 붙여넣기(Ctrl+V)는 박스 포커스 후 */
         <div
           tabIndex={effectiveType === 'text' ? undefined : 0}
-          onDrop={(e) => { e.preventDefault(); setDragging(false); if (!disabled && !mediaBusy) validateAndSet(e.dataTransfer.files?.[0]) }}
-          onDragOver={(e) => { e.preventDefault(); if (!disabled) setDragging(true) }}
+          onDrop={(e) => { e.preventDefault(); setDragging(false); if (!inputLocked && !mediaBusy) validateAndSet(e.dataTransfer.files?.[0]) }}
+          onDragOver={(e) => { e.preventDefault(); if (!inputLocked) setDragging(true) }}
           onDragLeave={() => setDragging(false)}
           onClick={(e) => {
-            if (content || disabled || mediaBusy) return
+            if (content || inputLocked || mediaBusy) return
             if (e.target.closest('[data-file-pick]')) return
             e.currentTarget.focus()
           }}
           onPaste={async (e) => {
-            if (disabled || mediaBusy || effectiveType === 'text' || content) return
+            if (inputLocked || mediaBusy || effectiveType === 'text' || content) return
             const acceptImage = effectiveType === 'image'
             const acceptVideo = effectiveType === 'video'
             const files = getClipboardMediaFiles(e, { images: acceptImage, videos: acceptVideo })
@@ -1225,7 +1256,7 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
           className={cn(
             FEED_CARD_FRAME,
             'border-2 border-dashed transition-all outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-400/30',
-            disabled || mediaBusy ? 'opacity-60 cursor-not-allowed' :
+            inputLocked || mediaBusy ? 'opacity-60 cursor-not-allowed' :
             dragging ? 'border-fuchsia-500 bg-fuchsia-50/80 scale-[1.02] cursor-copy' :
             content ? 'border-fuchsia-400 cursor-default' :
             'border-fuchsia-200/60 bg-gradient-to-br from-fuchsia-50/50 via-violet-50/30 to-indigo-50/40 hover:border-fuchsia-300 hover:from-fuchsia-50/80 hover:via-violet-50/60 cursor-default active:scale-[0.98]'
@@ -1272,6 +1303,15 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
                   <span className="w-6 h-6 border-2 border-fuchsia-200 border-t-fuchsia-600 rounded-full animate-spin" />
                   <p className="text-[10px] font-bold text-fuchsia-500">{processingLabel}</p>
                 </>
+              ) : locked ? (
+                <>
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-300 to-gray-400 flex items-center justify-center shadow-sm">
+                    <span className="text-lg">🔒</span>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs font-bold text-gray-500">먼저 카테고리를 선택해주세요</p>
+                  </div>
+                </>
               ) : (
                 <>
                   <div className="w-10 h-10 rounded-full bg-gradient-to-br from-fuchsia-500 to-violet-600 flex items-center justify-center shadow-[0_4px_14px_-3px_rgba(192,38,211,0.45)]">
@@ -1291,7 +1331,7 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
               )}
             </div>
           )}
-          {!content && !mediaBusy && !disabled && (
+          {!content && !mediaBusy && !inputLocked && (
             <button
               type="button"
               data-file-pick
@@ -1329,12 +1369,12 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
           {!showCamera ? (
             <button
               type="button"
-              disabled={disabled || mediaBusy || Boolean(content)}
+              disabled={inputLocked || mediaBusy || Boolean(content)}
               onClick={() => setShowCamera(true)}
               className={cn(
                 'flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200/70 bg-gradient-to-r from-emerald-50/95 to-teal-50/80 py-2.5 text-[11px] font-bold text-emerald-900 transition-colors',
                 'hover:border-emerald-300 hover:from-emerald-50 hover:to-teal-50',
-                (disabled || mediaBusy || content) && 'cursor-not-allowed opacity-45'
+                (inputLocked || mediaBusy || content) && 'cursor-not-allowed opacity-45'
               )}
             >
               <Camera size={14} className="shrink-0" aria-hidden />
@@ -1366,7 +1406,7 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
         type="file"
         accept={effectiveType === 'image' ? MATCHUP_IMAGE_INPUT_ACCEPT : MATCHUP_VIDEO_INPUT_ACCEPT}
         className="hidden"
-        onChange={(e) => { if (!mediaBusy) validateAndSet(e.target.files?.[0]); e.target.value = '' }}
+        onChange={(e) => { if (!mediaBusy && !inputLocked) validateAndSet(e.target.files?.[0]); e.target.value = '' }}
       />
     </div>
   )

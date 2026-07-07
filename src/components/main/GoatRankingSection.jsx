@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { formatNumber } from '../../lib/utils'
 import { safeMediaUrl, encodeForUrl } from '../../lib/sanitize'
 import { getCurrentSeason, getRankColumns } from '../../lib/season'
+import { getProfileTrackPoints } from '../../lib/rankingTrackPoints'
 import { getCachedRanking, setCachedRanking } from '../../lib/rankingCache'
 import { RANKING_ELIGIBLE_CACHE_TAG, getRankingEligibleProfileIds } from '../../lib/rankingEligibleProfiles'
 import { enrichProfileRowsWithTierSnapshot, EMPTY_TIER_RANK_INFO } from '../../lib/creatorRankSnapshot'
@@ -142,7 +143,10 @@ const cacheKey = `goat_${mode}_v6_${RANKING_ELIGIBLE_CACHE_TAG}`
 
   const MEDALS = ['🥇', '🥈', '🥉']
   const { number: seasonNum } = getCurrentSeason()
-  const pts = (p) => (mode === 'season' ? (p.season_points ?? p.points) : (p.points ?? 0))
+  const pts = (p) => {
+    const isChampion = (p.goatTrack || trackFilter) === 'champion'
+    return getProfileTrackPoints(p, isChampion, mode === 'season')
+  }
 
   const rawRankings =
     activeTab === 'all' ? goatAll : activeTab === 'monthly' ? goatMonthly : goatWeekly

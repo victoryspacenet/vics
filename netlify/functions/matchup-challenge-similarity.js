@@ -45,39 +45,111 @@ function isHttpsMediaUrl(u) {
 function isLikelyRasterImageUrl(u) {
   if (!u || typeof u !== 'string') return false
   const path = u.split('?')[0].toLowerCase()
-  return /\.(jpe?g|png|webp|gif)(\b|\/|$)/i.test(path)
+  if (/\.(jpe?g|png|webp|gif)(\b|\/|$)/i.test(path)) return true
+  // Supabase Storage 공개 객체 — poster.jpg 등 확장자 없어도 이미지 side면 허용
+  if (/\.supabase\.co\/storage\/v1\/object\//i.test(u) && /-poster(\.|$)/i.test(path)) return true
+  return false
 }
 
-function buildUserContentParts({ title, description, left, right }) {
+/** image/video side → OpenAI vision에 넣을 스틸컷 URL */
+function resolveVisualImageUrl(side) {
+  if (!side || side.type === 'text') return null
+  const candidates = [side.thumb, side.url].filter(Boolean)
+  for (const raw of candidates) {
+    if (!isHttpsMediaUrl(raw)) continue
+    if (isLikelyRasterImageUrl(raw)) return raw
+    if (side.type === 'image' && /\.supabase\.co\/storage\//i.test(raw)) return raw
+  }
+  return null
+}
+
+const CATEGORY_LABEL_KO = {
+  eternal_quest: '영원한 난제',
+  romance: '연애',
+  relationships: '인간관계',
+  work_life: '직장&갓생',
+  balance_game: '밸런스게임',
+  food_gourmet: '맛집&맛식',
+  fashion: '패션',
+  realtime_ranking: '실시간 랭킹',
+}
+
+function formatCategoryLabel(categoryId) {
+  if (!categoryId || typeof categoryId !== 'string') return null
+  const id = categoryId.trim()
+  return CATEGORY_LABEL_KO[id] || id
+}
+
+/** 관리자가 자유롭게 카테고리를 추가할 수 있어 라벨은 클라이언트가 전달한 값을 신뢰 (이모지 등 접두어는 제거) */
+function sanitizeCategoryLabel(label) {
+  if (!label || typeof label !== 'string') return null
+  const cleaned = label
+    .normalize('NFC')
+    .replace(/^[^\p{L}\p{N}]+/u, '')
+    .trim()
+    .slice(0, 40)
+  return cleaned || null
+}
+
+/** 카테고리 라벨별 세부 판정 기준 — 관리자가 만든 카테고리 이름과 정확히 일치할 때만 적용 */
+function categoryHintKo(categoryLabel) {
+  if (categoryLabel === '맛집') {
+    return (
+      `⚠️ "맛집" 카테고리 세부 기준: 음식(요리) 자체가 아니라 "음식점이라는 공간"이 중심이어야 합니다.\n` +
+      `외관·간판·매장 인테리어·좌석·웨이팅 줄·분위기 등 장소를 보여주는 콘텐츠는 높은 점수.\n` +
+      `반대로 음식/요리 클로즈업이 화면의 주인공이고 매장 공간이 거의 안 보이면, 그건 "맛식"에 가까우니 낮은 점수(0~30)를 주세요.\n\n`
+    )
+  }
+  if (categoryLabel === '맛식') {
+    return (
+      `⚠️ "맛식" 카테고리 세부 기준: 음식점이라는 공간이 아니라 "음식(요리) 자체"가 중심이어야 합니다.\n` +
+      `플레이팅·요리 클로즈업·먹는 모습·재료 등 음식이 주인공인 콘텐츠는 높은 점수.\n` +
+      `반대로 매장 외관·인테리어 등 공간만 보이고 음식이 주인공이 아니면, 그건 "맛집"에 가까우니 낮은 점수(0~30)를 주세요.\n\n`
+    )
+  }
+  return ''
+}
+
+function buildUserContentParts({ title, description, categoryLabel, left, right }) {
+  const categoryLine = categoryLabel
+    ? `카테고리(필수 맥락): ${categoryLabel}\n도전자(B)는 이 카테고리·A의 주제와 같은 분야여야 합니다. 다른 분야(예: 패션 vs 음식)는 0~25점.\n\n${categoryHintKo(categoryLabel)}`
+    : ''
+
   const parts = [
     {
       type: 'text',
       text:
-        `아래는 "매치업" 경쟁입니다. A는 매치업 메이커(왼쪽 게시자), B는 도전자(오른쪽 게시자)입니다.\n` +
-        `같은 경쟁 주제·톤 안에서 B가 A와 얼마나 주제적으로 맞는지 0~100 정수로만 평가하세요.\n` +
-        `100에 가까울수록 같은 주제·같은 맥락, 0에 가까울수록 무관·다른 주제·악의적 이탈입니다.\n` +
-        `반드시 JSON 한 객체만 출력: {"similarity":정수0~100,"reason_ko":"한국어 한 문장"}\n\n` +
+        `아래는 한국어 매치업 앱 "VICS"의 경쟁입니다. A=매치업 메이커, B=도전자.\n` +
+        `B가 A와 같은 경쟁 주제·카테고리·시각적 맥락에 맞는지 0~100 정수로 엄격히 평가하세요.\n` +
+        `100=같은 주제·같은 카테고리·같은 맥락, 0=완전히 다른 주제·다른 카테고리·악의적 무관 콘텐츠.\n` +
+        `이미지/영상이 첨부되면 반드시 시각 내용을 우선해 판단하세요. 텍스트만으로 관대하게 점수를 주지 마세요.\n` +
+        `반드시 JSON 한 객체만: {"similarity":정수0~100,"reason_ko":"한국어 한 문장"}\n\n` +
+        categoryLine +
         `경쟁 제목: ${title || '(없음)'}\n` +
         `설명: ${description || '(없음)'}\n\n` +
         `A 타입: ${left.type}\n` +
         (left.type === 'text'
           ? `A 텍스트: ${(left.text || '').slice(0, 4000)}\n`
-          : `A 미디어: 아래 첨부 스틸컷(있다면)을 참고하세요.\n`) +
+          : `A 미디어: 아래 A 스틸컷 참고.\n`) +
         `\nB 타입: ${right.type}\n` +
         (right.type === 'text'
           ? `B 텍스트: ${(right.text || '').slice(0, 4000)}\n`
-          : `B 미디어: 아래 첨부 스틸컷(있다면)을 참고하세요.\n`),
+          : `B 미디어: 아래 B 스틸컷 참고.\n`),
     },
   ]
 
-  for (const side of [left, right]) {
-    if (side.type === 'text') continue
-    const img = side.thumb && isLikelyRasterImageUrl(side.thumb) ? side.thumb : null
-    if (img && isHttpsMediaUrl(img)) {
-      parts.push({ type: 'image_url', image_url: { url: img } })
-    }
+  const leftImg = resolveVisualImageUrl(left)
+  const rightImg = resolveVisualImageUrl(right)
+  if (leftImg) {
+    parts.push({ type: 'text', text: '\n[A 스틸컷]' })
+    parts.push({ type: 'image_url', image_url: { url: leftImg, detail: 'low' } })
   }
-  return parts
+  if (rightImg) {
+    parts.push({ type: 'text', text: '\n[B 스틸컷]' })
+    parts.push({ type: 'image_url', image_url: { url: rightImg, detail: 'low' } })
+  }
+
+  return { parts, leftImg, rightImg }
 }
 
 async function scoreWithOpenAI(payload) {
@@ -85,7 +157,22 @@ async function scoreWithOpenAI(payload) {
   if (!apiKey) return null
 
   const model = process.env.OPENAI_SIMILARITY_MODEL || 'gpt-4o-mini'
-  const { title, description, left, right } = payload
+  const { title, description, categoryLabel, left, right } = payload
+
+  const { parts, leftImg, rightImg } = buildUserContentParts({
+    title,
+    description,
+    categoryLabel,
+    left,
+    right,
+  })
+
+  if (left.type !== 'text' && !leftImg) {
+    throw new Error('A측 미디어를 분석할 수 없어요')
+  }
+  if (right.type !== 'text' && !rightImg) {
+    throw new Error('B측 미디어를 분석할 수 없어요')
+  }
 
   const timeoutMsRaw = parseInt(process.env.MATCHUP_SIMILARITY_OPENAI_TIMEOUT_MS || '20000', 10)
   const timeoutMs = Math.min(90000, Math.max(5000, Number.isFinite(timeoutMsRaw) ? timeoutMsRaw : 20000))
@@ -109,9 +196,11 @@ async function scoreWithOpenAI(payload) {
           {
             role: 'system',
             content:
-              'You compare two user contents for thematic fit in a Korean matchup app. Be strict about off-topic challenger content. Output JSON only.',
+              'You compare challenger(B) vs maker(A) content for thematic fit in a Korean matchup app. ' +
+              'Be strict: different categories or unrelated visuals (e.g. fashion vs food) must score 0-25. ' +
+              'Use attached images when present. Output JSON only.',
           },
-          { role: 'user', content: buildUserContentParts({ title, description, left, right }) },
+          { role: 'user', content: parts },
         ],
       }),
     })
@@ -196,7 +285,7 @@ exports.handler = withIpRateLimit(async (event) => {
   const { data: row, error: rowErr } = await supabase
     .from('matchups')
     .select(
-      'id, user_id, title, description, left_type, left_text, left_url, left_thumbnail_url, right_user_id',
+      'id, user_id, title, description, category, left_type, left_text, left_url, left_thumbnail_url, right_user_id',
     )
     .eq('id', matchupId)
     .maybeSingle()
@@ -223,13 +312,19 @@ exports.handler = withIpRateLimit(async (event) => {
     }
   }
 
-  const minSim = Math.max(0, Math.min(100, parseInt(process.env.MATCHUP_CHALLENGE_SIMILARITY_MIN || '45', 10)))
+  const minSim = Math.max(0, Math.min(100, parseInt(process.env.MATCHUP_CHALLENGE_SIMILARITY_MIN || '55', 10)))
   const failOpen = String(process.env.MATCHUP_SIMILARITY_FAIL_OPEN || '').trim() === '1'
   const requireAi = String(process.env.MATCHUP_SIMILARITY_REQUIRE_AI || '').trim() === '1'
+
+  // 관리자가 자유롭게 추가한 카테고리(예: cat_wpxy=맛집)는 고정 맵에 없으므로,
+  // 클라이언트가 전달한 표시 라벨을 우선 신뢰하고, 없을 때만 고정 맵/원본 id로 폴백.
+  const categoryLabel =
+    sanitizeCategoryLabel(body.categoryLabel) || formatCategoryLabel(body.category || row.category)
 
   const payload = {
     title: title || row.title,
     description: description || row.description,
+    categoryLabel,
     left: {
       type: row.left_type,
       text: row.left_text,
@@ -249,19 +344,16 @@ exports.handler = withIpRateLimit(async (event) => {
     scored = await scoreWithOpenAI(payload)
   } catch (e) {
     console.error('[matchup-challenge-similarity]', e)
-    if (requireAi) {
+    if (requireAi || !failOpen) {
       return json(502, { ok: false, error: '유사도 검사를 수행하지 못했어요. 잠시 후 다시 시도해 주세요.' })
     }
-    // OpenAI 타임아웃·오류는 콘텐츠 문제가 아니므로 fail_open 여부와 무관하게 skip 처리
-    // (fail_open 미설정 시 업로드가 막히는 문제 방지)
     return json(200, { ok: true, skipped: true, reason: 'ai_error_fail_open' })
   }
 
   if (!scored) {
-    if (requireAi) {
+    if (requireAi || !failOpen) {
       return json(503, { ok: false, error: 'AI 유사도 검사가 설정되지 않았어요. 관리자에게 문의해 주세요.' })
     }
-    // OPENAI_API_KEY 미설정 → 검사 생략 (MATCHUP_SIMILARITY_REQUIRE_AI=1 설정 시 차단)
     return json(200, { ok: true, skipped: true, reason: 'no_openai_key' })
   }
 

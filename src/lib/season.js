@@ -36,6 +36,8 @@ export function getDaysUntilSeasonEnd(now = new Date()) {
 export const RANK_COLUMNS = {
   all: {
     points: 'points',
+    champion_points: 'champion_points',
+    oracle_points: 'oracle_points',
     total_votes_received: 'total_votes_received',
     hit_rate: 'hit_rate',
     vote_total: 'vote_total',
@@ -43,6 +45,8 @@ export const RANK_COLUMNS = {
   },
   season: {
     points: 'season_points',
+    champion_points: 'season_champion_points',
+    oracle_points: 'season_oracle_points',
     total_votes_received: 'season_total_votes_received',
     hit_rate: 'season_hit_rate',
     vote_total: 'season_vote_total',

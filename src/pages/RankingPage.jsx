@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import {
-  ChevronDown, TrendingUp, TrendingDown, Minus,
+  ChevronDown,
   ChevronRight, Flame, Plus, Menu, X,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -22,15 +22,33 @@ import {
 } from '../lib/rankingMobileTabs'
 import { getRankingCategoryNavItems } from '../lib/categoryAdminStorage'
 import { getRankingEligibleProfileIds, RANKING_ELIGIBLE_CACHE_TAG } from '../lib/rankingEligibleProfiles'
+import { getOracleRankingCandidateIds } from '../lib/rankingOracleCandidates'
 import { fetchCreatorRankMapForIds, EMPTY_TIER_RANK_INFO } from '../lib/creatorRankSnapshot'
 import {
-  clearRankingCelebrationSeenThisLogin,
-  markRankingCelebrationSeenThisLogin,
+  hasAutoShownRankingCelebrationPopup,
+  markRankingCelebrationPopupSeen,
   platformHasRankingCelebrationContext,
   profileHasRankingEngagement,
   shouldOfferRankingCelebration,
 } from '../lib/rankingCelebrationEligibility'
 import { attachCompetitionRanksForPage } from '../lib/rankingCompetitionRank'
+import {
+  RANKING_PROFILE_SELECT,
+  getRankingPageSortConfig,
+  calcRankingHitRate,
+  getRankingSortValue,
+  applyRankingQueryFilters,
+  getRankingOrderColFallback,
+  isMissingTrackPointsColumnError,
+  formatRankingPrimaryMetric,
+  formatRankingSortGap,
+} from '../lib/rankingPageSort'
+import {
+  fetchRankingLeaderboardPage,
+  mapCategoryRankingRows,
+  mapCategoryMyRank,
+  isMissingCategoryRankingRpcError,
+} from '../lib/rankingCategoryLeaderboard'
 import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../lib/layoutShellClasses'
 
 const PERIOD_OPTIONS = [
@@ -51,10 +69,14 @@ const VOTER_SORT_OPTIONS = [
   { id: 'hitrate',  label: '적중률순'   },
 ]
 
-/** 랭킹 행에 티어 스냅샷(_tierRankInfo) 포함 — 캐시 키 버전 */
-const RANKING_ROWS_CACHE_VER = 't3'
+/** 명예의 전당 LNB — 트랙별 누적 P TOP 3 */
+const HOF_CHAMPION_SORT = getRankingPageSortConfig('creator', 'points')
+const HOF_ORACLE_SORT = getRankingPageSortConfig('voter', 'points')
 
-/** 랭킹 LNB·드로어 */
+const RANKING_ROWS_CACHE_VER = 't8-period-rank'
+/** 웹(lg+) 랭킹 리스트·포디움 가로 폭 — 3열 테이블에 맞춤 */
+const RANKING_LEADERBOARD_WIDTH_CLASS = 'w-full lg:max-w-2xl lg:mx-auto'
+
 const MZ_SB =
   'rounded-2xl border border-amber-100/70 bg-gradient-to-b from-white via-amber-50/25 to-yellow-50/15 shadow-[0_4px_24px_-8px_rgba(251,191,36,0.14)]'
 
@@ -105,34 +127,17 @@ function Dropdown({ label, options, value, onChange }) {
   )
 }
 
-// ── 변동 배지 ────────────────────────────────────────────────────────
-function ChangeBadge({ change }) {
-  if (change === 'NEW') return <span className="px-1.5 py-0.5 text-[9px] font-black bg-blue-100 text-blue-600 rounded-full">NEW</span>
-  if (!change || change === 0) return <Minus size={10} className="text-gray-300" />
-  if (change > 0) return (
-    <span className="flex items-center gap-0.5 text-[10px] font-black text-emerald-500">
-      <TrendingUp size={10} />{change}
-    </span>
-  )
-  return (
-    <span className="flex items-center gap-0.5 text-[10px] font-black text-red-400">
-      <TrendingDown size={10} />{Math.abs(change)}
-    </span>
-  )
-}
-
-// ── 적중률 계산 (The Oracle) ────────────────────────────────────────
+// ── 적중률 (The Oracle 보조 표시)
 function calcHitRate(hits, total) {
-  if (!total || total === 0) return null
-  return Math.round(((hits || 0) / total) * 100)
+  return calcRankingHitRate(hits, total)
 }
 
 // ── TOP 3 포디움 ─────────────────────────────────────────────────────
-function Podium({ users, category, typeTab, sortBy, categories }) {
+function Podium({ users, category, sortConfig, categories }) {
   if (!users || users.filter(Boolean).length < 1) return null
   const [second, first, third] = [users[1], users[0], users[2]]
   const catLabel = categories.find((c) => c.id === category)
-  const typeOpt = TYPE_OPTIONS.find((t) => t.id === typeTab)
+  const typeOpt = TYPE_OPTIONS.find((t) => t.id === (sortConfig.isCreator ? 'creator' : 'voter'))
 
   return (
     <div className="relative bg-gradient-to-b from-amber-50/80 via-orange-50/50 to-rose-50/40 rounded-3xl border border-amber-200/50 shadow-[0_4px_24px_-8px_rgba(251,146,60,0.2)] px-4 pt-5 pb-0 mb-4 overflow-hidden">
@@ -155,26 +160,25 @@ function Podium({ users, category, typeTab, sortBy, categories }) {
         </span>
       </div>
       <div className="flex items-end justify-center gap-1">
-        <PodiumCard user={second} rank={second?._displayRank ?? 2} typeTab={typeTab} sortBy={sortBy} />
-        <PodiumCard user={first}  rank={first?._displayRank ?? 1} typeTab={typeTab} sortBy={sortBy} />
-        <PodiumCard user={third}  rank={third?._displayRank ?? 3} typeTab={typeTab} sortBy={sortBy} />
+        <PodiumCard user={second} podiumSlot={2} displayRank={second?._displayRank} sortConfig={sortConfig} />
+        <PodiumCard user={first}  podiumSlot={1} displayRank={first?._displayRank} sortConfig={sortConfig} />
+        <PodiumCard user={third}  podiumSlot={3} displayRank={third?._displayRank} sortConfig={sortConfig} />
       </div>
     </div>
   )
 }
 
-function PodiumCard({ user: u, rank, typeTab, sortBy }) {
+function PodiumCard({ user: u, podiumSlot, displayRank, sortConfig }) {
   if (!u) return <div className="flex-1" />
+  const slot = [1, 2, 3].includes(podiumSlot) ? podiumSlot : 3
   const cfg   = {
     1: { base: 'h-24',   gradient: 'from-amber-400 to-yellow-500', ring: 'ring-2 ring-amber-400', av: 'w-16 h-16', medal: '🥇', textColor: 'text-amber-600' },
     2: { base: 'h-16',   gradient: 'from-slate-300 to-gray-400',   ring: 'ring-2 ring-gray-300',  av: 'w-12 h-12', medal: '🥈', textColor: 'text-slate-500' },
     3: { base: 'h-12',   gradient: 'from-orange-300 to-amber-500', ring: 'ring-2 ring-orange-300', av: 'w-12 h-12', medal: '🥉', textColor: 'text-orange-500' },
-  }[rank]
+  }[slot]
 
-  const isCreator = typeTab === 'creator'
-  const statLabel = isCreator
-    ? (sortBy === 'points' ? `${formatNumber(u.points || 0)}P` : `${formatNumber(u.total_votes_received || 0)}표`)
-    : (sortBy === 'points' ? `${formatNumber(u.points || 0)}P` : calcHitRate(u.vote_hits, u.vote_total) !== null ? `적중률 ${calcHitRate(u.vote_hits, u.vote_total)}%` : '-')
+  const statLabel = formatRankingPrimaryMetric(u, sortConfig, formatNumber)
+  const rankLabel = displayRank != null && displayRank > 0 ? displayRank : slot
 
   return (
     <div className="flex flex-col items-center gap-1 flex-1">
@@ -200,7 +204,7 @@ function PodiumCard({ user: u, rank, typeTab, sortBy }) {
       />
       <p className={`text-xs font-black ${cfg.textColor}`}>{statLabel}</p>
       <div className={`w-full ${cfg.base} bg-gradient-to-b ${cfg.gradient} rounded-t-xl flex items-start justify-center pt-2`}>
-        <span className="text-xs font-black text-white/90">{rank}위</span>
+        <span className="text-xs font-black text-white/90">{rankLabel}위</span>
       </div>
     </div>
   )
@@ -209,36 +213,26 @@ function PodiumCard({ user: u, rank, typeTab, sortBy }) {
 // ── 순위 행 스켈레톤 ───────────────────────────────────────────────────
 function RankRowSkeleton() {
   return (
-    <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 border-b border-amber-100/40 last:border-0 animate-pulse">
-      <div className="w-7 sm:w-8 h-5 bg-amber-100/60 rounded flex-shrink-0" />
-      <div className="flex items-center gap-2 flex-[2] min-w-0">
+    <div className="grid grid-cols-12 items-center gap-2 px-3 sm:px-4 py-3 border-b border-amber-100/40 last:border-0 animate-pulse">
+      <div className="col-span-1 h-5 bg-amber-100/60 rounded mx-auto w-6" />
+      <div className="col-span-8 flex items-center gap-2 min-w-0">
         <div className="w-8 h-8 rounded-full bg-amber-100/60 flex-shrink-0" />
         <div className="flex-1 min-w-0 space-y-1">
           <div className="h-3.5 w-20 bg-amber-100/60 rounded" />
           <div className="h-2.5 w-14 bg-orange-100/50 rounded" />
         </div>
       </div>
-      <div className="flex-1 hidden sm:block">
-        <div className="h-3 w-10 bg-amber-100/50 rounded mx-auto" />
+      <div className="col-span-3 flex justify-end">
+        <div className="h-3.5 w-12 bg-amber-100/60 rounded" />
       </div>
-      <div className="flex-1 hidden md:block">
-        <div className="h-3 w-8 bg-amber-100/50 rounded mx-auto" />
-      </div>
-      <div className="flex-1 flex justify-end">
-        <div className="h-3 w-12 bg-amber-100/60 rounded" />
-      </div>
-      <div className="w-8 h-4 bg-amber-100/50 rounded flex-shrink-0" />
     </div>
   )
 }
 
 // ── 순위 테이블 행 ───────────────────────────────────────────────────
-function RankRow({ entry, rank, isMe, typeTab, sortBy }) {
-  const isCreator = typeTab === 'creator'
-  const hitRate = calcHitRate(entry.vote_hits, entry.vote_total)
-
-  const creatorStat = entry.total_votes_received || 0
-  const oracleP = entry.oracle_points || 0
+function RankRow({ entry, rank, isMe, typeTab, sortConfig }) {
+  const primaryLabel = formatRankingPrimaryMetric(entry, sortConfig, formatNumber)
+  const hitRate = sortConfig.kind === 'hit_rate' ? getRankingSortValue(entry, sortConfig) : null
 
   const isTop3 = rank <= 3
   const top3BgMap = {
@@ -254,21 +248,21 @@ function RankRow({ entry, rank, isMe, typeTab, sortBy }) {
 
   return (
     <div className={cn(
-      'flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 border-b border-amber-100/40 last:border-0 transition-colors',
+      'grid grid-cols-12 items-center gap-2 px-3 sm:px-4 py-3 border-b border-amber-100/40 last:border-0 transition-colors',
       isMe
         ? 'bg-lime-50/80 border-l-[3px] border-l-lime-400'
         : isTop3
           ? cn(top3BgMap[rank], 'border-l-[3px]', top3BorderMap[rank])
           : 'hover:bg-amber-50/40'
     )}>
-      <div className="w-7 sm:w-8 text-center flex-shrink-0">
+      <div className="col-span-1 text-center flex-shrink-0">
         {rank <= 3
           ? <span className="text-base">{['🥇','🥈','🥉'][rank - 1]}</span>
           : <span className="text-xs font-black text-gray-400 tabular-nums">{rank}</span>
         }
       </div>
 
-      <div className="flex items-center gap-2 flex-[2] min-w-0">
+      <div className="col-span-8 flex items-center gap-2 min-w-0">
         <div className={`w-8 h-8 rounded-full overflow-hidden flex-shrink-0 ${
           rank <= 3 ? (typeTab === 'creator' ? 'ring-2 ring-amber-400 ring-offset-1' : 'ring-2 ring-violet-400 ring-offset-1') : 'ring-2 ring-gray-100'
         }`}>
@@ -297,47 +291,14 @@ function RankRow({ entry, rank, isMe, typeTab, sortBy }) {
         </div>
       </div>
 
-      {/* Creator: 투표받은 수 / Voter: 적중률 */}
-      <div className="flex-1 text-center hidden sm:block">
-        {isCreator
-          ? <span className="text-xs font-bold text-gray-600">{formatNumber(creatorStat)}표</span>
-          : hitRate !== null
-            ? <span className={`text-xs font-black ${hitRate >= 70 ? 'text-emerald-500' : hitRate >= 50 ? 'text-[#22282E]' : 'text-gray-400'}`}>{hitRate}%</span>
-            : <span className="text-[10px] text-gray-300">-</span>
-        }
-      </div>
-
-      {/* Creator: 생성 수 / Voter: 적중P */}
-      <div className="flex-1 text-center hidden md:block">
-        {isCreator
-          ? <span className="text-xs font-bold text-gray-500">{entry.total_matchups || 0}개</span>
-          : <span className="text-xs font-bold text-violet-600">{formatNumber(oracleP)}P</span>
-        }
-      </div>
-
-      {/* 상단 정렬 옵션에 연동된 값 컬럼 */}
-      <div className="flex-1 text-right">
-        {sortBy === 'points' && (
-          <>
-            <span className="text-xs font-black text-[#22282E] tabular-nums">{formatNumber(entry.points || 0)}</span>
-            <span className="text-[9px] text-gray-400 ml-0.5">P</span>
-          </>
-        )}
-        {sortBy === 'votes' && (
-          <>
-            <span className="text-xs font-black text-[#22282E] tabular-nums">{formatNumber(creatorStat)}</span>
-            <span className="text-[9px] text-gray-400 ml-0.5">표</span>
-          </>
-        )}
-        {sortBy === 'hitrate' && (
-          hitRate !== null
-            ? <span className={`text-xs font-black tabular-nums ${hitRate >= 70 ? 'text-emerald-500' : hitRate >= 50 ? 'text-[#22282E]' : 'text-gray-400'}`}>{hitRate}%</span>
-            : <span className="text-[10px] text-gray-300">-</span>
-        )}
-      </div>
-
-      <div className="w-8 flex items-center justify-end flex-shrink-0">
-        <ChangeBadge change={entry._change} />
+      <div className="col-span-3 text-right">
+        <span className={`text-xs font-black tabular-nums ${
+          sortConfig.kind === 'hit_rate' && hitRate != null && hitRate >= 70 ? 'text-emerald-500'
+            : sortConfig.kind === 'hit_rate' && hitRate != null && hitRate > 0 && hitRate < 50 ? 'text-gray-400'
+              : 'text-[#22282E]'
+        }`}>
+          {primaryLabel}
+        </span>
       </div>
     </div>
   )
@@ -349,7 +310,7 @@ export function RankingPage() {
   const { openCreateDrawer, openLoginModal } = useUIStore()
 
   const [category,  setCategory]  = useState('all')
-  const [period,    setPeriod]    = useState('weekly')
+  const [period,    setPeriod]    = useState('all')
   const [typeTab,   setTypeTab]   = useState('creator')
   const [sortBy,    setSortBy]    = useState('points')
   const [lnbOpen,   setLnbOpen]   = useState(false)  // 모바일 LNB
@@ -390,6 +351,7 @@ export function RankingPage() {
   }, [rankingCategories, category])
 
   const PAGE_SIZE = 20
+  const sortConfig = useMemo(() => getRankingPageSortConfig(typeTab, sortBy), [typeTab, sortBy])
 
   // typeTab 변경 시 sortBy를 해당 트랙의 기본값으로 초기화
   useEffect(() => {
@@ -418,15 +380,17 @@ export function RankingPage() {
         }
         let baseCh = supabase
           .from('profiles')
-          .select('id, nickname, avatar_url, points, total_votes_received, featured_badge, founding_member_number')
-          .order('total_votes_received', { ascending: false })
+          .select('id, nickname, avatar_url, champion_points, featured_badge, founding_member_number')
+          .order('champion_points', { ascending: false })
           .limit(3)
         let baseOr = supabase
           .from('profiles')
-          .select('id, nickname, avatar_url, points, vote_hits, vote_total, hit_rate, featured_badge, founding_member_number')
-          .gte('vote_total', 1)
-          .order('hit_rate', { ascending: false })
+          .select('id, nickname, avatar_url, oracle_points, featured_badge, founding_member_number')
+          .order('oracle_points', { ascending: false })
           .limit(3)
+        const oracleIds = await getOracleRankingCandidateIds({ eligibleIds })
+        if (oracleIds.length) baseOr = baseOr.in('id', oracleIds)
+        else baseOr = baseOr.eq('id', '00000000-0000-0000-0000-000000000000')
         if (eligibleIds?.length) {
           baseCh = baseCh.in('id', eligibleIds)
           baseOr = baseOr.in('id', eligibleIds)
@@ -439,12 +403,23 @@ export function RankingPage() {
         })
       } catch (_) {
         if (cancelled) return
-        const { data } = await supabase
-          .from('profiles')
-          .select('id, nickname, avatar_url, points, total_votes_received, featured_badge, founding_member_number')
-          .order('total_votes_received', { ascending: false })
-          .limit(3)
-        setHallOfFameUsers({ champion: data || [], oracle: [] })
+        const [creators, voters] = await Promise.all([
+          supabase
+            .from('profiles')
+            .select('id, nickname, avatar_url, champion_points, featured_badge, founding_member_number')
+            .order('champion_points', { ascending: false })
+            .limit(3),
+          supabase
+            .from('profiles')
+            .select('id, nickname, avatar_url, oracle_points, featured_badge, founding_member_number')
+            .order('oracle_points', { ascending: false })
+            .limit(3),
+        ])
+        if (cancelled) return
+        setHallOfFameUsers({
+          champion: creators.data || [],
+          oracle: voters.data || [],
+        })
       }
     })()
     return () => {
@@ -471,7 +446,7 @@ export function RankingPage() {
     [mobileTabCategoryIds]
   )
 
-  // TOP 10 축하 모달: 당일 1회 · 플랫폼·본인 투표 활동 있을 때만
+  // TOP 10 축하 모달: 로그인 세션당 1회 · 플랫폼·본인 투표 활동 있을 때만
   useEffect(() => {
     if (!user?.id) celebrationAutoOpenRef.current = false
   }, [user?.id])
@@ -481,30 +456,29 @@ export function RankingPage() {
     if (celebrationAutoOpenRef.current) return
 
     let cancelled = false
-    let timer = null
 
     ;(async () => {
+      if (await hasAutoShownRankingCelebrationPopup(user)) return
+      if (cancelled || celebrationAutoOpenRef.current) return
+
       const platformActive = await platformHasRankingCelebrationContext()
       if (cancelled || !platformActive) return
       if (!shouldOfferRankingCelebration({ user, profile, myRank, platformActive })) return
       if (celebrationAutoOpenRef.current) return
 
-      timer = setTimeout(() => {
-        if (cancelled || celebrationAutoOpenRef.current) return
-        celebrationAutoOpenRef.current = true
-        markRankingCelebrationSeenThisLogin(user)
-        setShowCelebration(true)
-      }, 800)
+      celebrationAutoOpenRef.current = true
+      await markRankingCelebrationPopupSeen(user)
+      if (cancelled) return
+      setShowCelebration(true)
     })()
 
     return () => {
       cancelled = true
-      if (timer) clearTimeout(timer)
     }
-  }, [myRank, user, profile])
+  }, [myRank?.rank, myRank?.data?.id, user?.id, profile?.id, profile?.total_votes_received, profile?.vote_total])
 
   const loadRankings = async () => {
-    const cacheKey = `ranking_${RANKING_ELIGIBLE_CACHE_TAG}_${RANKING_ROWS_CACHE_VER}_${category}_${typeTab}_${sortBy}_${page}`
+    const cacheKey = `ranking_${RANKING_ELIGIBLE_CACHE_TAG}_${RANKING_ROWS_CACHE_VER}_${category}_${period}_${typeTab}_${sortBy}_${page}`
     const cached = getCachedRanking(cacheKey)
     if (cached?.data) {
       const { rows, total } = cached.data
@@ -522,6 +496,83 @@ export function RankingPage() {
     setLoading(true)
     try {
       const eligibleIds = await getRankingEligibleProfileIds()
+      const from = page * PAGE_SIZE
+
+      /** 카테고리·주/월 — point_transactions·votes 집계 RPC */
+      if (category !== 'all' || period !== 'all') {
+        try {
+          const { total, rows, my_rank: rpcMyRank } = await fetchRankingLeaderboardPage({
+            categoryId: category !== 'all' ? category : null,
+            period,
+            typeTab,
+            sortBy,
+            limit: PAGE_SIZE,
+            offset: from,
+            userId: user?.id || null,
+          })
+          const rowsRanked = mapCategoryRankingRows(rows, sortConfig)
+          let rowsWithTier = rowsRanked
+          if (rowsRanked.length > 0) {
+            const rawTier = await fetchCreatorRankMapForIds(rowsRanked.map((r) => String(r.id)))
+            const tierByLower = {}
+            for (const [pid, info] of Object.entries(rawTier)) {
+              tierByLower[String(pid).toLowerCase()] = info
+            }
+            rowsWithTier = rowsRanked.map((r) => {
+              const idKey = String(r.id).toLowerCase()
+              return {
+                ...r,
+                _tierRankInfo: tierByLower[idKey] ? { ...tierByLower[idKey] } : { ...EMPTY_TIER_RANK_INFO },
+              }
+            })
+          }
+
+          setRankings(rowsWithTier)
+          setTotalCount(total)
+
+          const uidStr = user?.id ? String(user.id) : ''
+          const userExcluded =
+            Boolean(uidStr) && Boolean(eligibleIds?.length) && !eligibleIds.includes(uidStr)
+
+          let savedMyRank = null
+          if (user?.id && profile && !userExcluded) {
+            savedMyRank = mapCategoryMyRank(rpcMyRank, sortConfig)
+            if (savedMyRank?.data?.id) {
+              const rawMyTier = await fetchCreatorRankMapForIds([String(savedMyRank.data.id)])
+              let myTierInfo = { ...EMPTY_TIER_RANK_INFO }
+              for (const [k, v] of Object.entries(rawMyTier)) {
+                if (String(k).toLowerCase() === uidStr.toLowerCase()) {
+                  myTierInfo = { ...v }
+                  break
+                }
+              }
+              savedMyRank = {
+                ...savedMyRank,
+                data: { ...savedMyRank.data, _change: null, _tierRankInfo: myTierInfo },
+              }
+            }
+            setMyRank(savedMyRank)
+          } else {
+            setMyRank(null)
+          }
+
+          setCachedRanking(cacheKey, { rows: rowsWithTier, myRank: savedMyRank, total })
+          return
+        } catch (catErr) {
+          if (isMissingCategoryRankingRpcError(catErr)) {
+            if (import.meta.env.DEV) {
+              console.warn('[RankingPage] ranking leaderboard RPC missing — run supabase_ranking_category_leaderboard.sql')
+            }
+            setRankings([])
+            setTotalCount(0)
+            setMyRank(null)
+            setCachedRanking(cacheKey, { rows: [], myRank: null, total: 0 })
+            return
+          }
+          throw catErr
+        }
+      }
+
       /** RPC 배포되어 후보 목록만 있을 때: 리스트 비면 랭킹 없음 */
       if (Array.isArray(eligibleIds) && eligibleIds.length === 0) {
         setRankings([])
@@ -531,22 +582,47 @@ export function RankingPage() {
         return
       }
 
-      const from = page * PAGE_SIZE
       const to = from + PAGE_SIZE - 1
       const isCreator = typeTab === 'creator'
-      const orderCol = sortBy === 'votes' ? 'total_votes_received' : sortBy === 'hitrate' ? 'hit_rate' : 'points'
-      const selectCols = 'id, nickname, avatar_url, points, total_matchups, total_votes_received, creator_wins, creator_win_streak, vote_hits, vote_total, oracle_points, hit_rate, featured_badge, founding_member_number'
+      const orderCol = sortConfig.orderCol
 
-      let query = supabase
-        .from('profiles')
-        .select(selectCols, { count: 'exact' })
-        .order(orderCol, { ascending: false, nullsFirst: false })
-        .range(from, to)
+      let voterFilterIds = null
+      if (!isCreator) {
+        voterFilterIds = await getOracleRankingCandidateIds({
+          hitrateOnly: sortConfig.kind === 'hit_rate',
+          eligibleIds,
+        })
+        if (voterFilterIds.length === 0) {
+          setRankings([])
+          setTotalCount(0)
+          setMyRank(null)
+          setCachedRanking(cacheKey, { rows: [], myRank: null, total: 0 })
+          return
+        }
+      }
 
-      if (eligibleIds?.length) query = query.in('id', eligibleIds)
-      if (!isCreator && orderCol === 'hit_rate') query = query.gte('vote_total', 1)
+      const buildListQuery = (col) => {
+        let q = supabase
+          .from('profiles')
+          .select(RANKING_PROFILE_SELECT, { count: 'exact' })
+          .order(col, { ascending: false, nullsFirst: false })
+          .order('id', { ascending: true })
+          .range(from, to)
+        q = applyRankingQueryFilters(q, sortConfig)
+        if (voterFilterIds?.length) q = q.in('id', voterFilterIds)
+        else if (eligibleIds?.length) q = q.in('id', eligibleIds)
+        return q
+      }
 
-      const { data, count } = await query
+      let { data, count, error } = await buildListQuery(orderCol)
+      if (error && isMissingTrackPointsColumnError(error)) {
+        const fallbackCol = getRankingOrderColFallback(sortConfig)
+        if (import.meta.env.DEV) {
+          console.warn('[RankingPage] track points column missing — fallback order:', fallbackCol)
+        }
+        ;({ data, count, error } = await buildListQuery(fallbackCol))
+      }
+      if (error) throw error
       const rows = data || []
       const total = count ?? 0
 
@@ -558,7 +634,7 @@ export function RankingPage() {
 
       const [rawTier, rowsRanked] = await Promise.all([
         tierPromise,
-        attachCompetitionRanksForPage(rows, { orderCol, eligibleIds, isCreator }),
+        attachCompetitionRanksForPage(rows, { sortConfig, eligibleIds: voterFilterIds ?? eligibleIds, isCreator }),
       ])
 
       if (rows.length > 0) {
@@ -597,28 +673,43 @@ export function RankingPage() {
               data: rowsWithTier[myIdx],
             }
           } else if (page === 0) {
-            const myVal =
-              profile[orderCol] ??
-              (orderCol === 'hit_rate' && profile.vote_total > 0
-                ? ((profile.vote_hits || 0) / (profile.vote_total || 1)) * 100
-                : 0)
-            let countQuery = supabase.from('profiles').select('id', { count: 'exact', head: true }).gt(orderCol, myVal)
-            if (eligibleIds?.length) countQuery = countQuery.in('id', eligibleIds)
-            if (!isCreator && orderCol === 'hit_rate') countQuery = countQuery.gte('vote_total', 1)
-            const [{ count: above }, rawMyTier] = await Promise.all([
-              countQuery,
-              fetchCreatorRankMapForIds([uidStr]),
-            ])
-            let myTierInfo = { ...EMPTY_TIER_RANK_INFO }
-            for (const [k, v] of Object.entries(rawMyTier)) {
-              if (String(k).toLowerCase() === uidStr.toLowerCase()) {
-                myTierInfo = { ...v }
-                break
+            let myProfile = profile
+            const { data: myRow } = await supabase
+              .from('profiles')
+              .select(RANKING_PROFILE_SELECT)
+              .eq('id', uidStr)
+              .maybeSingle()
+            if (myRow) myProfile = { ...profile, ...myRow }
+
+            const myVal = getRankingSortValue(myProfile, sortConfig)
+            const excludedFromOracle =
+              !isCreator &&
+              voterFilterIds?.length &&
+              !voterFilterIds.some((id) => String(id) === uidStr)
+
+            if (!excludedFromOracle) {
+              let countQuery = supabase
+                .from('profiles')
+                .select('id', { count: 'exact', head: true })
+                .gt(sortConfig.orderCol, myVal)
+              countQuery = applyRankingQueryFilters(countQuery, sortConfig)
+              const countFilterIds = voterFilterIds ?? eligibleIds
+              if (countFilterIds?.length) countQuery = countQuery.in('id', countFilterIds)
+              const [{ count: above }, rawMyTier] = await Promise.all([
+                countQuery,
+                fetchCreatorRankMapForIds([uidStr]),
+              ])
+              let myTierInfo = { ...EMPTY_TIER_RANK_INFO }
+              for (const [k, v] of Object.entries(rawMyTier)) {
+                if (String(k).toLowerCase() === uidStr.toLowerCase()) {
+                  myTierInfo = { ...v }
+                  break
+                }
               }
-            }
-            savedMyRank = {
-              rank: (above || 0) + 1,
-              data: { ...profile, _change: null, _tierRankInfo: myTierInfo },
+              savedMyRank = {
+                rank: (above || 0) + 1,
+                data: { ...myProfile, _change: null, _tierRankInfo: myTierInfo },
+              }
             }
           }
           if (savedMyRank) setMyRank(savedMyRank)
@@ -636,7 +727,15 @@ export function RankingPage() {
   const handleCreate = () => { user ? openCreateDrawer() : openLoginModal() }
 
   const activeCat = rankingCategories.find((c) => c.id === category)
-  const top3      = [rankings[1], rankings[0], rankings[2]]
+  const top3      = rankings.slice(0, 3)
+  const primaryColLabel =
+    sortConfig.kind === 'votes' ? '투표받은 수'
+      : sortConfig.kind === 'hit_rate' ? '적중률'
+        : '포인트'
+  const rankAboveMe = myRank?.rank > 1
+    ? rankings.find((r) => (r._displayRank ?? 0) === myRank.rank - 1)
+    : null
+  const myRankProfile = myRank?.data || profile
 
   // ── LNB 내용 (공통) ────────────────────────────────────────────────
   const LNBContent = () => (
@@ -704,7 +803,9 @@ export function RankingPage() {
                       <FeaturedBadgeSpan profile={u} rankInfo={u._tierRankInfo} />
                       <FoundingMemberBadge profile={u} size={11} />
                     </p>
-                    <span className="text-[10px] text-fuchsia-400/90">{formatNumber(u.total_votes_received || 0)}표</span>
+                    <span className="text-[10px] text-fuchsia-400/90">
+                      {formatRankingPrimaryMetric(u, HOF_CHAMPION_SORT, formatNumber)}
+                    </span>
                   </div>
                 </div>
               ))}
@@ -721,7 +822,9 @@ export function RankingPage() {
                       <FeaturedBadgeSpan profile={u} rankInfo={u._tierRankInfo} />
                       <FoundingMemberBadge profile={u} size={11} />
                     </p>
-                    <span className="text-[10px] text-fuchsia-400/90">{calcHitRate(u.vote_hits, u.vote_total) !== null ? `${calcHitRate(u.vote_hits, u.vote_total)}% 적중` : '-'}</span>
+                    <span className="text-[10px] text-fuchsia-400/90">
+                      {formatRankingPrimaryMetric(u, HOF_ORACLE_SORT, formatNumber)}
+                    </span>
                   </div>
                 </div>
               ))}
@@ -816,7 +919,7 @@ export function RankingPage() {
         {/* ════════════════════════════════════════
             메인 콘텐츠
         ════════════════════════════════════════ */}
-        <div className="min-w-0">
+        <div className={cn('min-w-0', RANKING_LEADERBOARD_WIDTH_CLASS)}>
 
           {/* 섹션 헤더 */}
           <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
@@ -859,7 +962,7 @@ export function RankingPage() {
 
           {/* TOP 3 포디움 */}
           {rankings.length >= 3 && (
-            <Podium users={top3} category={category} typeTab={typeTab} sortBy={sortBy} categories={rankingCategories} />
+            <Podium users={top3} category={category} sortConfig={sortConfig} categories={rankingCategories} />
           )}
 
           {/* 순위 테이블 */}
@@ -867,19 +970,10 @@ export function RankingPage() {
             <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-amber-400 via-orange-500 to-rose-400" />
 
             {/* 테이블 헤더 */}
-            <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 bg-gradient-to-r from-amber-100/50 to-orange-100/30 border-b border-amber-200/40 text-[10px] font-black text-amber-700/80 uppercase tracking-wider mt-[3px]">
-              <div className="w-7 sm:w-8 text-center flex-shrink-0">#</div>
-              <div className="flex-[2]">유저</div>
-              <div className="flex-1 text-center hidden sm:block">
-                {typeTab === 'creator' ? '투표받은 수' : '적중률'}
-              </div>
-              <div className="flex-1 text-center hidden md:block">
-                {typeTab === 'creator' ? '생성' : '적중P'}
-              </div>
-              <div className="flex-1 text-right text-[10px] font-black text-gray-400 uppercase tracking-wider">
-                {sortBy === 'points' ? '포인트' : sortBy === 'votes' ? '투표받은 수' : '적중률'}
-              </div>
-              <div className="w-8 text-right flex-shrink-0">변동</div>
+            <div className="grid grid-cols-12 items-center gap-2 px-3 sm:px-4 py-2.5 bg-gradient-to-r from-amber-100/50 to-orange-100/30 border-b border-amber-200/40 text-[10px] font-black text-amber-700/80 uppercase tracking-wider mt-[3px]">
+              <div className="col-span-1 text-center">#</div>
+              <div className="col-span-8">유저</div>
+              <div className="col-span-3 text-right">{primaryColLabel}</div>
             </div>
 
             {loading && rankings.length === 0
@@ -893,7 +987,7 @@ export function RankingPage() {
                       rank={entry._displayRank ?? 0}
                       isMe={entry.id === user?.id}
                       typeTab={typeTab}
-                      sortBy={sortBy}
+                      sortConfig={sortConfig}
                     />
                   ))}
                 </>
@@ -1004,34 +1098,27 @@ export function RankingPage() {
                   <FoundingMemberBadge profile={profile} size={11} />
                 </p>
                 <p className="text-[10px] text-gray-500">
-                  {formatNumber(profile?.points || 0)}P
-                  {typeTab === 'creator'
-                    ? (profile?.total_votes_received > 0 && <span className="ml-2 text-amber-500 font-bold">{formatNumber(profile.total_votes_received)}표</span>)
-                    : calcHitRate(profile?.vote_hits, profile?.vote_total) !== null && (
-                        <span className="ml-2 text-violet-500 font-bold">적중률 {calcHitRate(profile.vote_hits, profile.vote_total)}%</span>
-                      )
-                  }
+                  {formatRankingPrimaryMetric(myRankProfile, sortConfig, formatNumber)}
                 </p>
               </div>
             </div>
 
             {/* 상위 n명과 격차 */}
-            {myRank.rank > 1 && rankings[myRank.rank - 2] && (
-              <div className="flex-shrink-0 text-right hidden sm:block">
-                <p className="text-[9px] text-gray-400">위 순위와의 격차</p>
-                <p className="text-xs font-black text-orange-500">
-                  -{formatNumber((rankings[myRank.rank - 2]?.points || 0) - (profile?.points || 0))}P
-                </p>
-              </div>
-            )}
+            {rankAboveMe && myRankProfile && (() => {
+              const gapLabel = formatRankingSortGap(rankAboveMe, myRankProfile, sortConfig, formatNumber)
+              if (!gapLabel) return null
+              return (
+                <div className="flex-shrink-0 text-right hidden sm:block">
+                  <p className="text-[9px] text-gray-400">위 순위와의 격차</p>
+                  <p className="text-xs font-black text-orange-500">-{gapLabel}</p>
+                </div>
+              )
+            })()}
 
             {/* TOP 10이면 축하 카드 재표시 버튼 */}
             {myRank.rank <= 10 && profileHasRankingEngagement(profile) && (
               <button
-                onClick={() => {
-                  if (user) clearRankingCelebrationSeenThisLogin(user)
-                  setShowCelebration(true)
-                }}
+                onClick={() => setShowCelebration(true)}
                 className="flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-xl font-black text-xs text-white transition-all active:scale-95"
                 style={{ background: 'linear-gradient(135deg,#a855f7,#ec4899)', boxShadow: '0 2px 12px rgba(168,85,247,0.4)' }}
               >

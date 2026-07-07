@@ -35,11 +35,23 @@ function isInfraError(status) {
   )
 }
 
+function shouldAllowSimilaritySkip() {
+  return import.meta.env.VITE_MATCHUP_SIMILARITY_FAIL_OPEN === '1'
+}
+
+function rejectSkippedCheck(reason) {
+  if (shouldAllowSimilaritySkip()) {
+    console.warn('[similarity] check skipped (fail-open):', reason)
+    return { skipped: true }
+  }
+  throw new Error('콘텐츠 유사도 검사를 완료하지 못했어요. 잠시 후 다시 시도해 주세요.')
+}
+
 /**
- * @param {{ matchupId: string, mode: 'create'|'edit', right: { type: string, text?: string|null, url?: string|null, thumb?: string|null } }} params
+ * @param {{ matchupId: string, mode: 'create'|'edit', category?: string|null, categoryLabel?: string|null, right: { type: string, text?: string|null, url?: string|null, thumb?: string|null } }} params
  * @returns {Promise<{ skipped: boolean, similarity?: number }>}
  */
-export async function checkMatchupChallengeSimilarity({ matchupId, mode, right }) {
+export async function checkMatchupChallengeSimilarity({ matchupId, mode, category, categoryLabel, right }) {
   // 세션 획득 (타임아웃 적용 — auth 락 경합 시 무한 대기 방지)
   let tok = null
   try {
@@ -58,10 +70,8 @@ export async function checkMatchupChallengeSimilarity({ matchupId, mode, right }
     throw new Error('로그인이 필요해요')
   }
 
-  // 프로덕션에서도 VITE_MATCHUP_SIMILARITY_FAIL_OPEN=1 을 넣지 않으면
-  // OpenAI 오류 시 업로드가 막히므로, 인프라 오류는 항상 skip 처리.
-  // ok:false(유사도 거부)만 실제 에러로 전파.
-  const explicitFailOpen = import.meta.env.VITE_MATCHUP_SIMILARITY_FAIL_OPEN === '1'
+  // 인프라 오류는 기본 차단. VITE_MATCHUP_SIMILARITY_FAIL_OPEN=1 일 때만 로컬/QA용 생략.
+  const explicitFailOpen = shouldAllowSimilaritySkip()
 
   const url = apiUrl()
   const timeoutMs = parseTimeoutMs()
@@ -76,14 +86,12 @@ export async function checkMatchupChallengeSimilarity({ matchupId, mode, right }
         'Content-Type': 'application/json',
         Authorization: `Bearer ${tok}`,
       },
-      body: JSON.stringify({ matchupId, mode, right }),
+      body: JSON.stringify({ matchupId, mode, category: category || null, categoryLabel: categoryLabel || null, right }),
       signal: controller.signal,
     })
   } catch (e) {
-    // 네트워크 오류·타임아웃 = 인프라 문제이므로 콘텐츠 업로드는 허용(skip)
-    if (explicitFailOpen || e?.name === 'AbortError' || !e?.message?.includes('로그인')) {
-      console.warn('[similarity] fetch error, skipping check:', e?.message)
-      return { skipped: true }
+    if (explicitFailOpen || e?.name === 'AbortError') {
+      return rejectSkippedCheck(e?.message || 'network')
     }
     throw new Error(e?.message || '유사도 검사에 연결할 수 없어요')
   } finally {
@@ -93,10 +101,8 @@ export async function checkMatchupChallengeSimilarity({ matchupId, mode, right }
   const data = await res.json().catch(() => ({}))
 
   if (!res.ok) {
-    // 인프라 오류(함수 없음·서버 오류·속도제한 등) — 콘텐츠 문제가 아니므로 skip
     if (isInfraError(res.status)) {
-      console.warn('[similarity] infra error', res.status, data.error)
-      return { skipped: true }
+      return rejectSkippedCheck(data.error || `http_${res.status}`)
     }
     // 400/401/403 = 요청 오류이므로 에러 전파
     if (res.status === 401) throw new Error('로그인이 필요해요')
@@ -109,8 +115,12 @@ export async function checkMatchupChallengeSimilarity({ matchupId, mode, right }
     throw new Error(data.message || data.error || '주제 유사도가 낮아 업로드할 수 없어요')
   }
 
+  if (data.skipped) {
+    return rejectSkippedCheck(data.reason || 'server_skipped')
+  }
+
   return {
-    skipped: !!data.skipped,
+    skipped: false,
     similarity: typeof data.similarity === 'number' ? data.similarity : undefined,
   }
 }

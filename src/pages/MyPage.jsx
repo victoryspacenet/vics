@@ -49,9 +49,10 @@ const CREATED_SORT   = [
   { id: 'deadline', label: '마감임박순' },
 ]
 const CREATED_FILTER = [
-  { id: 'all',    label: '전체' },
-  { id: 'active', label: '진행 중' },
-  { id: 'ended',  label: '종료됨' },
+  { id: 'all',     label: '전체' },
+  { id: 'waiting', label: '대기중' },
+  { id: 'active',  label: '진행 중' },
+  { id: 'ended',   label: '종료됨' },
 ]
 const CREATED_PAGE_SIZE = 8
 const VOTED_PAGE_SIZE   = 8
@@ -60,6 +61,7 @@ const VOTED_FILTER = [
   { id: 'win',   label: '승리(적중)' },
   { id: 'lose',  label: '패배(아쉬움)' },
   { id: 'live',  label: '진행중' },
+  { id: 'draw',  label: '무승부' },
 ]
 const VOTER_RESULT_POINTS = { win: POINTS_VOTER_HIT, lose: POINTS_VOTER_MISS, draw: POINTS_VOTER_DRAW }
 const ATTENDANCE_POINTS = 10  // 출석 기본 포인트
@@ -70,6 +72,62 @@ const SECTION_CARD =
   'rounded-2xl border border-pink-200/55 bg-white/93 shadow-[0_6px_32px_-12px_rgba(244,114,182,0.25)] backdrop-blur-[2px]'
 const LIST_CARD =
   'rounded-2xl border border-pink-100/45 bg-white/95 shadow-sm shadow-pink-100/20'
+/** 웹(lg+) 마이페이지 매치업 피드 — 카드가 화면 전체를 채우지 않도록 */
+const MY_PAGE_MATCHUP_FEED_WIDTH = 'w-full lg:max-w-xl xl:max-w-2xl lg:mx-auto'
+
+/** 투표 마감·결과 확정 매치업 (status=active여도 expires_at 지난 경우 포함) */
+function isVotePeriodExpired(expiresAt) {
+  if (!expiresAt) return false
+  const t = new Date(expiresAt).getTime()
+  return Number.isFinite(t) && t <= Date.now()
+}
+
+function isMatchupVotingFinalized(m) {
+  if (!m || m.right_type == null) return false
+  if ((m.total_votes || 0) <= 0) return false
+  if (m.status !== 'active') return true
+  return isVotePeriodExpired(m.expires_at)
+}
+
+/** 내가 만든 매치업 UI 단계 — admin·메인 피드 NEW 탭과 동일 */
+function getCreatedMatchupPhase(m) {
+  if (!m) return 'ended'
+  if (m.status === 'closed') return 'ended'
+  if (m.status !== 'active') return 'ended'
+  if (m.right_type == null) return 'waiting'
+  if (isVotePeriodExpired(m.expires_at)) return 'ended'
+  return 'live'
+}
+
+/** 내가 투표한 매치업 1건 — phase·적중 여부 */
+function analyzeVotedEntry(v) {
+  const m = v?.matchups
+  if (!m) return null
+  const phase = getCreatedMatchupPhase(m)
+  const hasVotes = (m.total_votes || 0) > 0
+  const isDraw = (m.left_votes || 0) === (m.right_votes || 0)
+  const winner = isDraw ? null : (m.left_votes > m.right_votes ? 'left' : 'right')
+  const isLive = phase === 'live'
+  const isEnded = phase === 'ended'
+  const isWaiting = phase === 'waiting'
+  const myWin = isEnded && hasVotes && !isDraw && winner && v.side === winner
+  const myLose = isEnded && hasVotes && !isDraw && winner && v.side !== winner
+  const myDraw = isEnded && hasVotes && isDraw
+  return { m, phase, isLive, isEnded, isWaiting, hasVotes, isDraw, winner, myWin, myLose, myDraw }
+}
+
+function nonNegInt(v, fallback = 0) {
+  const n = Number(v)
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : fallback
+}
+
+function isChampionSideWin(m, side) {
+  if (!isMatchupVotingFinalized(m)) return false
+  const lv = m.left_votes || 0
+  const rv = m.right_votes || 0
+  if (lv === rv) return false
+  return side === 'left' ? lv > rv : rv > lv
+}
 
 export function MyPage() {
   const { user, profile, fetchProfile, loading: authLoading } = useAuthStore()
@@ -83,6 +141,7 @@ export function MyPage() {
   const [filterCreated,    setFilterCreated]     = useState('all')
   const [filterVoted,      setFilterVoted]       = useState('all')
   const [createdMatchups,  setCreatedMatchups]   = useState([])
+  const [challengedMatchups, setChallengedMatchups] = useState([])
   const [votedMatchups,    setVotedMatchups]     = useState([])
   const [stats,            setStats]             = useState(null)
   const [tierRankSnapshot, setTierRankSnapshot]   = useState(() => ({ ...EMPTY_TIER_RANK_INFO }))
@@ -150,8 +209,12 @@ export function MyPage() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      const bundle = await fetchMyPageListsBundle(user.id)
+      const [bundle] = await Promise.all([
+        fetchMyPageListsBundle(user.id),
+        fetchProfile(user.id, { force: true }),
+      ])
       setCreatedMatchups(bundle.createdMatchups)
+      setChallengedMatchups(bundle.challengedMatchups)
       setVotedMatchups(bundle.votedMatchups)
       setTierRankSnapshot(bundle.tierRankSnapshot)
       setStats(bundle.stats)
@@ -168,36 +231,75 @@ export function MyPage() {
     void fetchAttendanceStatus()
   }, [user])
 
-  const sortedCreated = [...createdMatchups].sort((a, b) => {
-    if (sortCreated === 'latest')   return new Date(b.created_at) - new Date(a.created_at)
-    if (sortCreated === 'deadline') {
-      const da = a.expires_at ? new Date(a.expires_at) : Infinity
-      const db = b.expires_at ? new Date(b.expires_at) : Infinity
-      return da - db
+  const sortedCreated = useMemo(() => {
+    const list = [...createdMatchups]
+    if (sortCreated === 'latest') {
+      return list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     }
-    const rateA = a.total_votes > 0 ? Math.max(a.left_votes, a.right_votes) / a.total_votes : 0
-    const rateB = b.total_votes > 0 ? Math.max(b.left_votes, b.right_votes) / b.total_votes : 0
-    return rateB - rateA
-  })
+    if (sortCreated === 'rate') {
+      return list.sort((a, b) => {
+        const rateA = a.total_votes > 0 ? Math.max(a.left_votes, a.right_votes) / a.total_votes : 0
+        const rateB = b.total_votes > 0 ? Math.max(b.left_votes, b.right_votes) / b.total_votes : 0
+        return rateB - rateA
+      })
+    }
+    if (sortCreated === 'deadline') {
+      return list
+        .filter((m) => getCreatedMatchupPhase(m) === 'live')
+        .sort((a, b) => {
+          const da = a.expires_at ? new Date(a.expires_at).getTime() : Infinity
+          const db = b.expires_at ? new Date(b.expires_at).getTime() : Infinity
+          return da - db
+        })
+    }
+    return list
+  }, [createdMatchups, sortCreated])
+
+  const createdPhaseCounts = useMemo(() => {
+    let waiting = 0
+    let live = 0
+    let ended = 0
+    for (const m of createdMatchups) {
+      const phase = getCreatedMatchupPhase(m)
+      if (phase === 'waiting') waiting += 1
+      else if (phase === 'live') live += 1
+      else ended += 1
+    }
+    return { waiting, live, ended }
+  }, [createdMatchups])
 
   const filteredCreated = sortedCreated.filter((m) => {
-    if (filterCreated === 'active') return m.status === 'active'
-    if (filterCreated === 'ended')  return m.status !== 'active'
+    const phase = getCreatedMatchupPhase(m)
+    if (filterCreated === 'waiting') return phase === 'waiting'
+    if (filterCreated === 'active') return phase === 'live'
+    if (filterCreated === 'ended') return phase === 'ended'
     return true
   })
   const totalCreatedPages = Math.max(1, Math.ceil(filteredCreated.length / CREATED_PAGE_SIZE))
 
+  const votedPhaseCounts = useMemo(() => {
+    let win = 0
+    let lose = 0
+    let live = 0
+    let draw = 0
+    for (const v of votedMatchups) {
+      const o = analyzeVotedEntry(v)
+      if (!o) continue
+      if (o.myWin) win += 1
+      if (o.myLose) lose += 1
+      if (o.isLive) live += 1
+      if (o.myDraw) draw += 1
+    }
+    return { all: votedMatchups.length, win, lose, live, draw }
+  }, [votedMatchups])
+
   const filteredVoted = votedMatchups.filter((v) => {
-    const m = v.matchups
-    if (!m) return false
-    const isActive = m.status === 'active'
-    const isDraw   = (m.left_votes || 0) === (m.right_votes || 0)
-    const winner   = isDraw ? null : (m.left_votes > m.right_votes ? 'left' : 'right')
-    const myWin    = !isDraw && winner && v.side === winner && m.total_votes > 0 && !isActive
-    const myLose   = !isDraw && m.total_votes > 0 && !isActive && v.side !== winner
-    if (filterVoted === 'win')  return myWin
-    if (filterVoted === 'lose') return myLose
-    if (filterVoted === 'live') return isActive
+    const o = analyzeVotedEntry(v)
+    if (!o) return false
+    if (filterVoted === 'win') return o.myWin
+    if (filterVoted === 'lose') return o.myLose
+    if (filterVoted === 'live') return o.isLive
+    if (filterVoted === 'draw') return o.myDraw
     return true
   })
   const totalVotedPages = Math.max(1, Math.ceil(filteredVoted.length / VOTED_PAGE_SIZE))
@@ -229,30 +331,22 @@ export function MyPage() {
 
   // ── 투표 탭 계산 ──────────────────────────────────────────────────
   const votesWithResult = votedMatchups.filter((v) => {
-    const m = v.matchups
-    return m && m.total_votes > 0 && m.status !== 'active'
+    const o = analyzeVotedEntry(v)
+    return o && o.isEnded && o.hasVotes
   })
-  const votedWins  = votesWithResult.filter((v) => {
-    const m = v.matchups
-    const isDraw = (m.left_votes || 0) === (m.right_votes || 0)
-    const winner = isDraw ? null : (m.left_votes > m.right_votes ? 'left' : 'right')
-    return !isDraw && winner && v.side === winner
-  }).length
+  const votedWins = votesWithResult.filter((v) => analyzeVotedEntry(v)?.myWin).length
   const voteWinRate = votesWithResult.length > 0
     ? Math.round((votedWins / votesWithResult.length) * 100)
     : 0
   const totalVotedPoints = useMemo(() => {
     return votedMatchups.reduce((sum, v) => {
-      const m = v.matchups
-      const isActive = m?.status === 'active'
-      const hasVotes = (m?.total_votes || 0) > 0
-      const isDraw = (m?.left_votes || 0) === (m?.right_votes || 0)
-      const winner = isDraw ? null : ((m?.left_votes || 0) > (m?.right_votes || 0) ? 'left' : 'right')
-      const myWin = !isActive && hasVotes && !isDraw && v.side === winner
-      const pts =
-        !isActive && hasVotes
-          ? (isDraw ? VOTER_RESULT_POINTS.draw : myWin ? VOTER_RESULT_POINTS.win : VOTER_RESULT_POINTS.lose)
-          : 0
+      const o = analyzeVotedEntry(v)
+      if (!o || !o.isEnded || !o.hasVotes) return sum
+      const pts = o.isDraw
+        ? VOTER_RESULT_POINTS.draw
+        : o.myWin
+          ? VOTER_RESULT_POINTS.win
+          : VOTER_RESULT_POINTS.lose
       return sum + pts
     }, 0)
   }, [votedMatchups])
@@ -282,45 +376,42 @@ export function MyPage() {
     if (nextMin <= curMin) return 100
     return Math.min(100, Math.round(((pts - curMin) / (nextMin - curMin)) * 100))
   }, [matchupTier.id, profile])
-  /** 만든 매치업(작성자 = 좌측) + 투표한 타인 매치업의 승·패를 합산한 총승률 (무승부·미종료 제외) */
-  const combinedOutcome = useMemo(() => {
-    if (!user?.id) return { wins: 0, losses: 0, rate: 0 }
-    let wins = 0
-    let losses = 0
-
+  /** The Champion — 생성(LEFT) + 도전(RIGHT) 참여 매치업, creator_wins와 동일 범위 */
+  const championStats = useMemo(() => {
+    let listWins = 0
     for (const m of createdMatchups) {
-      if (m.status === 'active') continue
-      if (m.right_type == null) continue
-      const tv = m.total_votes || 0
-      if (tv === 0) continue
-      const lv = m.left_votes || 0
-      const rv = m.right_votes || 0
-      if (lv === rv) continue
-      const winner = lv > rv ? 'left' : 'right'
-      if (winner === 'left') wins += 1
-      else losses += 1
+      if (isChampionSideWin(m, 'left')) listWins += 1
     }
+    for (const m of challengedMatchups) {
+      if (isChampionSideWin(m, 'right')) listWins += 1
+    }
+    const total = createdMatchups.length + challengedMatchups.length
+    const dbWins = nonNegInt(profile?.creator_wins)
+    const wins = total > 0 ? Math.min(Math.max(dbWins, listWins), total) : 0
+    return { wins, total }
+  }, [profile?.creator_wins, createdMatchups, challengedMatchups])
 
+  /** The Oracle — 투표 적중·참여 (적중 ≤ 참여) */
+  const oracleStats = useMemo(() => {
+    let listWins = 0
     for (const v of votedMatchups) {
       const m = v.matchups
-      if (!m || m.user_id === user.id) continue
-      if (m.status === 'active') continue
-      const tv = m.total_votes || 0
-      if (tv === 0) continue
+      if (!isMatchupVotingFinalized(m)) continue
       const lv = m.left_votes || 0
       const rv = m.right_votes || 0
       if (lv === rv) continue
       const winner = lv > rv ? 'left' : 'right'
-      if (v.side === winner) wins += 1
-      else losses += 1
+      if (v.side === winner) listWins += 1
     }
+    const dbWins = nonNegInt(profile?.vote_hits)
+    const dbTotal = nonNegInt(profile?.vote_total)
+    const total = Math.max(dbTotal, votedMatchups.length)
+    const wins = Math.min(Math.max(dbWins, listWins), total)
+    return { wins, total }
+  }, [profile?.vote_hits, profile?.vote_total, votedMatchups])
 
-    const n = wins + losses
-    const rate = n > 0 ? Math.round((wins / n) * 100) : 0
-    return { wins, losses, rate }
-  }, [user?.id, createdMatchups, votedMatchups])
-
-  const totalMatchups = createdMatchups.length + votedMatchups.length
+  const trackRankLabel = (rank) =>
+    typeof rank === 'number' && rank > 0 ? `${rank}위` : '-'
 
   // 활동통계 차트 데이터 (주간 7일 / 월간 4주)
   const chartData = useMemo(() => {
@@ -545,11 +636,25 @@ export function MyPage() {
               </p>
             </div>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 flex-1 w-full sm:w-auto">
-            <SideStatBox variant="rank" icon="🏅" label="랭킹" value={typeof stats?.rank === 'number' ? `${stats.rank}위` : '-'} color="text-amber-600" />
-            <SideStatBox variant="rate" icon="📊" label="총승률" value={`${combinedOutcome.rate}%`} color="text-sky-600" />
-            <SideStatBox variant="wins" icon="🏆" label="총승리" value={`${combinedOutcome.wins}승`} color="text-emerald-600" />
-            <SideStatBox variant="total" icon="⚔️" label="총 매치업" value={`${totalMatchups}전`} color="text-violet-600" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1 w-full">
+            <MyTrackStatsPanel
+              emoji="👑"
+              title="The Champion"
+              subtitle="매치업 생성·도전"
+              rank={trackRankLabel(tierRankSnapshot.overallRankChampion)}
+              wins={`${championStats.wins}승`}
+              total={`${championStats.total}전`}
+              headerClass="from-amber-600 via-orange-500 to-rose-500"
+            />
+            <MyTrackStatsPanel
+              emoji="🔮"
+              title="The Oracle"
+              subtitle="매치업 투표"
+              rank={trackRankLabel(tierRankSnapshot.overallRankOracle)}
+              wins={`${oracleStats.wins}승`}
+              total={`${oracleStats.total}전`}
+              headerClass="from-violet-600 via-fuchsia-500 to-pink-500"
+            />
           </div>
         </div>
 
@@ -702,10 +807,12 @@ export function MyPage() {
                   <Flame size={18} className="text-amber-300" />
                   {createdMatchups.length}개의 매치업을 이끌었습니다!
                 </p>
-                <div className="flex items-center gap-4 mt-3 text-xs text-white/70 relative z-10">
-                  <span>진행 중 {createdMatchups.filter(m => m.status === 'active').length}개</span>
+                <div className="flex items-center gap-4 mt-3 text-xs text-white/70 relative z-10 flex-wrap">
+                  <span>대기중 {createdPhaseCounts.waiting}개</span>
                   <span>·</span>
-                  <span>종료됨 {createdMatchups.filter(m => m.status !== 'active').length}개</span>
+                  <span>진행 중 {createdPhaseCounts.live}개</span>
+                  <span>·</span>
+                  <span>종료됨 {createdPhaseCounts.ended}개</span>
                   <span>·</span>
                   <span>총 {formatNumber(createdMatchups.reduce((s, m) => s + (m.total_votes || 0), 0))}표 획득</span>
                 </div>
@@ -744,9 +851,11 @@ export function MyPage() {
                       {f.label}
                       {f.id !== 'all' && (
                         <span className={`ml-1 text-[9px] ${filterCreated === f.id ? 'text-white/70' : 'text-gray-400'}`}>
-                          {f.id === 'active'
-                            ? createdMatchups.filter(m => m.status === 'active').length
-                            : createdMatchups.filter(m => m.status !== 'active').length}
+                          {f.id === 'waiting'
+                            ? createdPhaseCounts.waiting
+                            : f.id === 'active'
+                              ? createdPhaseCounts.live
+                              : createdPhaseCounts.ended}
                         </span>
                       )}
                     </button>
@@ -774,13 +883,13 @@ export function MyPage() {
 
               {/* 매치업 카드 리스트 (세로 스크롤 + 스냅) */}
               {loading
-                ? <div className="space-y-3">
+                ? <div className={cn('space-y-3', MY_PAGE_MATCHUP_FEED_WIDTH)}>
                     {Array.from({ length: 4 }).map((_, i) => <FullCardSkeleton key={i} />)}
                   </div>
                 : filteredCreated.length > 0
                 ? <>
                     <div
-                      className="space-y-4"
+                      className={cn('space-y-4', MY_PAGE_MATCHUP_FEED_WIDTH)}
                       style={{ scrollSnapType: 'y proximity' }}
                     >
                       {pagedCreated.map((m) => (
@@ -789,17 +898,31 @@ export function MyPage() {
                     </div>
                     {/* 페이지네이션 */}
                     {totalCreatedPages > 1 && (
-                      <CreatedPagination
-                        current={createdPage}
-                        total={totalCreatedPages}
-                        onPage={goCreatedPage}
-                      />
+                      <div className={MY_PAGE_MATCHUP_FEED_WIDTH}>
+                        <CreatedPagination
+                          current={createdPage}
+                          total={totalCreatedPages}
+                          onPage={goCreatedPage}
+                        />
+                      </div>
                     )}
                   </>
                 : <EmptyState
                     emoji="🥊"
-                    title={filterCreated === 'active' ? '진행 중인 매치업이 없어요' : filterCreated === 'ended' ? '종료된 매치업이 없어요' : '아직 만든 매치업이 없어요'}
-                    desc="첫 번째 매치업을 만들어 경쟁을 시작해보세요!"
+                    title={
+                      sortCreated === 'deadline' || filterCreated === 'active'
+                        ? '진행 중인 매치업이 없어요'
+                        : filterCreated === 'waiting'
+                          ? '대기 중인 매치업이 없어요'
+                          : filterCreated === 'ended'
+                            ? '종료된 매치업이 없어요'
+                            : '아직 만든 매치업이 없어요'
+                    }
+                    desc={
+                      sortCreated === 'deadline'
+                        ? '마감임박순은 투표가 진행 중인 매치업만 보여줘요.'
+                        : '첫 번째 매치업을 만들어 경쟁을 시작해보세요!'
+                    }
                   />
               }
             </div>
@@ -851,10 +974,7 @@ export function MyPage() {
               {/* 필터 탭 */}
               <div className="flex items-center gap-1 bg-violet-100/40 rounded-full p-1 mb-4 overflow-x-auto scrollbar-hide border border-violet-100/50">
                 {VOTED_FILTER.map((f) => {
-                  const count = f.id === 'all'  ? votedMatchups.length
-                              : f.id === 'win'  ? votedMatchups.filter(v => { const m = v.matchups; if (!m || m.status === 'active') return false; const draw = (m.left_votes || 0) === (m.right_votes || 0); const w = draw ? null : (m.left_votes > m.right_votes ? 'left' : 'right'); return !draw && w && v.side === w && m.total_votes > 0 }).length
-                              : f.id === 'lose' ? votedMatchups.filter(v => { const m = v.matchups; if (!m || m.status === 'active') return false; const draw = (m.left_votes || 0) === (m.right_votes || 0); const w = draw ? null : (m.left_votes > m.right_votes ? 'left' : 'right'); return !draw && v.side !== w && m.total_votes > 0 }).length
-                              : votedMatchups.filter(v => v.matchups?.status === 'active').length
+                  const count = votedPhaseCounts[f.id] ?? votedPhaseCounts.all
                   return (
                     <button
                       key={f.id}
@@ -865,7 +985,7 @@ export function MyPage() {
                           : 'text-violet-800/70 hover:text-violet-950'
                       }`}
                     >
-                      {f.id === 'win' ? '🎯' : f.id === 'lose' ? '💧' : f.id === 'live' ? '⏳' : null}
+                      {f.id === 'win' ? '🎯' : f.id === 'lose' ? '💧' : f.id === 'live' ? '⏳' : f.id === 'draw' ? '🤝' : null}
                       {f.label}
                       <span className={`text-[9px] px-1 rounded-full ${
                         filterVoted === f.id ? 'bg-white/25 text-white' : 'bg-violet-200/70 text-violet-800/80'
@@ -877,22 +997,22 @@ export function MyPage() {
 
               {/* 카드 리스트 */}
               {loading
-                ? <div className="space-y-4">
+                ? <div className={cn('space-y-4', MY_PAGE_MATCHUP_FEED_WIDTH)}>
                     {Array.from({ length: 3 }).map((_, i) => <FullCardSkeleton key={i} />)}
                   </div>
                 : filteredVoted.length > 0
                 ? <>
-                    <div className="space-y-4" style={{ scrollSnapType: 'y proximity' }}>
-                      {pagedVoted.map((v, idx) => {
-                        const m = v.matchups
-                        const isActive = m?.status === 'active'
-                        const hasVotes = (m?.total_votes || 0) > 0
-                        const isDraw = (m?.left_votes || 0) === (m?.right_votes || 0)
-                        const winner = isDraw ? null : ((m?.left_votes || 0) > (m?.right_votes || 0) ? 'left' : 'right')
-                        const myWin = !isActive && hasVotes && !isDraw && v.side === winner
+                    <div className={cn('space-y-4', MY_PAGE_MATCHUP_FEED_WIDTH)} style={{ scrollSnapType: 'y proximity' }}>
+                      {pagedVoted.map((v) => {
+                        const o = analyzeVotedEntry(v)
+                        const m = o?.m
                         const pts =
-                          !isActive && hasVotes
-                            ? (isDraw ? VOTER_RESULT_POINTS.draw : myWin ? VOTER_RESULT_POINTS.win : VOTER_RESULT_POINTS.lose)
+                          o && o.isEnded && o.hasVotes
+                            ? (o.isDraw
+                              ? VOTER_RESULT_POINTS.draw
+                              : o.myWin
+                                ? VOTER_RESULT_POINTS.win
+                                : VOTER_RESULT_POINTS.lose)
                             : 0
                         return (
                           <VotedMatchupFullCard
@@ -905,19 +1025,22 @@ export function MyPage() {
                       })}
                     </div>
                     {totalVotedPages > 1 && (
-                      <CreatedPagination
-                        current={votedPage}
-                        total={totalVotedPages}
-                        onPage={goVotedPage}
-                      />
+                      <div className={MY_PAGE_MATCHUP_FEED_WIDTH}>
+                        <CreatedPagination
+                          current={votedPage}
+                          total={totalVotedPages}
+                          onPage={goVotedPage}
+                        />
+                      </div>
                     )}
                   </>
                 : <EmptyState
-                    emoji={filterVoted === 'win' ? '🎯' : filterVoted === 'lose' ? '💧' : filterVoted === 'live' ? '⏳' : '🗳️'}
+                    emoji={filterVoted === 'win' ? '🎯' : filterVoted === 'lose' ? '💧' : filterVoted === 'live' ? '⏳' : filterVoted === 'draw' ? '🤝' : '🗳️'}
                     title={
                       filterVoted === 'win'  ? '아직 적중한 매치업이 없어요'  :
                       filterVoted === 'lose' ? '아직 아쉬운 결과가 없어요'    :
-                      filterVoted === 'live' ? '진행 중인 투표가 없어요'       :
+                      filterVoted === 'live' ? '투표한 매치업 중에 진행중인 매치업이 없어요'       :
+                      filterVoted === 'draw' ? '무승부로 끝난 투표가 없어요'   :
                       '아직 투표한 매치업이 없어요'
                     }
                     desc="피드에서 매치업에 투표하고 포인트를 획득해보세요!"
@@ -971,7 +1094,10 @@ function CircularTierRing({ tierEmoji, rankLabel, progressPercent }) {
 
 // ── 내가 만든 매치업 풀카드 (세로 리스트) ───────────────────────────
 function CreatedMatchupFullCard({ matchup: m }) {
-  const isActive   = m.status === 'active'
+  const phase = getCreatedMatchupPhase(m)
+  const isWaiting = phase === 'waiting'
+  const isLive = phase === 'live'
+  const isEnded = phase === 'ended'
   const isComplete = m.right_type != null
   const hasVotes   = (m.total_votes || 0) > 0
   const isDraw     = (m.left_votes || 0) === (m.right_votes || 0)
@@ -981,19 +1107,28 @@ function CreatedMatchupFullCard({ matchup: m }) {
   const rightThumb = m.right_thumbnail_url || (m.right_type === 'image' ? m.right_url : null)
   const { left, right } = calcPercent(m.left_votes, m.right_votes)
 
+  const topBarClass = isLive
+    ? 'bg-gradient-to-r from-emerald-400 via-teal-500 to-cyan-400'
+    : isWaiting
+      ? 'bg-gradient-to-r from-amber-400 via-orange-400 to-yellow-400'
+      : 'bg-gradient-to-r from-fuchsia-400 via-pink-400 to-rose-400'
+
   return (
     <div
       className={`${LIST_CARD} overflow-hidden hover:shadow-[0_8px_28px_-8px_rgba(244,114,182,0.3)] hover:-translate-y-0.5 transition-all duration-200 relative`}
       style={{ scrollSnapAlign: 'start' }}
     >
       {/* 상단 색상 바 */}
-      <div className={`h-[3px] w-full ${isActive ? 'bg-gradient-to-r from-emerald-400 via-teal-500 to-cyan-400' : 'bg-gradient-to-r from-fuchsia-400 via-pink-400 to-rose-400'}`} />
+      <div className={`h-[3px] w-full ${topBarClass}`} />
 
       {/* 카드 헤더: 상태 + 제목 */}
-      <div className="px-4 pt-3.5 pb-3 flex items-start justify-between gap-3">
+      <div className="px-4 pt-3.5 pb-3 flex items-start gap-3">
         <div className="flex items-center gap-2 flex-1 min-w-0">
-          {/* 상태 배지 */}
-          {isActive ? (
+          {isWaiting ? (
+            <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-amber-600 bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200/70 shadow-sm">
+              ⏳ 대기중
+            </span>
+          ) : isLive ? (
             <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-emerald-50 to-teal-50 text-emerald-600 text-[10px] font-black border border-emerald-200/70 shadow-sm">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
               진행 중
@@ -1005,19 +1140,13 @@ function CreatedMatchupFullCard({ matchup: m }) {
           )}
           <h3 className="text-sm font-black text-[#22282E] truncate">{m.title}</h3>
         </div>
-        {/* 도전자 대기 중 */}
-        {!isComplete && (
-          <span className="shrink-0 text-[10px] font-bold text-amber-600 bg-gradient-to-r from-amber-50 to-yellow-50 px-2 py-0.5 rounded-full border border-amber-200/70 shadow-sm">
-            ⏳ 대기중
-          </span>
-        )}
       </div>
 
       {/* 콘텐츠: 좌우 썸네일 + VS */}
       <div className="px-4 pb-3">
         <div className="relative grid grid-cols-2 gap-2">
           {/* A측 */}
-          <MatchupThumbFrame side="left" className="aspect-square w-full">
+          <MatchupThumbFrame side="left" className="aspect-square lg:aspect-[5/4] w-full">
             {leftThumb
               ? <img src={safeMediaUrl(leftThumb)} alt="A" className="h-full w-full object-cover" />
               : <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-amber-950/90 via-orange-900/80 to-rose-950/85 p-3">
@@ -1025,7 +1154,7 @@ function CreatedMatchupFullCard({ matchup: m }) {
                 </div>
             }
             {/* A WIN 뱃지 */}
-            {isComplete && hasVotes && !isActive && winner === 'left' && (
+            {isComplete && hasVotes && isEnded && winner === 'left' && (
               <div className="absolute right-1.5 top-1.5 z-10">
                 <span className="inline-flex items-center gap-0.5 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 px-1.5 py-0.5 text-[10px] font-black text-white shadow-[0_2px_8px_rgba(16,185,129,0.5)]">
                   <CheckCircle2 size={9} /> WIN
@@ -1036,11 +1165,11 @@ function CreatedMatchupFullCard({ matchup: m }) {
 
           {/* 중앙 VS 뱃지 */}
           <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
-            <VsBadge size="lg" />
+            <VsBadge size="md" className="lg:scale-90" />
           </div>
 
           {/* B측 */}
-          <MatchupThumbFrame side="right" className="aspect-square w-full">
+          <MatchupThumbFrame side="right" className="aspect-square lg:aspect-[5/4] w-full">
             {isComplete
               ? rightThumb
                 ? <img src={safeMediaUrl(rightThumb)} alt="B" className="h-full w-full object-cover" />
@@ -1053,7 +1182,7 @@ function CreatedMatchupFullCard({ matchup: m }) {
                 </div>
             }
             {/* B WIN 뱃지 */}
-            {isComplete && hasVotes && !isActive && winner === 'right' && (
+            {isComplete && hasVotes && isEnded && winner === 'right' && (
               <div className="absolute left-1.5 top-1.5 z-10">
                 <span className="inline-flex items-center gap-0.5 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 px-1.5 py-0.5 text-[10px] font-black text-white shadow-[0_2px_8px_rgba(16,185,129,0.5)]">
                   <CheckCircle2 size={9} /> WIN
@@ -1083,7 +1212,7 @@ function CreatedMatchupFullCard({ matchup: m }) {
       <div className="px-4 py-3 border-t border-pink-100/30 flex items-center justify-between">
         <div className="flex items-center gap-1.5 text-sm text-gray-500">
           <Users size={13} className="text-fuchsia-400" />
-          {isActive
+          {isLive
             ? <span><span className="font-black text-fuchsia-700">{formatNumber(m.total_votes || 0)}명</span> 실시간 참여 중</span>
             : <span>최종 <span className="font-black text-[#22282E]">{formatNumber(m.total_votes || 0)}명</span> 참여</span>
           }
@@ -1092,7 +1221,7 @@ function CreatedMatchupFullCard({ matchup: m }) {
           to={`/matchup/${m.id}`}
           className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-black text-white bg-gradient-to-r from-fuchsia-600 to-pink-500 rounded-full shadow-sm hover:shadow-[0_3px_12px_-3px_rgba(192,38,211,0.5)] hover:-translate-y-0.5 transition-all"
         >
-          {isActive ? '현황 보기' : '결과 보기'}
+          {isEnded ? '결과 보기' : '현황 보기'}
           <ArrowRight size={11} />
         </Link>
       </div>
@@ -1233,21 +1362,16 @@ function CreatedMatchupCard({ matchup: m }) {
 function VotedMatchupFullCard({ vote, matchup: m, pointsEarned }) {
   if (!m) return null
 
-  const isActive  = m.status === 'active'
-  const hasVotes  = (m.total_votes || 0) > 0
-  const isDraw    = (m.left_votes || 0) === (m.right_votes || 0)
-  const winner   = isDraw ? null : (m.left_votes > m.right_votes ? 'left' : 'right')
-  const myWin    = !isActive && hasVotes && !isDraw && vote.side === winner
-  const myLose   = !isActive && hasVotes && !isDraw && vote.side !== winner
-  const myLabel  = vote.side === 'left' ? (m.left_label || 'A') : (m.right_label || 'B')
+  const o = analyzeVotedEntry({ ...vote, matchups: m })
+  const { isLive, isEnded, isWaiting, hasVotes, isDraw, winner, myWin } = o || {}
+  const myLabel = vote.side === 'left' ? (m.left_label || 'A') : (m.right_label || 'B')
 
   const leftThumb  = m.left_thumbnail_url  || (m.left_type  === 'image' ? m.left_url  : null)
   const rightThumb = m.right_thumbnail_url || (m.right_type === 'image' ? m.right_url : null)
   const { left, right } = calcPercent(m.left_votes, m.right_votes)
 
-  // 마감까지 남은 시간
   const timeLeft = (() => {
-    if (!isActive || !m.expires_at) return null
+    if (!isLive || !m.expires_at) return null
     const diff = new Date(m.expires_at) - new Date()
     if (diff <= 0) return null
     const h = Math.floor(diff / 3600000)
@@ -1257,14 +1381,15 @@ function VotedMatchupFullCard({ vote, matchup: m, pointsEarned }) {
     return `${min}분 후 마감`
   })()
 
-  // 상태 배지
-  const statusBadge = isActive
-    ? { label: '진행중 ⏳', cls: 'bg-amber-50 text-amber-600 border-amber-100' }
-    : isDraw
-    ? { label: '무승부 🤝', cls: 'bg-gray-100 text-gray-600 border-gray-200' }
-    : myWin
-    ? { label: '적중! 🎯', cls: 'bg-green-50 text-green-600 border-green-100' }
-    : { label: '아쉬움 💧', cls: 'bg-blue-50 text-blue-500 border-blue-100' }
+  const statusBadge = isLive
+    ? { label: '진행중 ⏳', cls: 'bg-emerald-50 text-emerald-600 border-emerald-100' }
+    : isWaiting
+      ? { label: '대기중 ⏳', cls: 'bg-amber-50 text-amber-600 border-amber-100' }
+      : isDraw
+        ? { label: '무승부 🤝', cls: 'bg-gray-100 text-gray-600 border-gray-200' }
+        : myWin
+          ? { label: '적중! 🎯', cls: 'bg-green-50 text-green-600 border-green-100' }
+          : { label: '아쉬움 💧', cls: 'bg-blue-50 text-blue-500 border-blue-100' }
 
   return (
     <div
@@ -1290,7 +1415,7 @@ function VotedMatchupFullCard({ vote, matchup: m, pointsEarned }) {
 
           {/* A측 */}
           <div className={`relative w-full ${vote.side === 'left' ? 'rounded-xl ring-2 ring-[#22282E]' : ''}`}>
-            <MatchupThumbFrame side="left" className="aspect-square w-full">
+            <MatchupThumbFrame side="left" className="aspect-square lg:aspect-[5/4] w-full">
               {leftThumb
                 ? <img src={safeMediaUrl(leftThumb)} alt="A" className="h-full w-full object-cover" />
                 : <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-3">
@@ -1309,7 +1434,7 @@ function VotedMatchupFullCard({ vote, matchup: m, pointsEarned }) {
               {hasVotes && (
                 <div className="absolute bottom-1.5 left-1.5 z-10">
                   <span className={`rounded-lg px-1.5 py-0.5 text-[11px] font-black ${
-                    !isActive && winner === 'left' ? 'bg-green-500 text-white' : 'bg-black/50 text-white backdrop-blur-sm'
+                    isEnded && winner === 'left' ? 'bg-green-500 text-white' : 'bg-black/50 text-white backdrop-blur-sm'
                   }`}>{left}%</span>
                 </div>
               )}
@@ -1318,12 +1443,12 @@ function VotedMatchupFullCard({ vote, matchup: m, pointsEarned }) {
 
           {/* 중앙 VS (GNB 로고 + 청·적 그라데이션 배지 — 다른 매치업 카드와 동일) */}
           <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
-            <VsBadge size="lg" />
+            <VsBadge size="md" className="lg:scale-90" />
           </div>
 
           {/* B측 */}
           <div className={`relative w-full ${vote.side === 'right' ? 'rounded-xl ring-2 ring-[#22282E]' : ''}`}>
-            <MatchupThumbFrame side="right" className="aspect-square w-full">
+            <MatchupThumbFrame side="right" className="aspect-square lg:aspect-[5/4] w-full">
               {rightThumb
                 ? <img src={safeMediaUrl(rightThumb)} alt="B" className="h-full w-full object-cover" />
                 : <div className="flex h-full w-full items-center justify-center bg-gradient-to-bl from-pink-50 to-red-100 p-3">
@@ -1342,7 +1467,7 @@ function VotedMatchupFullCard({ vote, matchup: m, pointsEarned }) {
               {hasVotes && (
                 <div className="absolute bottom-1.5 right-1.5 z-10">
                   <span className={`rounded-lg px-1.5 py-0.5 text-[11px] font-black ${
-                    !isActive && winner === 'right' ? 'bg-green-500 text-white' : 'bg-black/50 text-white backdrop-blur-sm'
+                    isEnded && winner === 'right' ? 'bg-green-500 text-white' : 'bg-black/50 text-white backdrop-blur-sm'
                   }`}>{right}%</span>
                 </div>
               )}
@@ -1354,11 +1479,11 @@ function VotedMatchupFullCard({ vote, matchup: m, pointsEarned }) {
         {hasVotes && (
           <div className="mt-2.5">
             <div className="flex justify-between text-[10px] font-black mb-1">
-              <span className={!isActive && winner === 'left' ? 'text-green-500' : 'text-blue-400'}>
+              <span className={isEnded && winner === 'left' ? 'text-green-500' : 'text-blue-400'}>
                 {m.left_label || 'A'} {left}%
               </span>
               <span className="text-gray-400">{formatNumber(m.total_votes)}명 참여</span>
-              <span className={!isActive && winner === 'right' ? 'text-green-500' : 'text-red-400'}>
+              <span className={isEnded && winner === 'right' ? 'text-green-500' : 'text-red-400'}>
                 {right}% {m.right_label || 'B'}
               </span>
             </div>
@@ -1373,23 +1498,29 @@ function VotedMatchupFullCard({ vote, matchup: m, pointsEarned }) {
       {/* 카드 하단 */}
       <div className="px-4 py-3 border-t border-gray-50 space-y-2">
         {/* 포인트 / 카운트다운 */}
-        {!isActive && (
+        {isEnded && (
           <div className="flex items-center gap-1.5 text-xs">
             <Gift size={12} className="text-violet-400" />
             <span className="text-violet-600 font-black">보상: +{pointsEarned}P 획득 완료</span>
             {myWin && <span className="text-green-500 font-bold ml-1">· 안목 적중 보너스!</span>}
           </div>
         )}
-        {isActive && timeLeft && (
+        {isLive && timeLeft && (
           <div className="flex items-center gap-1.5 text-xs">
             <Clock size={12} className="text-amber-500" />
             <span className="text-amber-600 font-bold">📢 결과 발표까지 {timeLeft}</span>
           </div>
         )}
-        {isActive && !timeLeft && (
+        {isLive && !timeLeft && (
           <div className="flex items-center gap-1.5 text-xs">
             <Clock size={12} className="text-amber-500 animate-pulse" />
             <span className="text-amber-600 font-bold">실시간 투표 진행 중</span>
+          </div>
+        )}
+        {isWaiting && (
+          <div className="flex items-center gap-1.5 text-xs">
+            <Clock size={12} className="text-amber-500" />
+            <span className="text-amber-600 font-bold">도전자 모집 중 · 결과 대기</span>
           </div>
         )}
 
@@ -1398,7 +1529,7 @@ function VotedMatchupFullCard({ vote, matchup: m, pointsEarned }) {
           <div className="flex items-center gap-1.5">
             <Users size={11} className="text-gray-400" />
             <span className="text-[11px] text-gray-400">
-              {isActive
+              {isLive
                 ? <span>실시간 <span className="font-black text-[#22282E]">{formatNumber(m.total_votes || 0)}명</span> 참여 중</span>
                 : <span>최종 <span className="font-black text-[#22282E]">{formatNumber(m.total_votes || 0)}명</span> 참여</span>
               }
@@ -1408,7 +1539,7 @@ function VotedMatchupFullCard({ vote, matchup: m, pointsEarned }) {
             to={`/matchup/${m.id}`}
             className="inline-flex items-center gap-1 text-xs font-black text-[#22282E] hover:text-violet-600 transition-colors"
           >
-            {isActive ? '현황 보기' : '결과 보기'}
+            {isEnded ? '결과 보기' : '현황 보기'}
             <ArrowRight size={12} />
           </Link>
         </div>
@@ -1623,6 +1754,27 @@ const SIDE_STAT_VARIANT = {
   },
 }
 
+function MyTrackStatsPanel({ emoji, title, subtitle, rank, wins, total, headerClass }) {
+  return (
+    <div className="rounded-2xl border border-pink-100/60 bg-gradient-to-br from-white via-pink-50/20 to-fuchsia-50/15 p-3">
+      <div className="mb-2.5 flex items-center gap-2">
+        <span className="text-lg leading-none">{emoji}</span>
+        <div className="min-w-0">
+          <p className={cn('text-xs font-black bg-gradient-to-r bg-clip-text text-transparent', headerClass)}>
+            {title}
+          </p>
+          <p className="text-[10px] font-semibold text-gray-400">{subtitle}</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <SideStatBox variant="rank" icon="🏅" label="랭킹" value={rank} color="text-amber-600" />
+        <SideStatBox variant="wins" icon="🏆" label="총승리" value={wins} color="text-emerald-600" />
+        <SideStatBox variant="total" icon="⚔️" label="총 매치업" value={total} color="text-violet-600" />
+      </div>
+    </div>
+  )
+}
+
 function SideStatBox({ variant = 'total', icon, label, value, color }) {
   const v = SIDE_STAT_VARIANT[variant] || SIDE_STAT_VARIANT.total
   return (
@@ -1670,9 +1822,16 @@ function ProfileLevelSkeleton() {
         <div className="mt-3 h-4 w-24 rounded bg-amber-100/70" />
         <div className="mt-2 h-3 w-20 rounded bg-pink-100/60" />
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 flex-1 w-full sm:w-auto">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="h-16 bg-gradient-to-br from-pink-50 to-fuchsia-50 rounded-xl border border-pink-100/50" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1 w-full">
+        {[1, 2].map((i) => (
+          <div key={i} className="space-y-2">
+            <div className="h-4 w-32 rounded bg-gradient-to-r from-amber-100 to-orange-100" />
+            <div className="grid grid-cols-3 gap-2">
+              {[1, 2, 3].map((j) => (
+                <div key={j} className="h-16 bg-gradient-to-br from-pink-50 to-fuchsia-50 rounded-xl border border-pink-100/50" />
+              ))}
+            </div>
+          </div>
         ))}
       </div>
     </div>
@@ -1700,8 +1859,8 @@ function FullCardSkeleton() {
       </div>
       <div className="px-4 pb-3">
         <div className="grid grid-cols-2 gap-2">
-          <div className="aspect-square bg-gradient-to-br from-pink-100/70 to-rose-100/50 rounded-xl" />
-          <div className="aspect-square bg-gradient-to-br from-violet-100/60 to-fuchsia-100/50 rounded-xl" />
+          <div className="aspect-square lg:aspect-[5/4] bg-gradient-to-br from-pink-100/70 to-rose-100/50 rounded-xl" />
+          <div className="aspect-square lg:aspect-[5/4] bg-gradient-to-br from-violet-100/60 to-fuchsia-100/50 rounded-xl" />
         </div>
       </div>
       <div className="px-4 py-3 border-t border-pink-100/30 flex justify-between">

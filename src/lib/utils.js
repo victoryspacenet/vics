@@ -77,6 +77,24 @@ export function copyToClipboard(text) {
   return copyToClipboardFallback(value)
 }
 
+/** PNG blob을 클립보드에 복사 (카카오톡 등 이미지 붙여넣기 공유용) */
+export async function copyImageToClipboard(blob) {
+  if (!blob || typeof navigator === 'undefined' || !navigator.clipboard?.write) {
+    return false
+  }
+
+  const pngBlob = blob.type === 'image/png' ? blob : new Blob([blob], { type: 'image/png' })
+
+  try {
+    await navigator.clipboard.write([
+      new ClipboardItem({ 'image/png': Promise.resolve(pngBlob) }),
+    ])
+    return true
+  } catch {
+    return false
+  }
+}
+
 function copyToClipboardFallback(text) {
   const el = document.createElement('textarea')
   el.value = text

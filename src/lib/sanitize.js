@@ -129,6 +129,25 @@ export function safeMediaUrl(url, fallback = '') {
   return trimmed
 }
 
+/** 갤러리·캔버스 저장 썸네일(data:image/* base64) — 외부 URL은 safeMediaUrl 사용 */
+const INLINE_IMAGE_DATA_RE = /^data:image\/(png|jpeg|jpg|webp);base64,/i
+const MAX_INLINE_IMAGE_DATA_LEN = 600_000
+
+export function safeInlineImageUrl(url, fallback = '') {
+  if (!url || typeof url !== 'string') return fallback
+  const trimmed = url.trim()
+  if (!INLINE_IMAGE_DATA_RE.test(trimmed)) return fallback
+  if (trimmed.length > MAX_INLINE_IMAGE_DATA_LEN) return fallback
+  return trimmed
+}
+
+/** HTTPS·blob·동일출처 또는 갤러리용 data:image 썸네일 */
+export function resolveGalleryCardImageUrl(url, fallback = '') {
+  const remote = safeMediaUrl(url, '')
+  if (remote) return remote
+  return safeInlineImageUrl(url, fallback)
+}
+
 // ── 3. 금칙어 에러 파싱 ────────────────────────────────────────────────────
 
 /**

@@ -2,7 +2,9 @@
  * Vics 성향 리포트 — 투표 패턴 분석 (순수 함수)
  */
 
-import { DEFAULT_CATEGORY_EMOJI_BY_ID } from './categoryAdminStorage'
+import { getCategoryConfig, getCategoryLabelById, DEFAULT_CATEGORY_EMOJI_BY_ID } from './categoryAdminStorage'
+import { canonicalCategoryIdFromStoredValue } from './matchupCategoryAliases'
+import { mapTiedMaxLabels } from './resolveTiedMaxLabels'
 
 export const TENDENCY_REPORT_VOTE_THRESHOLD = 10
 
@@ -39,23 +41,53 @@ export const TENDENCY_TYPES = {
   },
 }
 
-const DEFAULT_CATEGORY_LABELS = {
-  eternal_quest: '영원한 난제',
-  romance: '연애',
-  relationships: '인간관계',
-  work_life: '직장&갓생',
-  balance_game: '밸런스게임',
-  food_gourmet: '맛집&맛식',
-  fashion: '패션',
+const OTHER_CATEGORY_ID = 'other'
+
+function knownCategoryIds() {
+  return new Set(getCategoryConfig().activeCategories.map((c) => c.id))
+}
+
+/** DB·스냅샷 category → 현재 활성 카테고리 id (없으면 other) */
+export function resolveReportCategoryId(raw) {
+  const canonical = canonicalCategoryIdFromStoredValue(raw) || OTHER_CATEGORY_ID
+  if (canonical === OTHER_CATEGORY_ID) return OTHER_CATEGORY_ID
+  return knownCategoryIds().has(canonical) ? canonical : OTHER_CATEGORY_ID
 }
 
 function categoryLabel(id) {
-  if (!id) return '기타'
-  return DEFAULT_CATEGORY_LABELS[id] || id
+  if (!id || id === OTHER_CATEGORY_ID) return '기타'
+  return getCategoryLabelById(id)
 }
 
 function categoryEmoji(id) {
+  if (!id || id === OTHER_CATEGORY_ID) return '📌'
+  const found = getCategoryConfig().activeCategories.find((c) => c.id === id)
+  if (found?.iconEmoji) return found.iconEmoji
   return DEFAULT_CATEGORY_EMOJI_BY_ID[id] || '📌'
+}
+
+function buildCategoryBreakdownList(categoryCounts, voteCount) {
+  return Object.entries(categoryCounts)
+    .filter(([id]) => id !== OTHER_CATEGORY_ID)
+    .map(([id, count]) => ({
+      id,
+      label: categoryLabel(id),
+      emoji: categoryEmoji(id),
+      count,
+      pct: voteCount > 0 ? Math.round((count / voteCount) * 100) : 0,
+    }))
+    .sort((a, b) => b.count - a.count)
+}
+
+/** 저장된 스냅샷·구 리포트의 categoryBreakdown 정규화 */
+export function normalizeCategoryBreakdown(rawBreakdown, voteCount = 0) {
+  const counts = {}
+  for (const row of rawBreakdown || []) {
+    const id = resolveReportCategoryId(row?.id)
+    if (id === OTHER_CATEGORY_ID) continue
+    counts[id] = (counts[id] || 0) + Number(row?.count || 0)
+  }
+  return buildCategoryBreakdownList(counts, voteCount)
 }
 
 function majoritySide(m) {
@@ -108,7 +140,7 @@ export function computeTendencyReport(voteRows, opts = {}) {
       if (side === m.winner) hits += 1
     }
 
-    const cat = m?.category || 'other'
+    const cat = resolveReportCategoryId(m?.category)
     categoryCounts[cat] = (categoryCounts[cat] || 0) + 1
 
     choices.push({
@@ -130,17 +162,11 @@ export function computeTendencyReport(voteRows, opts = {}) {
   const tendencyType = classifyTendency({ mainstreamPct, contrarianPct, hitRatePct, completed })
   const meta = TENDENCY_TYPES[tendencyType]
 
-  const categoryBreakdown = Object.entries(categoryCounts)
-    .map(([id, count]) => ({
-      id,
-      label: categoryLabel(id),
-      emoji: categoryEmoji(id),
-      count,
-      pct: rows.length > 0 ? Math.round((count / rows.length) * 100) : 0,
-    }))
-    .sort((a, b) => b.count - a.count)
+  const categoryBreakdown = buildCategoryBreakdownList(categoryCounts, rows.length)
 
-  const topCategory = categoryBreakdown[0] || { id: 'other', label: '기타', emoji: '📌', count: 0, pct: 0 }
+  const topCategory =
+    categoryBreakdown[0] ||
+    { id: OTHER_CATEGORY_ID, label: '기타', emoji: '📌', count: 0, pct: 0 }
 
   const { headline, summary, traits } = buildCopy({
     tendencyType,
@@ -191,6 +217,55 @@ function classifyTendency({ mainstreamPct, contrarianPct, hitRatePct, completed 
   if (contrarianPct >= 45 && mainstreamPct < 55) return 'unique'
   if (mainstreamPct >= 52) return 'mainstream'
   return 'trendsetter'
+}
+
+const ADMIN_TENDENCY_TYPE_PRIORITY = ['trendsetter', 'mainstream', 'unique']
+
+function adminTendencyTypeLabelMap() {
+  return {
+    trendsetter: TENDENCY_TYPES.trendsetter.title,
+    mainstream: TENDENCY_TYPES.mainstream.title,
+    unique: TENDENCY_TYPES.unique.title,
+  }
+}
+
+/**
+ * 관리자 유저 상세 — 투표 정렬(다수/소수/박빙) 건수
+ * @param {Array<{ side: string, matchups?: object | object[] }>} voteRows
+ */
+export function countVoteTendencyAlignment(voteRows) {
+  const rows = (voteRows || []).slice(0, TENDENCY_REPORT_VOTE_THRESHOLD)
+  let mainstream = 0
+  let unique = 0
+  let trendsetter = 0
+
+  for (const row of rows) {
+    const m = Array.isArray(row.matchups) ? row.matchups[0] : row.matchups
+    const side = row.side === 'right' ? 'right' : 'left'
+    const maj = majoritySide(m)
+    if (!maj) trendsetter += 1
+    else if (side === maj) mainstream += 1
+    else unique += 1
+  }
+
+  return { mainstream, unique, trendsetter }
+}
+
+/**
+ * @param {Array<{ side: string, matchups?: object | object[] }>} voteRows
+ */
+export function mapVoteTendencyLabelsFromVoteRows(voteRows) {
+  const { keys, labels, label } = mapTiedMaxLabels(
+    countVoteTendencyAlignment(voteRows),
+    ADMIN_TENDENCY_TYPE_PRIORITY,
+    adminTendencyTypeLabelMap(),
+  )
+  if (!labels.length) return {}
+  return {
+    voteTendencyTypes: keys,
+    voteTendencyLabels: labels,
+    voteTendencyLabel: label,
+  }
 }
 
 function buildCopy({ tendencyType, nickname, mainstreamPct, contrarianPct, hitRatePct, topCategory, voteCount }) {

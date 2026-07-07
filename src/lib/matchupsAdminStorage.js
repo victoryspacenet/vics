@@ -8,7 +8,7 @@ import { supabase } from './supabase'
 const KEY_STATUS_OVERRIDES = 'admin_matchup_status_overrides_v1'
 
 const ADMIN_MATCHUP_LIST_SELECT =
-  'id, title, category, status, created_at, left_label, right_label, is_demo, right_type, expires_at'
+  'id, title, category, status, created_at, updated_at, challenger_joined_at, left_label, right_label, is_demo, right_type, expires_at'
 
 const ADMIN_LIST_LIMIT = 500
 
@@ -65,6 +65,20 @@ function formatAdminCreatedAt(iso) {
   const hh = String(d.getHours()).padStart(2, '0')
   const mi = String(d.getMinutes()).padStart(2, '0')
   return `${mm}.${dd} ${hh}:${mi}`
+}
+
+function resolveChallengerRegisteredIso(row) {
+  if (row.right_type == null) return null
+  return row.challenger_joined_at || row.updated_at || row.created_at || null
+}
+
+function mapAdminMatchupDates(row) {
+  const challengerIso = resolveChallengerRegisteredIso(row)
+  return {
+    registeredAt: challengerIso ? formatAdminCreatedAt(challengerIso) : '-',
+    registeredAtIso: challengerIso,
+    authorCreatedAtIso: row.created_at || null,
+  }
 }
 
 function buildListTitle(row) {
@@ -129,12 +143,23 @@ async function persistStatusOverride(matchupId, adminStatus) {
 
 async function fetchMatchupsFromSupabase() {
   const overrides = await readStatusOverrides()
-  const { data, error } = await supabase
+  let selectCols = ADMIN_MATCHUP_LIST_SELECT
+  let res = await supabase
     .from('matchups')
-    .select(ADMIN_MATCHUP_LIST_SELECT)
+    .select(selectCols)
     .order('created_at', { ascending: false })
     .limit(ADMIN_LIST_LIMIT)
 
+  if (res.error && /challenger_joined_at/i.test(res.error.message || '')) {
+    selectCols = selectCols.replace(', challenger_joined_at', '')
+    res = await supabase
+      .from('matchups')
+      .select(selectCols)
+      .order('created_at', { ascending: false })
+      .limit(ADMIN_LIST_LIMIT)
+  }
+
+  const { data, error } = res
   if (error) {
     console.warn('[matchupsAdminStorage] fetch list', error)
     return []
@@ -147,7 +172,7 @@ async function fetchMatchupsFromSupabase() {
     title: buildListTitle(row),
     reports: 0,
     status: normalizeMatchupStatus(mapRowToAdminStatus(row, overrides)),
-    createdAt: formatAdminCreatedAt(row.created_at),
+    ...mapAdminMatchupDates(row),
     hasChallenger: row.right_type != null,
   }))
 }
@@ -236,7 +261,7 @@ async function fetchMatchupDetailFromSupabase(id) {
   const { data: row, error } = await supabase
     .from('matchups')
     .select(
-      `id, title, category, status, left_label, right_label, right_type, expires_at,
+      `id, title, category, status, created_at, updated_at, challenger_joined_at, left_label, right_label, right_type, expires_at,
       left_url, left_thumbnail_url, right_url, right_thumbnail_url,
       user_id, right_user_id,
       profiles:user_id(id, nickname, avatar_url),
@@ -255,7 +280,7 @@ async function fetchMatchupDetailFromSupabase(id) {
     title: buildListTitle(row),
     reports: 0,
     status: normalizeMatchupStatus(mapRowToAdminStatus(row, overrides)),
-    createdAt: formatAdminCreatedAt(row.created_at),
+    ...mapAdminMatchupDates(row),
     hasChallenger: row.right_type != null,
   }
 

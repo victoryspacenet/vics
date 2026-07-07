@@ -19,6 +19,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor-community/media": "^8.0.1",
     "@capacitor/android": "^7.6.5",
     "@capacitor/camera": "^7.0.5",
     "@capacitor/core": "^7.6.5",

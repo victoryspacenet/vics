@@ -15,7 +15,7 @@ function getOgMeta(matchup, baseUrl, requestUrl) {
 
   const ogImage = matchup.id
     ? `${baseUrl.replace(/\/+$/, '')}/api/matchup-share-image?matchupId=${encodeURIComponent(matchup.id)}`
-    : `${baseUrl}/logo.png`
+    : `${baseUrl.replace(/\/+$/, '')}/api/site-og-image`
 
   return {
     title: `${ogTitle} - VICS`,

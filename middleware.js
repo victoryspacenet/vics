@@ -11,7 +11,7 @@ export const config = {
 
 export default async function middleware(request) {
   const url = new URL(request.url)
-  const pathMatch = url.pathname.match(/^\/matchup\/([^/]+)$/)
+  const pathMatch = url.pathname.match(/^\/matchup\/(?:share\/)?([^/]+)$/)
   if (!pathMatch) return passThrough(request)
 
   const isCrawler = CRAWLER_REGEX.test(request.headers.get('user-agent') || '')
@@ -24,7 +24,7 @@ export default async function middleware(request) {
     const matchup = await fetchMatchup(id)
     if (!matchup) return passThrough(request)
 
-    const html = buildOGHtml(matchup, url.origin + url.pathname)
+    const html = buildOGHtml(matchup, buildSharePageUrl(url.origin, id, url.pathname))
     return new Response(html, {
       status: 200,
       headers: {
@@ -123,10 +123,17 @@ function getOgImageUrl(matchup, canonicalUrl) {
     if (matchup?.id) {
       return `${origin}/api/matchup-share-image?matchupId=${encodeURIComponent(matchup.id)}`
     }
-    return `${origin}/logo.png`
+    return `${origin}/api/site-og-image`
   } catch {
-    return '/logo.png'
+    return '/api/site-og-image'
   }
+}
+
+function buildSharePageUrl(origin, id, pathname) {
+  if (pathname.includes('/matchup/share/')) {
+    return `${origin}/matchup/share/${id}`
+  }
+  return `${origin}/matchup/${id}`
 }
 
 function escapeHtml(str) {

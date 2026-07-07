@@ -106,7 +106,21 @@ export function getMedal(rank) {
   return { 1: '🥇', 2: '🥈', 3: '🥉' }[rank] || '🎖️'
 }
 
-/** 순위 구간별 표시 — 랜딩 «매치업 등급 배지»(Player·Star·Master·Vip·Goat)와 동일 명칭 */
+/** 매치업 등급(Player·Star·…) 표시 — 갤러리·저장 완료 UI */
+export function getMatchupTierDisplay(tierId) {
+  const t = TIERS.find((x) => x.id === tierId) || TIERS[0]
+  const styles = {
+    player: { color: '#6B7280', bg: 'linear-gradient(135deg,#1f2937,#9ca3af)' },
+    star: { color: '#F59E0B', bg: 'linear-gradient(135deg,#451a03,#fcd34d)' },
+    master: { color: '#EA580C', bg: 'linear-gradient(135deg,#7c2d12,#fb923c)' },
+    vip: { color: '#7C3AED', bg: 'linear-gradient(135deg,#1e1b4b,#a78bfa)' },
+    goat: { color: '#CA8A04', bg: 'linear-gradient(135deg,#78350f,#fbbf24)' },
+  }
+  const s = styles[t.id] || styles.player
+  return { name: t.name, emoji: t.emoji, color: s.color, bg: s.bg, id: t.id }
+}
+
+/** @deprecated 랭킹 순위(1~10) 구간 표시 — 티어 판정에는 getMatchupTierDisplay·getTier 사용 */
 export function getTierInfo(rank) {
   const [player, star, master, vip, goat] = TIERS
   if (rank === 1) return { name: goat.name, emoji: goat.emoji, color: '#CA8A04', bg: 'linear-gradient(135deg,#78350f,#fbbf24)' }

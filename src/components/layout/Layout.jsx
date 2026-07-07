@@ -11,6 +11,7 @@ import { WelcomeBackOverlay } from '../ui/WelcomeBackOverlay'
 import { FandomMilestoneGate } from '../fandom/FandomMilestoneGate'
 import { TendencyReportGate } from '../tendency/TendencyReportGate'
 import { OfflineConnectivityBanner } from '../system/OfflineConnectivityBanner'
+import { ChallengeCompleteShareModal } from '../matchup/ChallengeCompleteShareModal'
 import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
 import { setLastPathBeforeLogin } from '../../lib/loginReturn'
@@ -47,6 +48,7 @@ export function Layout({ children }) {
         <OfflineConnectivityBanner />
         {children}
         <Toast />
+        <ChallengeCompleteShareModal />
         <NotificationPanelOverlay />
       </div>
     )
@@ -58,6 +60,7 @@ export function Layout({ children }) {
         <OfflineConnectivityBanner />
         {children}
         <Toast />
+        <ChallengeCompleteShareModal />
       </div>
     )
   }
@@ -75,6 +78,7 @@ export function Layout({ children }) {
           {children}
         </main>
         <Toast />
+        <ChallengeCompleteShareModal />
       </div>
     )
   }
@@ -113,6 +117,7 @@ export function Layout({ children }) {
       </main>
       <Footer />
       <Toast />
+      <ChallengeCompleteShareModal />
       <PopupNoticeDisplay />
       <BottomNav legendDiamondShell={legendDiamondShell} />
       <NotificationPanelOverlay />

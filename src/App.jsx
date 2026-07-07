@@ -13,6 +13,7 @@ import { ServerMaintenanceGate } from './components/system/ServerMaintenanceGate
 import { PushNotificationNavBridge } from './components/system/PushNotificationNavBridge'
 import { GoogleAnalyticsBridge } from './components/system/GoogleAnalyticsBridge'
 import { HubSpotBridge } from './components/system/HubSpotBridge'
+import { ProfileLastVisitBridge } from './components/system/ProfileLastVisitBridge'
 import { AdminLayout } from './components/layout/AdminLayout'
 import * as LazyAdmin from './routes/lazyAdminPages'
 import * as LazyExtra from './routes/lazyDevAndHeavyPages'
@@ -94,14 +95,24 @@ function App() {
       LazyDrawers.prefetchMatchupDrawers()
     }, { timeoutMs: 2000 })
 
-    // OAuth 콜백 후 URL 해시에 에러가 있는 경우 감지
+    // OAuth 콜백 · 이메일 인증 링크 클릭 후 URL 해시에 에러가 있는 경우 감지
     const hash = window.location.hash
     if (hash.includes('error=')) {
       const params = new URLSearchParams(hash.replace('#', ''))
+      const errorCode = params.get('error_code') || ''
       const errorDesc = params.get('error_description') || params.get('error') || '로그인 실패'
       const humanError = errorDesc.replace(/\+/g, ' ')
-      console.error('[OAuth callback] 에러:', humanError)
-      showToast(`소셜 로그인 실패: ${humanError}`, 'error')
+      console.error('[Auth callback] 에러:', errorCode, humanError)
+      // otp_expired: 가입 확인·매직링크·비밀번호 재설정 메일의 인증 링크가 만료됐거나 이미 쓴 경우
+      // (소셜 로그인 실패와는 다른 케이스라 별도 안내 + 재전송 동선 제공)
+      if (errorCode === 'otp_expired') {
+        showToast(
+          '메일 속 인증 링크가 만료됐거나 이미 사용됐어요. 로그인 화면에서 인증 메일을 다시 받아 주세요.',
+          'error',
+        )
+      } else {
+        showToast(`소셜 로그인 실패: ${humanError}`, 'error')
+      }
       window.history.replaceState(null, '', window.location.pathname)
     }
   }, [])
@@ -187,6 +198,7 @@ function App() {
     <BrowserRouter>
       <GoogleAnalyticsBridge />
       <HubSpotBridge />
+      <ProfileLastVisitBridge />
       <PushNotificationNavBridge />
       <PostOAuthRedirect />
       <ModerationRestrictionGate />
@@ -204,7 +216,9 @@ function App() {
           <Route path="/landing" element={<RouteSuspense Page={LazySP.LandingPage} />} />
           <Route path="/events" element={<RouteSuspense Page={LazySP.EventsComingSoonPage} />} />
           <Route path="/matchup/:id" element={<RouteSuspense Page={LazyRMM.MatchupDetailPage} />} />
+          <Route path="/matchup/share/:id" element={<RouteSuspense Page={LazyRMM.MatchupDetailPage} />} />
           <Route path="/ranking" element={<RouteSuspense Page={LazySP.RankingPage} />} />
+          <Route path="/ranking/share" element={<RouteSuspense Page={LazySP.RankingPage} />} />
           <Route path="/search" element={<RouteSuspense Page={LazySP.SearchPage} />} />
           <Route path="/rewards" element={<RouteSuspense Page={LazyRMM.PointRewardsPage} />} />
           <Route path="/rewards/main-spotlight" element={<RouteSuspense Page={LazyRMM.MainSpotlight1hPage} />} />
@@ -247,6 +261,7 @@ function App() {
           <Route path="/hall-of-fame" element={<RouteSuspense Page={LazySP.EventsComingSoonPage} />} />
           <Route path="/profile/:userId" element={<RouteSuspense Page={LazyRMM.PublicProfilePage} />} />
           <Route path="/mypage" element={<RouteSuspense Page={LazyRMM.MyPage} />} />
+          <Route path="/report/tendency/s/:shareId" element={<RouteSuspense Page={LazyRMM.TendencyReportPage} />} />
           <Route path="/report/tendency" element={<RouteSuspense Page={LazyRMM.TendencyReportPage} />} />
           <Route path="/signup" element={<RouteSuspense Page={LazySP.SignupPage} />} />
           <Route path="/welcome" element={<RouteSuspense Page={LazySP.WelcomePage} />} />

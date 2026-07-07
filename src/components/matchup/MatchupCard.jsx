@@ -15,7 +15,8 @@ import { MatchupThumbFrame } from '../ui/MatchupThumbFrame'
 import { getTier, tierAtLeast } from '../../lib/tiers'
 import { isFeedBannerHighlightActive } from '../../lib/bannerHighlightBoost'
 import { isMatchupCreatorVipTierGlow, VIP_MATCHUP_SURFACE_CLASS } from '../../lib/matchupCreatorVipGlow'
-import { formatDate, formatNumber, copyToClipboard, calcPercent, cn } from '../../lib/utils'
+import { formatDate, formatNumber, calcPercent, cn } from '../../lib/utils'
+import { copyMatchupShareLink, getMatchupSharePageUrl } from '../../lib/socialShare'
 import { voteViaApi } from '../../lib/voteApi'
 import { fandomTierHasDiamondListNicknameAura } from '../../lib/fandomTiers'
 import { FandomBronzeStarBadge } from '../fandom/FandomBronzeStarBadge'
@@ -142,15 +143,15 @@ export function MatchupCard({ matchup: initialMatchup, compact, onVoteUpdate }) 
   }
 
   const handleCopyLink = async () => {
-    const url = `${window.location.origin}/matchup/${matchup.id}`
-    await copyToClipboard(url)
-    setLinkCopied(true)
-    showToast('링크가 복사됐어요!', 'success')
-    setTimeout(() => setLinkCopied(false), 2000)
+    const ok = await copyMatchupShareLink({ matchupId: matchup.id, showToast })
+    if (ok) {
+      setLinkCopied(true)
+      setTimeout(() => setLinkCopied(false), 2000)
+    }
   }
 
   const handleShare = () => {
-    const url = `${window.location.origin}/matchup/${matchup.id}`
+    const url = getMatchupSharePageUrl(matchup.id)
     if (navigator.share) {
       navigator.share({ title: matchup.title, url })
     } else {

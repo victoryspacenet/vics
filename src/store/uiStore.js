@@ -17,6 +17,8 @@ export const useUIStore = create((set, get) => ({
   challengeMatchup: null, // { id, title, left_type, left_url, left_thumbnail_url, left_text, tags, ... }
   /** true면 도전자(B) 기존 콘텐츠 수정 모드 */
   challengeMatchupEdit: false,
+  /** 도전 완료 후 공유 안내 (ChallengeDrawer 언마운트 후에도 표시) */
+  challengeCompleteShare: null, // { matchupId, matchupTitle }
   toast: null,
 
   openCreateDrawer: () => set({ isCreateDrawerOpen: true, createDrawerEditMatchup: null }),
@@ -41,6 +43,9 @@ export const useUIStore = create((set, get) => ({
     set({ challengeMatchup: matchup, challengeMatchupEdit: wantEdit })
   },
   closeChallengeDrawer: () => set({ challengeMatchup: null, challengeMatchupEdit: false }),
+
+  openChallengeCompleteShare: (payload) => set({ challengeCompleteShare: payload }),
+  closeChallengeCompleteShare: () => set({ challengeCompleteShare: null }),
 
   showToast: (message, type = 'success') => {
     set({ toast: { message, type, id: Date.now() } })

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   ChevronLeft,
   MessageCircle,
@@ -29,6 +29,7 @@ import {
   REVOKE_POINTS_MODES,
 } from '../../lib/userAdminStorage'
 import { getWarningHistory } from '../../lib/warnSanctionStorage'
+import { resolveAdminUsersDetailReturnTo, rememberAdminUsersDetailEntry } from '../../lib/adminUsersListNav'
 
 const STATUS_LABEL = {
   active: '활성',
@@ -79,6 +80,20 @@ function SectionCard({ icon: Icon, title, subtitle, children, className }) {
   )
 }
 
+const GENDER_LABEL = { male: '남성', female: '여성', other: '기타' }
+
+function calcAge(birthdateStr) {
+  if (!birthdateStr) return null
+  const bd = new Date(birthdateStr)
+  if (Number.isNaN(bd.getTime())) return null
+  const now = new Date()
+  let age = now.getFullYear() - bd.getFullYear()
+  const beforeBirthdayThisYear =
+    now.getMonth() < bd.getMonth() || (now.getMonth() === bd.getMonth() && now.getDate() < bd.getDate())
+  if (beforeBirthdayThisYear) age -= 1
+  return age >= 0 ? age : null
+}
+
 function InfoRow({ label, children }) {
   return (
     <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4 py-3 first:pt-0 last:pb-0 border-b border-gray-100/90 last:border-0">
@@ -88,8 +103,37 @@ function InfoRow({ label, children }) {
   )
 }
 
+function activityStatLabels(user, pluralKey, singularKey) {
+  const plural = user?.[pluralKey]
+  if (Array.isArray(plural) && plural.length > 0) return plural
+  const single = user?.[singularKey]
+  return single ? [single] : []
+}
+
+function ActivityStatBadges({ labels, badgeClassName }) {
+  if (!labels?.length) return null
+  return labels.map((label) => (
+    <span
+      key={label}
+      className={cn(
+        'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold',
+        badgeClassName,
+      )}
+    >
+      {label}
+    </span>
+  ))
+}
+
 export function AdminUserDetailPage() {
   const { id } = useParams()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const listReturnTo = resolveAdminUsersDetailReturnTo(id, location.state?.adminUsersReturnTo)
+
+  useEffect(() => {
+    if (id && listReturnTo) rememberAdminUsersDetailEntry(id, listReturnTo)
+  }, [id, listReturnTo])
   const { showToast } = useUIStore()
   const [user, setUser] = useState(null)
   const [memos, setMemos] = useState([])
@@ -161,12 +205,13 @@ export function AdminUserDetailPage() {
         </div>
         <p className="text-sm font-semibold text-gray-700">유저를 찾을 수 없어요.</p>
         <p className="mt-1 text-xs text-gray-500">목록에서 다시 선택해 주세요.</p>
-        <Link
-          to="/admin/users"
+        <button
+          type="button"
+          onClick={() => navigate(listReturnTo, { replace: true })}
           className="mt-6 inline-flex items-center justify-center rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-emerald-700"
         >
           유저 목록으로
-        </Link>
+        </button>
       </div>
     )
   }
@@ -262,14 +307,15 @@ export function AdminUserDetailPage() {
         <div className="pointer-events-none absolute -bottom-12 -left-10 h-32 w-32 rounded-full bg-teal-200/20 blur-2xl" />
         <div className="relative p-4 sm:p-6">
           <div className="mb-4 flex items-center gap-2">
-            <Link
-              to="/admin/users"
+            <button
+              type="button"
+              onClick={() => navigate(listReturnTo, { replace: true })}
               className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200/80 bg-white/80 px-2.5 py-1.5 text-xs font-bold text-emerald-800 shadow-sm backdrop-blur-sm hover:bg-white"
               aria-label="목록으로"
             >
               <ChevronLeft size={18} className="text-emerald-700" />
               유저 관리
-            </Link>
+            </button>
           </div>
           <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex min-w-0 flex-1 gap-4">
@@ -307,6 +353,12 @@ export function AdminUserDetailPage() {
                       가입 {user.joinedAt}
                     </span>
                   )}
+                  {user.lastVisitedAt && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-white/70 px-2.5 py-1 text-[11px] font-bold text-gray-600 ring-1 ring-gray-200/80">
+                      <Clock size={11} />
+                      최종방문 {user.lastVisitedAt}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -317,10 +369,14 @@ export function AdminUserDetailPage() {
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <SectionCard icon={User} title="회원 정보" subtitle="기본 프로필 및 연동">
           <div>
-            <InfoRow label="닉네임">{user.nickname}</InfoRow>
-            <InfoRow label="소셜 로그인">{user.social ?? '—'}</InfoRow>
-            <InfoRow label="포인트 합계">
-              <span className="tabular-nums">{profilePoints.toLocaleString()}P</span>
+            <InfoRow label="연령">
+              <span className="tabular-nums">{calcAge(user.birthdate) != null ? `만 ${calcAge(user.birthdate)}세` : '—'}</span>
+            </InfoRow>
+            <InfoRow label="성별">
+              <span>{GENDER_LABEL[user.gender] ?? '—'}</span>
+            </InfoRow>
+            <InfoRow label="Total (보너스 포함)">
+              <span className="tabular-nums font-black">{(user.points ?? profilePoints).toLocaleString()}P</span>
             </InfoRow>
             <InfoRow label="신고 받은 수">
               <span
@@ -337,9 +393,15 @@ export function AdminUserDetailPage() {
         <SectionCard icon={BarChart3} title="활동 통계" subtitle="생성·투표 활동 요약">
           <div className="space-y-4">
             <div className="rounded-xl border border-sky-100 bg-sky-50/50 px-3 py-3 sm:px-4">
-              <p className="text-[11px] font-bold uppercase tracking-wide text-sky-800/80">
-                매치업 · 생성
-              </p>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-sky-800/80">
+                  매치업 · 생성
+                </p>
+                <ActivityStatBadges
+                  labels={activityStatLabels(user, 'primaryActivityLabels', 'primaryActivityLabel')}
+                  badgeClassName="border-sky-200/80 bg-white/80 text-sky-800"
+                />
+              </div>
               <p className="mt-1 text-sm font-bold text-[#22282E]">
                 생성 {(user.matchupsCreated ?? 0).toLocaleString()}회
                 <span className="mx-1.5 text-gray-300">·</span>
@@ -349,9 +411,15 @@ export function AdminUserDetailPage() {
               </p>
             </div>
             <div className="rounded-xl border border-amber-100 bg-amber-50/40 px-3 py-3 sm:px-4">
-              <p className="text-[11px] font-bold uppercase tracking-wide text-amber-900/80">
-                투표 참여
-              </p>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-amber-900/80">
+                  투표 참여
+                </p>
+                <ActivityStatBadges
+                  labels={activityStatLabels(user, 'voteTendencyLabels', 'voteTendencyLabel')}
+                  badgeClassName="border-amber-200/80 bg-white/80 text-amber-900"
+                />
+              </div>
               <p className="mt-1 text-sm font-bold text-[#22282E]">
                 {(user.totalVotes ?? 0).toLocaleString()}회 참여
                 <span className="mx-1.5 text-gray-300">·</span>
@@ -361,12 +429,18 @@ export function AdminUserDetailPage() {
               </p>
             </div>
             <div className="rounded-xl border border-gray-100 bg-gray-50/60 px-3 py-3 sm:px-4">
-              <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">
-                주요 카테고리
-              </p>
-              <p className="mt-1 text-sm font-semibold text-[#22282E]">
-                {(Array.isArray(user.topCategories) ? user.topCategories : []).join(', ') || '—'}
-              </p>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">
+                  주요 카테고리
+                </p>
+                <ActivityStatBadges
+                  labels={activityStatLabels(user, 'primaryCategoryLabels', 'primaryCategoryLabel')}
+                  badgeClassName="border-gray-200/90 bg-white/90 text-gray-700"
+                />
+              </div>
+              {activityStatLabels(user, 'primaryCategoryLabels', 'primaryCategoryLabel').length === 0 && (
+                <p className="mt-1 text-sm font-semibold text-[#22282E]">—</p>
+              )}
             </div>
           </div>
         </SectionCard>
@@ -735,12 +809,13 @@ export function AdminUserDetailPage() {
       </Modal>
 
       <div className="flex justify-center pb-2">
-        <Link
-          to="/admin/users"
+        <button
+          type="button"
+          onClick={() => navigate(listReturnTo, { replace: true })}
           className="inline-flex min-w-[12rem] items-center justify-center rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 px-8 py-3 text-sm font-black text-white shadow-md shadow-emerald-600/20 hover:from-emerald-700 hover:to-teal-700"
         >
           목록으로 돌아가기
-        </Link>
+        </button>
       </div>
     </div>
   )

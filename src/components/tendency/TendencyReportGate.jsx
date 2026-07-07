@@ -3,6 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import {
   fetchTendencyReportStatus,
+  markTendencyReportPopupSeen,
+  TENDENCY_REPORT_POPUP_SEEN,
   TENDENCY_REPORT_VOTE_THRESHOLD,
   TENDENCY_VOTE_CAST,
   TENDENCY_REPORT_ACKED,
@@ -10,14 +12,13 @@ import {
 import { TendencyReportUnlockModal } from './TendencyReportUnlockModal'
 
 const SKIP_PREFIXES = ['/login', '/signup', '/admin', '/goodbye', '/dev', '/welcome']
-const CHECK_TTL_MS = 60_000
 
 function shouldSkipPath(pathname) {
   return SKIP_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))
 }
 
-function snoozeKey(userId) {
-  return `vics:tendency-report-snooze-${userId}`
+function isTendencyReportPath(pathname) {
+  return pathname === '/report/tendency' || pathname.startsWith('/report/tendency/s/')
 }
 
 export function TendencyReportGate() {
@@ -31,39 +32,40 @@ export function TendencyReportGate() {
 
   const [showUnlock, setShowUnlock] = useState(false)
   const busyRef = useRef(false)
-  const lastCheckAtRef = useRef(0)
+  const popupHandledRef = useRef(false)
+  const lastUserIdRef = useRef(null)
 
-  const check = useCallback(async (force = false) => {
-    if (!user?.id || shouldSkipPath(pathnameRef.current)) {
-      setShowUnlock(false)
-      return
-    }
-    if (pathnameRef.current === '/report/tendency') {
-      setShowUnlock(false)
-      return
-    }
-
-    const now = Date.now()
-    if (!force && now - lastCheckAtRef.current < CHECK_TTL_MS) return
-    if (busyRef.current) return
+  const evaluateUnlock = useCallback(async (reason) => {
+    const userId = user?.id
+    if (!userId || popupHandledRef.current || busyRef.current) return
+    if (shouldSkipPath(pathnameRef.current) || isTendencyReportPath(pathnameRef.current)) return
 
     busyRef.current = true
-    lastCheckAtRef.current = now
-
     try {
       const status = await fetchTendencyReportStatus()
       if (
+        status.popupSeen ||
         !status.eligible ||
         status.acknowledged ||
         status.voteCount < TENDENCY_REPORT_VOTE_THRESHOLD
       ) {
-        setShowUnlock(false)
+        if (status.popupSeen || status.acknowledged) popupHandledRef.current = true
         return
       }
-      if (sessionStorage.getItem(snoozeKey(user.id))) {
-        setShowUnlock(false)
+
+      if (reason === 'vote' && status.voteCount !== TENDENCY_REPORT_VOTE_THRESHOLD) {
         return
       }
+
+      const marked = await markTendencyReportPopupSeen()
+      if (!marked.ok) {
+        if (import.meta.env.DEV) {
+          console.warn('[TendencyReportGate] popup seen save failed:', marked.error)
+        }
+        return
+      }
+
+      popupHandledRef.current = true
       setShowUnlock(true)
     } finally {
       busyRef.current = false
@@ -71,31 +73,47 @@ export function TendencyReportGate() {
   }, [user?.id])
 
   useEffect(() => {
-    const t = window.setTimeout(() => void check(), 500)
+    if (user?.id !== lastUserIdRef.current) {
+      lastUserIdRef.current = user?.id ?? null
+      popupHandledRef.current = false
+      setShowUnlock(false)
+    }
+    if (!user?.id) return undefined
+
+    const t = window.setTimeout(() => void evaluateUnlock('login'), 500)
     return () => window.clearTimeout(t)
-  }, [check, user?.id])
+  }, [evaluateUnlock, user?.id])
 
   useEffect(() => {
-    const onVote = () => void check(true)
-    const onAcked = () => setShowUnlock(false)
+    const onVote = () => void evaluateUnlock('vote')
+    const onAcked = () => {
+      popupHandledRef.current = true
+      setShowUnlock(false)
+    }
+    const onPopupSeen = () => {
+      popupHandledRef.current = true
+      setShowUnlock(false)
+    }
     window.addEventListener(TENDENCY_VOTE_CAST, onVote)
     window.addEventListener(TENDENCY_REPORT_ACKED, onAcked)
+    window.addEventListener(TENDENCY_REPORT_POPUP_SEEN, onPopupSeen)
     return () => {
       window.removeEventListener(TENDENCY_VOTE_CAST, onVote)
       window.removeEventListener(TENDENCY_REPORT_ACKED, onAcked)
+      window.removeEventListener(TENDENCY_REPORT_POPUP_SEEN, onPopupSeen)
     }
-  }, [check])
+  }, [evaluateUnlock])
 
   const onClose = useCallback(() => {
-    if (user?.id) sessionStorage.setItem(snoozeKey(user.id), '1')
+    popupHandledRef.current = true
     setShowUnlock(false)
-  }, [user?.id])
+  }, [])
 
   const onOpenReport = useCallback(() => {
-    if (user?.id) sessionStorage.removeItem(snoozeKey(user.id))
+    popupHandledRef.current = true
     setShowUnlock(false)
     navigate('/report/tendency')
-  }, [navigate, user?.id])
+  }, [navigate])
 
   return (
     <TendencyReportUnlockModal

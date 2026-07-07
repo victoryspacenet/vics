@@ -91,14 +91,19 @@ export function RankingCardEditor({ rank, nickname, avatar_url, points, period =
       // 2. 썸네일 생성 (모달 프리뷰용)
       const thumbnail = await generateThumbnail(opts)
 
-      // 3. 갤러리에 저장
+      // 3. 갤러리에 저장 (Supabase)
       if (user?.id) {
-        saveToGallery(user.id, {
-          rank, nickname, points, period, themeId,
-          showNickname: showNick, showPoints: showPts, showRank,
-          thumbnail,
-        })
-        setSavedToGallery(true)
+        try {
+          await saveToGallery(user.id, {
+            rank, nickname, points, period, themeId,
+            matchupTierId: userTier.id,
+            showNickname: showNick, showPoints: showPts, showRank,
+            thumbnail,
+          })
+          setSavedToGallery(true)
+        } catch (e) {
+          showToast(e?.message || '갤러리 저장에 실패했어요', 'error')
+        }
       }
 
       // 4. 토스트 먼저 표시
@@ -403,6 +408,7 @@ export function RankingCardEditor({ rank, nickname, avatar_url, points, period =
           thumbnail={lastThumbnail}
           rank={rank}
           nickname={nickname}
+          tierId={userTier.id}
           winRate={calcWinRate(profile?.wins, profile?.losses)}
           onClose={() => {
             navigate('/ranking')

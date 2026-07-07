@@ -27,7 +27,7 @@ function getOgMeta(matchup, baseUrl, requestUrl) {
 
   const ogImage = matchup.id
     ? `${baseUrl.replace(/\/+$/, '')}/api/matchup-share-image?matchupId=${encodeURIComponent(matchup.id)}`
-    : `${baseUrl}/logo.png`
+    : `${baseUrl.replace(/\/+$/, '')}/api/site-og-image`
 
   return {
     title: `${ogTitle} - VICS`,
@@ -61,12 +61,12 @@ function injectOgIntoHtml(html, meta) {
   if (out.includes('og:image')) {
     out = out.replace(
       /<meta property="og:image" content="[^"]*"\/?>/,
-      `<meta property="og:image" content="${img}" />\n  <meta property="og:image:width" content="1200" />\n  <meta property="og:image:height" content="630" />`,
+      `<meta property="og:image" content="${img}" />\n  <meta property="og:image:secure_url" content="${img}" />\n  <meta property="og:image:width" content="1200" />\n  <meta property="og:image:height" content="630" />`,
     )
   } else {
     out = out.replace(
       '</head>',
-      `  <meta property="og:image" content="${img}" />\n  <meta property="og:image:width" content="1200" />\n  <meta property="og:image:height" content="630" />\n  <meta property="og:url" content="${url}" />\n</head>`,
+      `  <meta property="og:image" content="${img}" />\n  <meta property="og:image:secure_url" content="${img}" />\n  <meta property="og:image:width" content="1200" />\n  <meta property="og:image:height" content="630" />\n  <meta property="og:url" content="${url}" />\n</head>`,
     )
   }
   if (!out.includes('og:url')) {
@@ -119,7 +119,7 @@ function buildFallbackOgHtml(meta, baseUrl) {
 
 const ogHandler = async (event) => {
   const path = event.path || ''
-  const match = path.match(/^\/matchup\/([^/]+)/)
+  const match = path.match(/^\/matchup\/(?:share\/)?([^/?#]+)/)
   const id = match ? match[1] : event.queryStringParameters?.id
 
   if (!id) {
@@ -129,7 +129,9 @@ const ogHandler = async (event) => {
   const host = event.headers['x-forwarded-host'] || event.headers.host || ''
   const proto = event.headers['x-forwarded-proto'] || 'https'
   const baseUrl = `${proto}://${host}`
-  const requestUrl = `${baseUrl}/matchup/${id}`
+  const requestUrl = path.includes('/matchup/share/')
+    ? `${baseUrl}/matchup/share/${id}`
+    : `${baseUrl}/matchup/${id}`
 
   if (!isValidSupabaseUrl(supabaseUrl)) {
     console.error('[VICS 보안] Supabase URL은 HTTPS여야 합니다. VITE_SUPABASE_URL을 확인해주세요.')

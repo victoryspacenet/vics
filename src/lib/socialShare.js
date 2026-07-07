@@ -11,28 +11,51 @@ import { copyToClipboard } from './utils'
 import { getSiteOrigin } from './siteApiBase'
 import { fetchMatchupShareBlob } from './matchupShareCompositeBrowser'
 
+function recordShareSuccess(kind = 'matchup') {
+  void import('./userShareEvent').then(({ logUserShareEvent }) => logUserShareEvent(kind))
+}
+
 const KAKAO_SDK_URL = 'https://t1.kakaocdn.net/kakao_js_sdk/2.8.1/kakao.min.js'
 
 let kakaoSdkPromise = null
 let kakaoInitKey = null
 
-async function isNativeCapacitorApp() {
+export async function isNativeCapacitorApp() {
   try {
     const { Capacitor } = await import('@capacitor/core')
-    return Capacitor.isNativePlatform()
+    if (Capacitor.isNativePlatform()) return true
+    const platform = Capacitor.getPlatform?.()
+    return Boolean(platform && platform !== 'web')
   } catch {
     return false
   }
 }
 
+/**
+ * Capacitor 네이티브 셸 판별 — 개발자 빌드(라이브리로드 등)에서 isNativePlatform()이
+ * 예상과 다르게 동작할 수 있어 여러 신호를 함께 확인한다.
+ */
 function isCapacitorNativeShell() {
   if (typeof window === 'undefined') return false
-  return Boolean(window.Capacitor?.isNativePlatform?.())
+  const cap = window.Capacitor
+  if (!cap) return false
+  if (cap.isNativePlatform?.()) return true
+  const platform = cap.getPlatform?.()
+  // getPlatform()이 'web'이면 브라우저(또는 @capacitor/core만 번들된 PWA)이므로
+  // window.Capacitor가 존재해도 네이티브로 취급하지 않는다.
+  return Boolean(platform && platform !== 'web')
+}
+
+/** iOS 기본 스킴(capacitor://localhost) 등 네이티브 전용 프로토콜 */
+function isCapacitorSchemeShell() {
+  if (typeof window === 'undefined') return false
+  const { protocol } = window.location
+  return protocol === 'capacitor:' || protocol === 'ionic:'
 }
 
 /** Capacitor androidScheme:https → https://localhost (JS SDK 도메인 등록 불가 → 4011) */
 function isCapacitorHttpsLocalhostShell() {
-  if (typeof window === 'undefined' || import.meta.env.DEV) return false
+  if (typeof window === 'undefined') return false
   const { protocol, hostname } = window.location
   return protocol === 'https:' && (hostname === 'localhost' || hostname === '127.0.0.1')
 }
@@ -44,7 +67,19 @@ function isLocalhostHostname() {
 }
 
 function getKakaoJsKey() {
-  return String(import.meta.env.VITE_KAKAO_JS_KEY || '').trim()
+  const raw = String(import.meta.env.VITE_KAKAO_JS_KEY || '')
+  if (!raw) return ''
+  // Netlify/복붙 시 따옴표·개행·제로폭 공백(ZWSP)·BOM이 섞이면 카카오 4011
+  const cleaned = raw
+    .replace(/^['"]|['"]$/g, '')
+    .replace(/[\s\u200B-\u200D\uFEFF]/g, '')
+  if (import.meta.env.DEV && cleaned && !/^[0-9a-fA-F]{32}$/.test(cleaned)) {
+    console.warn(
+      '[kakao-share] VITE_KAKAO_JS_KEY가 일반적인 카카오 키 형식(32자리 16진수)이 아니에요. ' +
+        `length=${cleaned.length}. 카카오 콘솔의 "JavaScript 키" 값을 다시 복사해 주세요.`,
+    )
+  }
+  return cleaned
 }
 
 function isLocalDevBrowser() {
@@ -73,6 +108,7 @@ function getKakaoProductionHostnames() {
 function isNativeOrAppShell() {
   return (
     isCapacitorNativeShell()
+    || isCapacitorSchemeShell()
     || isBundledAppLocalhostShell()
     || isCapacitorHttpsLocalhostShell()
   )
@@ -119,6 +155,79 @@ export function resolvePublicShareUrl(url) {
   }
 }
 
+/** 랭킹 갤러리 공유 — 랭킹 페이지 URL (항상 /ranking 경로) */
+export function getRankingPageShareUrl() {
+  if (typeof window === 'undefined') {
+    const site = getPublicShareOrigin()
+    return site ? `${site}/ranking` : 'https://www.victoryspace.net/ranking'
+  }
+  const origin = getPublicShareOrigin() || window.location.origin
+  try {
+    return new URL('/ranking', origin.endsWith('/') ? origin : `${origin}/`).href
+  } catch {
+    return resolvePublicShareUrl(`${window.location.origin}/ranking`)
+  }
+}
+
+/** @param {{ rank?: number, nickname?: string, tierName?: string }} opts */
+export function buildRankingGalleryShareHeadline(nickname) {
+  return nickname ? `${nickname}님의 VICS 랭킹 카드 🏆` : '나의 VICS 랭킹 카드 🏆'
+}
+
+export function buildRankingGalleryShareSubline(rank, tierName) {
+  return [rank != null ? `#${rank}` : '', tierName || ''].filter(Boolean).join(' · ')
+}
+
+/** @param {{ rank?: number, nickname?: string, tierName?: string }} opts */
+export function buildRankingGalleryShareText({ rank, nickname, tierName } = {}) {
+  const url = getRankingGallerySharePageUrl({ rank, nickname, tierName })
+  const lines = [buildRankingGalleryShareHeadline(nickname)]
+  const sub = buildRankingGalleryShareSubline(rank, tierName)
+  if (sub) lines.push(sub)
+  lines.push('', 'VictorySpace에서 나도 도전해 보세요 👇', url)
+  return lines.join('\n')
+}
+
+function buildRankingShareQueryString({ nickname, rank, tierName, cardId } = {}) {
+  const qs = new URLSearchParams()
+  if (rank != null && rank !== '') qs.set('rank', String(rank))
+  if (tierName) qs.set('tier', tierName)
+  if (nickname) qs.set('nickname', nickname)
+  if (cardId) qs.set('sid', String(cardId).slice(0, 12))
+  const s = qs.toString()
+  return s ? `?${s}` : ''
+}
+
+/** 카카오·SNS 링크 미리보기용 공유 URL (OG 주입 — /ranking/share) */
+export function getRankingGallerySharePageUrl({ nickname, rank, tierName, cardId } = {}) {
+  if (typeof window === 'undefined') {
+    const site = getPublicShareOrigin() || 'https://www.victoryspace.net'
+    return `${site.replace(/\/+$/, '')}/ranking/share${buildRankingShareQueryString({ nickname, rank, tierName, cardId })}`
+  }
+  const qs = buildRankingShareQueryString({ nickname, rank, tierName, cardId })
+  return resolvePublicShareUrl(`${window.location.origin}/ranking/share${qs}`)
+}
+
+/** @param {{ nickname?: string, rank?: number, tierName?: string, thumbnailUrl?: string }} opts */
+export function getRankingShareImageUrl({ nickname, rank, tierName, thumbnailUrl } = {}) {
+  const origin = getPublicShareOrigin()
+  if (!origin) return defaultOgImageUrl()
+  const qs = new URLSearchParams()
+  if (rank != null && rank !== '') qs.set('rank', String(rank))
+  if (tierName) qs.set('tier', tierName)
+  if (nickname) qs.set('nickname', nickname)
+  if (thumbnailUrl && /^https:\/\//i.test(thumbnailUrl)) qs.set('thumb', thumbnailUrl)
+  return `${origin.replace(/\/+$/, '')}/api/ranking-share-image?${qs.toString()}`
+}
+
+export function buildRankingGalleryShareDescription({ rank, tierName } = {}) {
+  const lines = []
+  const sub = buildRankingGalleryShareSubline(rank, tierName)
+  if (sub) lines.push(sub)
+  lines.push('VictorySpace에서 나도 도전해 보세요 👇')
+  return lines.join('\n')
+}
+
 function loadKakaoSdkOnce() {
   if (typeof window === 'undefined') return Promise.reject(new Error('no window'))
   if (window.Kakao) return Promise.resolve(window.Kakao)
@@ -142,9 +251,11 @@ function loadKakaoSdkOnce() {
   return kakaoSdkPromise
 }
 
+export const DEFAULT_OG_IMAGE_PATH = '/api/site-og-image'
+
 function defaultOgImageUrl() {
   const origin = getPublicShareOrigin()
-  return origin ? `${origin}/logo.png` : null
+  return origin ? `${origin.replace(/\/+$/, '')}${DEFAULT_OG_IMAGE_PATH}` : null
 }
 
 export function getMatchupShareImageUrl(matchup, _safeMediaUrlFn) {
@@ -153,6 +264,84 @@ export function getMatchupShareImageUrl(matchup, _safeMediaUrlFn) {
   if (!origin) return null
   // A|VS|B 합성 썸네일 (Netlify function)
   return `${origin.replace(/\/+$/, '')}/api/matchup-share-image?matchupId=${encodeURIComponent(matchup.id)}`
+}
+
+/** 카카오·링크 미리보기용 공유 URL (OG 주입 — /matchup/share/:id) */
+export function getMatchupSharePageUrl(matchupId) {
+  if (!matchupId) return ''
+  const id = encodeURIComponent(String(matchupId))
+  if (typeof window === 'undefined') {
+    const site = getPublicShareOrigin() || 'https://www.victoryspace.net'
+    return `${site.replace(/\/+$/, '')}/matchup/share/${id}`
+  }
+  return resolvePublicShareUrl(`${window.location.origin}/matchup/share/${id}`)
+}
+
+/** 매치업 상세 페이지 URL (앱 내 이동·북마크) */
+export function getMatchupDetailPageUrl(matchupId) {
+  if (!matchupId) return ''
+  const id = encodeURIComponent(String(matchupId))
+  if (typeof window === 'undefined') {
+    const site = getPublicShareOrigin() || 'https://www.victoryspace.net'
+    return `${site.replace(/\/+$/, '')}/matchup/${id}`
+  }
+  return resolvePublicShareUrl(`${window.location.origin}/matchup/${id}`)
+}
+
+/** @param {{ matchupId: string, showToast?: (msg: string, type?: string) => void }} opts */
+export async function copyMatchupShareLink({ matchupId, showToast }) {
+  const url = getMatchupSharePageUrl(matchupId)
+  if (!url) {
+    showToast?.('공유 링크를 만들 수 없어요', 'error')
+    return false
+  }
+  try {
+    await copyToClipboard(url)
+    showToast?.('링크를 복사했어요. 카카오톡에 붙여넣으면 VS 썸네일 미리보기가 뜹니다', 'success')
+    return true
+  } catch {
+    showToast?.('복사에 실패했어요. 주소창의 링크를 직접 복사해 주세요', 'error')
+    return false
+  }
+}
+
+function resolveHttpsShareImageUrl(imageUrl) {
+  const candidates = [imageUrl, defaultOgImageUrl()].filter(Boolean)
+  for (const raw of candidates) {
+    if (typeof raw === 'string' && /^https:\/\//i.test(raw)) return raw
+  }
+  return null
+}
+
+/** 카카오 피드 공유용 — 링크·이미지는 https 운영 도메인 권장 */
+function getKakaoFeedShareOrigin() {
+  const site = getSiteOrigin()
+  if (site && /^https:\/\//i.test(site)) return site
+  if (typeof window !== 'undefined' && /^https:\/\//i.test(window.location.origin)) {
+    if (!isLocalhostHostname()) return window.location.origin
+  }
+  return ''
+}
+
+function validateKakaoSdkSharePayload({ url, imageUrl }) {
+  const jsKey = getKakaoJsKey()
+  if (!jsKey) return { ok: false, reason: 'no-key' }
+  if (isNativeOrAppShell()) return { ok: false, reason: 'app-shell' }
+
+  const feedOrigin = getKakaoFeedShareOrigin()
+  if (!feedOrigin) {
+    return { ok: false, reason: 'no-https-origin' }
+  }
+
+  const shareUrl = resolvePublicShareUrl(url)
+  if (!shareUrl || !/^https:\/\//i.test(shareUrl)) {
+    return { ok: false, reason: 'http-share-url' }
+  }
+
+  const img = resolveHttpsShareImageUrl(imageUrl)
+  if (!img) return { ok: false, reason: 'http-image-url' }
+
+  return { ok: true, shareUrl, imageUrl: img }
 }
 
 function resolveShareImageUrl(imageUrl) {
@@ -172,6 +361,58 @@ async function blobToShareFile(blob) {
   return new File([blob], 'vics-matchup-vs.jpg', { type: blob.type || 'image/jpeg' })
 }
 
+function blobToDataUri(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(reader.error || new Error('blob read failed'))
+    reader.readAsDataURL(blob)
+  })
+}
+
+const NATIVE_GALLERY_ALBUM_NAME = 'VICS'
+
+/** Android: 앱 전용 앨범(`VICS`)이 없으면 만들고 identifier를 반환. iOS는 앨범 없이도 저장 가능. */
+async function ensureNativeGalleryAlbumId(Media, Capacitor) {
+  if (Capacitor.getPlatform() !== 'android') return undefined
+  const findAlbum = async () => {
+    const { albums } = await Media.getAlbums()
+    const { path: albumsPath } = await Media.getAlbumsPath()
+    return albums.find(
+      (a) => a.name === NATIVE_GALLERY_ALBUM_NAME && a.identifier.startsWith(albumsPath),
+    )
+  }
+  const existing = await findAlbum()
+  if (existing) return existing.identifier
+  await Media.createAlbum({ name: NATIVE_GALLERY_ALBUM_NAME })
+  const created = await findAlbum()
+  return created?.identifier
+}
+
+/**
+ * Capacitor 네이티브 앱(WebView)에서는 `<a download>`·`navigator.share` 파일 첨부가
+ * 안정적으로 동작하지 않아, 사진첩(카메라 롤)에 직접 저장한다 (`@capacitor-community/media`).
+ * 웹(모바일 브라우저·PC)에서는 지원되지 않으므로 호출 전 네이티브 여부를 확인해야 한다.
+ * @param {Blob} blob
+ * @param {{ fileName?: string }} [opts]
+ * @returns {Promise<{ ok: boolean, reason?: string }>}
+ */
+export async function saveImageBlobToNativeGallery(blob, { fileName = 'vics-matchup-vs' } = {}) {
+  try {
+    const [{ Media }, { Capacitor }] = await Promise.all([
+      import('@capacitor-community/media'),
+      import('@capacitor/core'),
+    ])
+    const dataUri = await blobToDataUri(blob)
+    const albumIdentifier = await ensureNativeGalleryAlbumId(Media, Capacitor)
+    await Media.savePhoto({ path: dataUri, fileName, ...(albumIdentifier ? { albumIdentifier } : {}) })
+    return { ok: true }
+  } catch (e) {
+    console.warn('[socialShare] saveImageBlobToNativeGallery failed', e)
+    return { ok: false, reason: e?.code || e?.message || 'save-failed' }
+  }
+}
+
 /** 모바일 네이티브 공유 시 VS 합성 JPEG 첨부 (인스타·페북·X 앱 등) */
 async function tryNativeShareWithImage({ safeTitle, url, imageUrl, matchup, safeMediaUrlFn, notify }) {
   if (typeof navigator === 'undefined' || !navigator.share) return false
@@ -182,6 +423,7 @@ async function tryNativeShareWithImage({ safeTitle, url, imageUrl, matchup, safe
     if (navigator.canShare && !navigator.canShare(payload)) return false
     await navigator.share(payload)
     notify('공유했어요')
+    recordShareSuccess('matchup')
     return true
   } catch {
     return false
@@ -202,11 +444,82 @@ async function saveShareImageToDevice({ imageUrl, matchup, safeMediaUrlFn }) {
   setTimeout(() => URL.revokeObjectURL(objectUrl), 3000)
 }
 
+const INSTAGRAM_WEB_FALLBACK = 'https://www.instagram.com/'
+
+function isIosDevice() {
+  return typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent)
+}
+
+function isAndroidDevice() {
+  return typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent)
+}
+
+/** @param {{ preferStory?: boolean }} opts — story-camera vs feed camera */
+function getInstagramAppUrl({ preferStory = true } = {}) {
+  if (isAndroidDevice()) {
+    const path = preferStory ? 'story-camera' : 'camera'
+    const fallback = encodeURIComponent(INSTAGRAM_WEB_FALLBACK)
+    return `intent://${path}/#Intent;package=com.instagram.android;scheme=instagram;S.browser_fallback_url=${fallback};end`
+  }
+  if (isIosDevice()) {
+    return preferStory ? 'instagram://story-camera' : 'instagram://camera'
+  }
+  return INSTAGRAM_WEB_FALLBACK
+}
+
+/**
+ * 합성/스토리 이미지 저장 후 인스타 앱 딥링크 — 미설치·실패 시 웹 fallback
+ * @param {{ preferStory?: boolean, fallbackMs?: number }} opts
+ */
+export async function tryOpenInstagramApp({ preferStory = true, fallbackMs = 1600 } = {}) {
+  if (typeof window === 'undefined') return
+
+  const isMobile = isIosDevice() || isAndroidDevice()
+  if (!isMobile) {
+    window.open(INSTAGRAM_WEB_FALLBACK, '_blank', 'noopener,noreferrer')
+    return
+  }
+
+  let appUrl = getInstagramAppUrl({ preferStory })
+  // Capacitor WebView: intent:// 대신 instagram:// scheme
+  if (await isNativeCapacitorApp()) {
+    appUrl = preferStory ? 'instagram://story-camera' : 'instagram://camera'
+  }
+
+  let cleared = false
+  const clear = () => {
+    if (cleared) return
+    cleared = true
+    window.clearTimeout(timer)
+    document.removeEventListener('visibilitychange', onHide)
+    window.removeEventListener('pagehide', clear)
+  }
+  const onHide = () => {
+    if (document.hidden) clear()
+  }
+
+  const timer = window.setTimeout(() => {
+    clear()
+    window.open(INSTAGRAM_WEB_FALLBACK, '_blank', 'noopener,noreferrer')
+  }, fallbackMs)
+
+  document.addEventListener('visibilitychange', onHide)
+  window.addEventListener('pagehide', clear)
+
+  try {
+    window.location.assign(appUrl)
+  } catch {
+    clear()
+    window.open(INSTAGRAM_WEB_FALLBACK, '_blank', 'noopener,noreferrer')
+  }
+}
+
 async function tryCapacitorShare({ url, notify }) {
   try {
     const { Share } = await import('@capacitor/share')
     await Share.share({ url, dialogTitle: '공유하기' })
     notify('공유했어요')
+    recordShareSuccess('matchup')
     return true
   } catch (e) {
     const msg = String(e?.message || e || '')
@@ -215,20 +528,58 @@ async function tryCapacitorShare({ url, notify }) {
   }
 }
 
+function kakaoSdkSkipMessage(reason) {
+  switch (reason) {
+    case 'no-key':
+      return '카카오 JavaScript 키가 없어요. .env.local에 VITE_KAKAO_JS_KEY를 넣고 dev 서버를 재시작해 주세요.'
+    case 'app-shell':
+      return '앱에서는 카카오톡을 선택해 링크를 공유해 주세요.'
+    case 'no-https-origin':
+      return '로컬에서는 VITE_SITE_ORIGIN=https://www.victoryspace.net 을 .env.local에 설정해야 카카오 공유가 됩니다.'
+    case 'http-share-url':
+    case 'http-image-url':
+      return '공유 링크·썸네일은 https 운영 URL이 필요해요. VITE_SITE_ORIGIN을 확인해 주세요.'
+    default:
+      return '카카오 공유창을 열지 못했어요. 링크 복사로 공유해 주세요.'
+  }
+}
+
 function isKakao4011Error(err) {
   const text = `${err?.code ?? ''} ${err?.message ?? ''} ${String(err ?? '')}`
   return /4011|wrong appKey|잘못.*앱 키|invalid.*app key/i.test(text)
 }
 
-function logKakaoShareDiagnostics(context) {
-  if (!import.meta.env.DEV || typeof window === 'undefined') return
+function getCapacitorDebugInfo() {
+  if (typeof window === 'undefined') return { hasGlobal: false }
+  const cap = window.Capacitor
+  if (!cap) return { hasGlobal: false }
+  return {
+    hasGlobal: true,
+    isNativePlatform: (() => {
+      try { return Boolean(cap.isNativePlatform?.()) } catch { return 'error' }
+    })(),
+    platform: (() => {
+      try { return cap.getPlatform?.() } catch { return 'error' }
+    })(),
+  }
+}
+
+function logKakaoShareDiagnostics(context, extra = {}) {
+  if (typeof window === 'undefined') return
   const key = getKakaoJsKey()
+  // eslint-disable-next-line no-console
   console.info('[kakao-share]', context, {
     origin: window.location.origin,
+    protocol: window.location.protocol,
+    hostname: window.location.hostname,
     canUseSdk: canUseKakaoJsSdk(),
     isAppShell: isNativeOrAppShell(),
-    keyPrefix: key ? `${key.slice(0, 8)}…` : '(empty)',
-    shareUrl: getPublicShareOrigin(),
+    capacitor: getCapacitorDebugInfo(),
+    keyLength: key.length,
+    keyLooksValid: /^[0-9a-fA-F]{32}$/.test(key),
+    keyPrefix: key ? `${key.slice(0, 6)}…${key.slice(-4)}` : '(empty)',
+    shareOrigin: getPublicShareOrigin(),
+    ...extra,
   })
 }
 
@@ -245,35 +596,51 @@ function ensureKakaoInitialized(Kakao, jsKey) {
   kakaoInitKey = jsKey
 }
 
-async function runKakaoFeedSdkShare({ safeTitle, url, imageUrl, notify }) {
+async function runKakaoFeedSdkShare({
+  safeTitle,
+  description = '',
+  url,
+  imageUrl,
+  buttonTitle = '보러 가기',
+  notify,
+}) {
   const jsKey = getKakaoJsKey()
   if (!jsKey || !canUseKakaoJsSdk()) return { ok: false, reason: 'sdk-unavailable' }
-  logKakaoShareDiagnostics('before-send')
+
+  const payload = validateKakaoSdkSharePayload({ url, imageUrl })
+  if (!payload.ok) {
+    return { ok: false, reason: payload.reason }
+  }
+
+  logKakaoShareDiagnostics('before-send', { shareUrl: payload.shareUrl, imageUrl: payload.imageUrl })
   try {
     const Kakao = await loadKakaoSdkOnce()
     ensureKakaoInitialized(Kakao, jsKey)
     if (!Kakao.isInitialized()) {
       return { ok: false, reason: 'init-failed' }
     }
-    const img = imageUrl || defaultOgImageUrl()
-    if (!img) throw new Error('Kakao share image required')
     await Kakao.Share.sendDefault({
       objectType: 'feed',
       content: {
         title: safeTitle,
-        // 카카오 피드: 썸네일 아래 매치업 제목만 표시 (작성자 A 설명 제외)
-        description: '',
-        imageUrl: img,
-        link: { mobileWebUrl: url, webUrl: url },
+        description: description || '',
+        imageUrl: payload.imageUrl,
+        link: { mobileWebUrl: payload.shareUrl, webUrl: payload.shareUrl },
       },
-      buttons: [{ title: '매치업 보기', link: { mobileWebUrl: url, webUrl: url } }],
+      buttons: [{ title: buttonTitle, link: { mobileWebUrl: payload.shareUrl, webUrl: payload.shareUrl } }],
     })
     return { ok: true }
   } catch (e) {
-    console.warn('[shareMatchupToSns] Kakao SDK failed', e)
+    // 항상(운영 포함) 출력 — 콘솔에서 실제 code·msg를 확인해 카카오 콘솔 설정과 대조
+    console.error('[kakao-share] sendDefault failed', {
+      code: e?.code,
+      message: e?.message,
+      raw: e,
+    })
+    logKakaoShareDiagnostics('after-fail', { shareUrl: payload.shareUrl, imageUrl: payload.imageUrl })
     if (isKakao4011Error(e)) {
       notify?.(
-        '카카오 JavaScript 키가 맞지 않아요. REST API 키가 아니라, localhost를 등록한 JavaScript 키 줄의 값을 .env.local에 넣고 dev 서버를 재시작해 주세요.',
+        '카카오 4011: 앱 키가 잘못됐거나(REST API 키 등) 해당 앱에서 "카카오톡 공유" 제품이 비활성화 상태일 수 있어요. 브라우저 콘솔의 [kakao-share] 로그를 확인해 주세요.',
         'error',
       )
       return { ok: false, reason: '4011' }
@@ -302,6 +669,7 @@ export async function shareMatchupToSns(platform, opts) {
       if (navigator.canShare && !navigator.canShare(payload)) return false
       await navigator.share(payload)
       notify('공유했어요')
+      recordShareSuccess('matchup')
       return true
     } catch (e) {
       if (e?.name === 'AbortError') return true
@@ -313,6 +681,7 @@ export async function shareMatchupToSns(platform, opts) {
     try {
       await copyToClipboard(url)
       notify(hint || '링크를 복사했어요')
+      recordShareSuccess('matchup')
     } catch {
       notify('복사에 실패했어요. 주소창의 링크를 직접 복사해 주세요', 'error')
     }
@@ -321,6 +690,7 @@ export async function shareMatchupToSns(platform, opts) {
   switch (platform) {
     case 'kakao': {
       const isNative = isNativeOrAppShell() || await isNativeCapacitorApp()
+      logKakaoShareDiagnostics('kakao-share-start', { isNative, isMobile })
 
       if (isNative) {
         if (await tryCapacitorShare({ url, notify })) return
@@ -329,25 +699,37 @@ export async function shareMatchupToSns(platform, opts) {
         return
       }
 
-      const trySdk = () => runKakaoFeedSdkShare({ safeTitle, url, imageUrl, notify })
+      const trySdk = () => runKakaoFeedSdkShare({
+        safeTitle,
+        url,
+        imageUrl,
+        buttonTitle: '매치업 보기',
+        notify,
+      })
+
+      const handleSdkFallback = async (sdk, copyHint) => {
+        if (sdk.ok) return true
+        if (sdk.reason === '4011') {
+          await copyLink('운영 링크를 복사했어요. JavaScript 키를 확인한 뒤 dev 서버를 재시작해 주세요 📋')
+          return true
+        }
+        if (['no-key', 'no-https-origin', 'http-share-url', 'http-image-url', 'app-shell'].includes(sdk.reason)) {
+          notify?.(kakaoSdkSkipMessage(sdk.reason), 'info')
+          await copyLink(copyHint || '링크를 복사했어요. 카카오톡에 붙여넣으면 VS 썸네일 미리보기가 뜹니다 📋')
+          return true
+        }
+        return false
+      }
 
       // 웹 브라우저 (localhost dev · 운영): PC는 SDK 공유창 우선
       if (!isMobile) {
         const sdk = await trySdk()
-        if (sdk.ok) return
-        if (sdk.reason === '4011') {
-          await copyLink('운영 링크를 복사했어요. 키 수정 후 dev 서버를 재시작해 주세요 📋')
-          return
-        }
+        if (await handleSdkFallback(sdk, '운영 링크를 복사했어요. 키 수정 후 dev 서버를 재시작해 주세요 📋')) return
       }
       if (isMobile && await tryWebShare()) return
       {
         const sdk = await trySdk()
-        if (sdk.ok) return
-        if (sdk.reason === '4011') {
-          await copyLink('운영 링크를 복사했어요. JavaScript 키를 확인해 주세요 📋')
-          return
-        }
+        if (await handleSdkFallback(sdk, '운영 링크를 복사했어요. JavaScript 키를 확인해 주세요 📋')) return
       }
       await copyLink(
         isLocalDevBrowser()
@@ -378,7 +760,34 @@ export async function shareMatchupToSns(platform, opts) {
       return
     }
     case 'instagram': {
-      // PC: 네이티브 공유창(취소 시 조기 종료) 대신 저장+복사. 모바일만 파일 공유 시도.
+      // 네이티브 앱(Capacitor WebView)에서는 <a download>·navigator.share 파일 첨부가
+      // 안 되거나 불안정해서, 사진첩(카메라 롤)에 직접 저장한 뒤 스토리로 딥링크한다.
+      if (await isNativeCapacitorApp()) {
+        let linkCopied = false
+        try {
+          await copyToClipboard(url)
+          linkCopied = true
+        } catch {
+          /* 사진첩 저장 후에도 재시도 가능 */
+        }
+        try {
+          const blob = await resolveShareBlob(shareImageCtx)
+          const saved = await saveImageBlobToNativeGallery(blob)
+          if (!saved.ok) throw new Error(saved.reason || 'save-failed')
+          notify('VS 합성 이미지를 사진첩에 저장했어요! 인스타 스토리에서 방금 저장한 사진을 선택해 올려 주세요 📸')
+          void tryOpenInstagramApp({ preferStory: true })
+        } catch (e) {
+          console.warn('[socialShare] instagram native gallery save failed', e)
+          if (linkCopied) {
+            notify('링크는 복사됐어요. 사진첩 저장에는 실패했어요 — 다시 시도해 주세요 📋', 'info')
+          } else {
+            await copyLink('사진첩 저장에 실패했어요. 링크만 복사했습니다 — 다시 시도해 주세요 📋')
+          }
+        }
+        return
+      }
+
+      // PC: 네이티브 공유창(취소 시 조기 종료) 대신 저장+복사. 모바일 브라우저만 파일 공유 시도.
       if (isMobile && await tryNativeShareWithImage({ safeTitle, url, notify, ...shareImageCtx })) return
 
       // 클립보드는 사용자 클릭 제스처가 유효할 때 먼저 복사 (await 이미지 생성 전)
@@ -390,8 +799,10 @@ export async function shareMatchupToSns(platform, opts) {
         /* 이미지 저장 후 fallback 재시도 */
       }
 
+      let imageSaved = false
       try {
         await saveShareImageToDevice(shareImageCtx)
+        imageSaved = true
         notify(
           linkCopied
             ? (isMobile
@@ -410,12 +821,58 @@ export async function shareMatchupToSns(platform, opts) {
         }
       }
 
-      if (isMobile) {
-        window.open('https://www.instagram.com', '_blank', 'noopener,noreferrer')
+      if (isMobile && imageSaved) {
+        void tryOpenInstagramApp({ preferStory: false })
       }
       return
     }
     default:
       await copyLink()
   }
+}
+
+/**
+ * 랭킹 갤러리 — 링크 카드(OG) 공유
+ * 카카오 JS SDK(4011) 없이 URL 공유·복사만 사용 → 채팅에 붙이면 클릭 가능한 미리보기 카드
+ * @param {{ nickname?: string, rank?: number, tierName?: string, thumbnailUrl?: string, showToast?: (msg: string, type?: string) => void }} opts
+ */
+export async function shareRankingGallery({ nickname, rank, tierName, cardId, showToast }) {
+  const title = buildRankingGalleryShareHeadline(nickname)
+  const description = buildRankingGalleryShareDescription({ rank, tierName })
+  const sharePageUrl = getRankingGallerySharePageUrl({ nickname, rank, tierName, cardId })
+  const notify = (msg, type = 'success') => showToast?.(msg, type)
+
+  const copyLink = async (hint) => {
+    try {
+      await copyToClipboard(sharePageUrl)
+      notify(hint || '랭킹 공유 링크를 복사했어요. 카카오톡에 붙여넣으면 랭킹 카드 미리보기가 뜹니다')
+      recordShareSuccess('ranking')
+    } catch {
+      notify('복사에 실패했어요. 주소창의 링크를 직접 복사해 주세요', 'error')
+    }
+  }
+
+  const tryWebShare = async () => {
+    if (typeof navigator === 'undefined' || !navigator.share) return false
+    const payload = { title, text: description, url: sharePageUrl }
+    try {
+      if (navigator.canShare && !navigator.canShare(payload)) return false
+      await navigator.share(payload)
+      notify('공유했어요')
+      recordShareSuccess('ranking')
+      return true
+    } catch (e) {
+      if (e?.name === 'AbortError') return true
+      return false
+    }
+  }
+
+  const isNative = isNativeOrAppShell() || await isNativeCapacitorApp()
+  if (isNative) {
+    if (await tryCapacitorShare({ url: sharePageUrl, notify })) return
+  }
+
+  if (await tryWebShare()) return
+
+  await copyLink()
 }

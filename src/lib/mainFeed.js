@@ -133,9 +133,10 @@ export async function fetchMainMatchupsQuick() {
         .select(MATCHUP_EMBED)
         .eq('status', 'active')
         .not('right_type', 'is', null)
+        .gt('total_votes', 0)
         .order('total_votes', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
-        .limit(MAIN_FEED_BEST_LIMIT),
+        .limit(MAIN_FEED_BEST_LIMIT + 1),
     ),
     withVotingInProgressFilter(
       supabase
@@ -160,7 +161,7 @@ export async function fetchMainMatchupsQuick() {
   const bestPicked = (bestRows || []).slice(0, MAIN_FEED_BEST_LIMIT)
   const bestIds = bestMatchupIdSet(bestPicked)
 
-  const hotPickedLean = pickHotFromVotePool(hotPool || [], MAIN_FEED_HOT_LIMIT, bestIds)
+  const hotPickedLean = pickHotFromVotePool(hotPool || [], MAIN_FEED_HOT_LIMIT + 1, bestIds)
   const hotIds = hotPickedLean.map((m) => m.id).filter(Boolean)
   let hotPicked = []
   if (hotIds.length > 0) {
@@ -237,6 +238,7 @@ export async function fetchMainFeaturedFeedRestriction() {
         .select('id')
         .eq('status', 'active')
         .not('right_type', 'is', null)
+        .gt('total_votes', 0)
         .order('total_votes', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
         .limit(MAIN_FEED_BEST_LIMIT),

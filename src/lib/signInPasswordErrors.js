@@ -1,3 +1,5 @@
+import { supabase } from './supabase'
+
 /**
  * Supabase `signInWithPassword` 실패 시 사용자에게 보여줄 메시지
  * (이메일 미인증은 동일한 "Invalid login credentials"로 올 수 있어 code·문구 둘 다 확인)
@@ -63,4 +65,31 @@ export function messageForSignUpError(err) {
     return '이메일 발송 한도에 걸렸어요. 잠시 후 다시 시도해 주세요.'
   }
   return err?.message || '회원가입에 실패했어요. 잠시 후 다시 시도해 주세요.'
+}
+
+/**
+ * 가입 확인(인증) 메일 재전송 — "이메일 인증을 먼저 완료해 주세요" 에러로 로그인이
+ * 막힌 유저가 인증 메일을 못 받았거나 잃어버렸을 때 스스로 다시 받을 수 있게 함.
+ * @param {string} email
+ * @returns {Promise<{ ok: boolean; message: string }>}
+ */
+export async function resendSignupVerificationEmail(email) {
+  const trimmed = String(email || '').trim()
+  if (!trimmed) {
+    return { ok: false, message: '이메일을 입력해 주세요.' }
+  }
+  try {
+    const { error } = await supabase.auth.resend({ type: 'signup', email: trimmed })
+    if (error) throw error
+    return { ok: true, message: '인증 메일을 다시 보냈어요. 받은 편지함·스팸함을 확인해 주세요 📩' }
+  } catch (err) {
+    const msg = String(err?.message || '').toLowerCase()
+    if (msg.includes('already confirmed') || msg.includes('already been confirmed')) {
+      return { ok: true, message: '이미 인증된 이메일이에요. 비밀번호로 바로 로그인해 주세요.' }
+    }
+    if (msg.includes('rate limit')) {
+      return { ok: false, message: '메일 발송 한도에 걸렸어요. 잠시 후 다시 시도해 주세요.' }
+    }
+    return { ok: false, message: '인증 메일 재전송에 실패했어요. 잠시 후 다시 시도해 주세요.' }
+  }
 }

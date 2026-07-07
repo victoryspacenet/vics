@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowRight, Eye, EyeOff, Sparkles, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { messageForSignInWithPasswordError } from '../lib/signInPasswordErrors'
+import { messageForSignInWithPasswordError, resendSignupVerificationEmail } from '../lib/signInPasswordErrors'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
 import {
@@ -154,6 +154,14 @@ export function LoginPage() {
   const [showPw, setShowPw] = useState(false)
   const [loading, setLoading] = useState(false)
   const [emailVerifyHint, setEmailVerifyHint] = useState(false)
+  const [resending, setResending] = useState(false)
+  const [resendCooldown, setResendCooldown] = useState(0)
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return undefined
+    const tid = window.setInterval(() => setResendCooldown((s) => Math.max(0, s - 1)), 1000)
+    return () => window.clearInterval(tid)
+  }, [resendCooldown])
 
   useEffect(() => {
     if (searchParams.get('reset') === 'success') {
@@ -218,6 +226,18 @@ export function LoginPage() {
     }
   }
 
+  const handleResendVerification = async () => {
+    if (resending || resendCooldown > 0) return
+    setResending(true)
+    try {
+      const res = await resendSignupVerificationEmail(email)
+      showToast(res.message, res.ok ? 'success' : 'error')
+      if (res.ok) setResendCooldown(60)
+    } finally {
+      setResending(false)
+    }
+  }
+
   return (
     <PasswordRecoveryShell>
       <RecoveryHeading
@@ -243,6 +263,18 @@ export function LoginPage() {
               가입하신 주소로 인증 메일이 갔을 수 있어요.{' '}
               <strong className="text-sky-800">받은 편지함·스팸함</strong>을 확인한 뒤, 메일 속 링크로 인증을 마친 다음 여기서 로그인해 주세요.
             </p>
+            <button
+              type="button"
+              onClick={handleResendVerification}
+              disabled={resending || resendCooldown > 0 || !email.trim()}
+              className="mt-2.5 inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {resending
+                ? '재전송 중…'
+                : resendCooldown > 0
+                  ? `인증 메일 재전송 (${resendCooldown}초 후 가능)`
+                  : '인증 메일 재전송'}
+            </button>
           </div>
         </div>
       )}
@@ -361,6 +393,15 @@ export function LoginModal({ onClose }) {
   const [password, setPassword] = useState('')
   const [showModalPw, setShowModalPw] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [emailVerifyHint, setEmailVerifyHint] = useState(false)
+  const [resending, setResending] = useState(false)
+  const [resendCooldown, setResendCooldown] = useState(0)
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return undefined
+    const tid = window.setInterval(() => setResendCooldown((s) => Math.max(0, s - 1)), 1000)
+    return () => window.clearInterval(tid)
+  }, [resendCooldown])
 
   const oauthReturnPath = useMemo(
     () => getSafeReturnPath(`${location.pathname}${location.search}${location.hash}`, '/'),
@@ -394,10 +435,22 @@ export function LoginModal({ onClose }) {
         console.error('[EmailLoginModal] signInWithPassword error:', err)
       }
       const human = messageForSignInWithPasswordError(err)
-      // 모달에서는 힌트 UI가 없으니 메시지로만 안내
-      showToast(messageForSignInWithPasswordError(err), 'error')
+      if (human.includes('이메일 인증')) setEmailVerifyHint(true)
+      showToast(human, 'error')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleResendVerification = async () => {
+    if (resending || resendCooldown > 0) return
+    setResending(true)
+    try {
+      const res = await resendSignupVerificationEmail(email)
+      showToast(res.message, res.ok ? 'success' : 'error')
+      if (res.ok) setResendCooldown(60)
+    } finally {
+      setResending(false)
     }
   }
 
@@ -501,6 +554,27 @@ export function LoginModal({ onClose }) {
             )}
           </button>
         </form>
+
+        {emailVerifyHint && (
+          <div className="mt-3 rounded-xl border border-sky-200/70 bg-sky-50/80 px-3.5 py-3">
+            <p className="text-xs font-bold text-sky-950">이메일 인증이 필요해요</p>
+            <p className="mt-1 text-[11px] font-medium leading-relaxed text-sky-900/80">
+              가입 메일의 인증 링크를 먼저 눌러 주세요. 메일을 못 받았다면 아래에서 다시 받을 수 있어요.
+            </p>
+            <button
+              type="button"
+              onClick={handleResendVerification}
+              disabled={resending || resendCooldown > 0 || !email.trim()}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {resending
+                ? '재전송 중…'
+                : resendCooldown > 0
+                  ? `인증 메일 재전송 (${resendCooldown}초 후 가능)`
+                  : '인증 메일 재전송'}
+            </button>
+          </div>
+        )}
 
         <p className="mt-6 flex flex-wrap items-center justify-center gap-x-1 gap-y-1 pb-0.5 text-center text-xs font-medium leading-relaxed text-fuchsia-950/45">
           <span className="shrink-0">아직 계정이 없어요?</span>

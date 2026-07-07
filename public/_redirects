@@ -1,0 +1,19 @@
+# Netlify Functions (dist에 포함 — netlify.toml과 동일 규칙 백업)
+/api/vote /.netlify/functions/vote 200!
+/api/inquiry-reply-email /.netlify/functions/inquiry-reply-email 200!
+/api/system-push-dispatch /.netlify/functions/system-push-dispatch 200!
+/api/fcm-register-token /.netlify/functions/fcm-register-token 200!
+/api/fcm-notice-broadcast /.netlify/functions/fcm-notice-broadcast 200!
+/api/fcm-send-users /.netlify/functions/fcm-send-users 200!
+/api/login-fail-notify /.netlify/functions/login-fail-notify 200!
+/api/profiles-bootstrap-signup /.netlify/functions/profiles-bootstrap-signup 200!
+/api/nickname-check /.netlify/functions/nickname-check 200!
+/api/matchup-challenge-similarity /.netlify/functions/matchup-challenge-similarity 200!
+/api/matchup-category-similarity /.netlify/functions/matchup-category-similarity 200!
+/api/matchup-report-moderation /.netlify/functions/matchup-report-moderation 200!
+/api/ranking-share-image /.netlify/functions/ranking-share-image 200!
+/api/matchup-share-image /.netlify/functions/matchup-share-image 200!
+/api/site-og-image /.netlify/functions/site-og-image 200!
+/ranking/share /.netlify/functions/ranking-og 200!
+/matchup/* /.netlify/functions/matchup-og 200!
+/* /index.html 200

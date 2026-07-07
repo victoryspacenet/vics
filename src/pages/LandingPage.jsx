@@ -20,8 +20,8 @@ const TIER_CONDITION_KO = {
   player: '가입 직후 기본',
   star: `매치업 생성 10회 이상 및 투표 20회 이상, 보유 P ${TIER_MIN_HOLD_POINTS.star.toLocaleString('ko-KR')} 이상`,
   master: `Star 조건을 모두 충족한 뒤, 매치업 생성 승리 20회 이상 및 적중률 65% 이상, 보유 P ${TIER_MIN_HOLD_POINTS.master.toLocaleString('ko-KR')} 이상`,
-  vip: `Star·Master 조건을 모두 충족한 뒤, The Champion / The Oracle 중 하나 이상 참여·전체 랭킹 상위 10%, 보유 P ${TIER_MIN_HOLD_POINTS.vip.toLocaleString('ko-KR')} 이상`,
-  goat: `Star·Master·Vip 조건을 모두 충족한 뒤, The Champion / The Oracle 각각 전체 1~10위, 주간 1~3위, 월간 1~7위 중 하나 이상 달성, 보유 P ${TIER_MIN_HOLD_POINTS.goat.toLocaleString('ko-KR')} 이상`,
+  vip: `Master 조건을 모두 충족한 뒤, The Champion / The Oracle 중 하나 이상 참여·전체 랭킹 상위 10%, 보유 P ${TIER_MIN_HOLD_POINTS.vip.toLocaleString('ko-KR')} 이상`,
+  goat: `Vip 조건을 모두 충족한 뒤, The Champion / The Oracle 각각 전체 1~10위, 주간 1~3위, 월간 1~7위 중 하나 이상 달성, 보유 P ${TIER_MIN_HOLD_POINTS.goat.toLocaleString('ko-KR')} 이상`,
 }
 
 const FANDOM_TIER_ROWS = [
@@ -609,7 +609,11 @@ export function LandingPage() {
                               <span className="block">생성·투표 승/패</span>
                               <span className="mt-1 block text-[8px] sm:text-[9px] text-white/35 leading-snug">(서비스 내 실제 1회 지급 포인트)</span>
                             </td>
-                            <td className="py-2 px-1.5 whitespace-nowrap align-top">승 50P·25P / 패 10P·5P</td>
+                            <td className="py-2 px-1.5 align-top">
+                              <span className="block">생성자 승 50P / 패 10P</span>
+                              <span className="block text-white/50">(왼쪽·오른쪽 도전자 각각 본인 측 기준)</span>
+                              <span className="block text-white/50 mt-0.5">투표자 적중 25P / 패 5P</span>
+                            </td>
                             <td className="py-2 px-1.5 align-top">—</td>
                             <td className="py-2 px-1.5 align-top">—</td>
                             <td className="py-2 px-1.5 align-top">무승부: 생성자 30P / 투표자 15P</td>

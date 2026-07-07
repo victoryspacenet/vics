@@ -4,6 +4,8 @@
 const OUT_W = 1200
 const OUT_H = 630
 const HALF_W = OUT_W / 2
+const VS_BADGE_R = 44
+const VS_BADGE_FONT_PX = 42
 
 function absoluteMediaUrl(raw, baseUrl, safeMediaUrlFn) {
   if (!raw || typeof raw !== 'string') return null
@@ -56,25 +58,22 @@ function loadImage(url) {
   })
 }
 
-function drawCoverImage(ctx, img, dx, dy, dw, dh) {
+/** 패널 안에 이미지 전체가 보이도록 contain (좌우·상하 잘림 없음) */
+function drawContainImage(ctx, img, dx, dy, dw, dh) {
   const ir = img.width / img.height
   const dr = dw / dh
-  let sw
-  let sh
-  let sx
-  let sy
+  let drawW
+  let drawH
   if (ir > dr) {
-    sh = img.height
-    sw = sh * dr
-    sx = (img.width - sw) / 2
-    sy = 0
+    drawW = dw
+    drawH = dw / ir
   } else {
-    sw = img.width
-    sh = sw / dr
-    sx = 0
-    sy = (img.height - sh) / 2
+    drawH = dh
+    drawW = dh * ir
   }
-  ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh)
+  const x = dx + (dw - drawW) / 2
+  const y = dy + (dh - drawH) / 2
+  ctx.drawImage(img, x, y, drawW, drawH)
 }
 
 function drawLabel(ctx, label, labelBg, x, y) {
@@ -99,7 +98,7 @@ async function drawSidePanel(ctx, side, x) {
   if (side.imageUrl) {
     try {
       const img = await loadImage(side.imageUrl)
-      drawCoverImage(ctx, img, x, 0, HALF_W, OUT_H)
+      drawContainImage(ctx, img, x, 0, HALF_W, OUT_H)
     } catch {
       ctx.fillStyle = side.bg
       ctx.fillRect(x, 0, HALF_W, OUT_H)
@@ -120,7 +119,7 @@ async function drawSidePanel(ctx, side, x) {
 function drawVsBadge(ctx) {
   const cx = HALF_W
   const cy = OUT_H / 2
-  const r = 44
+  const r = VS_BADGE_R
   ctx.beginPath()
   ctx.arc(cx, cy, r + 3, 0, Math.PI * 2)
   ctx.fillStyle = '#fff'
@@ -130,10 +129,10 @@ function drawVsBadge(ctx) {
   ctx.fillStyle = '#4f46e5'
   ctx.fill()
   ctx.fillStyle = '#fff'
-  ctx.font = 'bold 16px system-ui, sans-serif'
+  ctx.font = `bold ${VS_BADGE_FONT_PX}px system-ui, -apple-system, sans-serif`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText('VS', cx, cy)
+  ctx.fillText('VS', cx, cy + 1)
   ctx.strokeStyle = 'rgba(255,255,255,0.8)'
   ctx.beginPath()
   ctx.moveTo(cx, 0)

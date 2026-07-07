@@ -125,67 +125,70 @@ export function MainFeedPage() {
 
   return (
     <div className="min-h-screen text-[#22282E] -mx-4 -my-6 px-4 py-6 pb-24 sm:pb-8">
-      <MainTabBar currentVariant={validVariant} />
+      {/* 넓은 화면에서 카드가 과하게 늘어나지 않도록 가운데 정렬된 폭으로 제한 */}
+      <div className="mx-auto w-full max-w-2xl">
+        <MainTabBar currentVariant={validVariant} />
 
-      <Suspense
-        fallback={
-          <div
-            className="mb-4 min-h-[5rem] rounded-xl border border-slate-200/60 bg-gradient-to-b from-slate-50/90 to-slate-100/50"
-            aria-hidden
-          />
-        }
-      >
-        <LegendFeedBanner />
-      </Suspense>
-
-      {enriching && !loading && rows.length > 0 && (
-        <p className="mb-3 text-center text-[11px] font-medium text-slate-400 tabular-nums" aria-live="polite">
-          크리에이터 랭크 정보 동기화 중…
-        </p>
-      )}
-
-      <div className="space-y-4">
-        {loading ? (
-          <>
-            <div className="py-3">
-              <MainFeedCardSkeleton variant={validVariant} staticLcp />
-            </div>
-            <div className="py-3">
-              <MainFeedCardSkeleton variant={validVariant} />
-            </div>
-            <div className="py-3">
-              <MainFeedCardSkeleton variant={validVariant} />
-            </div>
-          </>
-        ) : rows.length > 0 ? (
-          rows.map((m, i) => (
+        <Suspense
+          fallback={
             <div
-              key={`${validVariant}-${page}-${m.id}`}
-              className="py-3 animate-fade-in-feed-stagger"
-              style={{ '--stagger-delay': `${Math.min(i, 11) * 52}ms` }}
-            >
-              <MainMatchupCard
-                matchup={m}
-                variant={validVariant}
-                rank={validVariant === 'best' ? (page - 1) * PAGE_SIZE + i + 1 : undefined}
-                eagerMedia={(page - 1) * PAGE_SIZE + i < 2}
-              />
+              className="mb-4 min-h-[5rem] rounded-xl border border-slate-200/60 bg-gradient-to-b from-slate-50/90 to-slate-100/50"
+              aria-hidden
+            />
+          }
+        >
+          <LegendFeedBanner />
+        </Suspense>
+
+        {enriching && !loading && rows.length > 0 && (
+          <p className="mb-3 text-center text-[11px] font-medium text-slate-400 tabular-nums" aria-live="polite">
+            크리에이터 랭크 정보 동기화 중…
+          </p>
+        )}
+
+        <div className="space-y-4">
+          {loading ? (
+            <>
+              <div className="py-3">
+                <MainFeedCardSkeleton variant={validVariant} staticLcp />
+              </div>
+              <div className="py-3">
+                <MainFeedCardSkeleton variant={validVariant} />
+              </div>
+              <div className="py-3">
+                <MainFeedCardSkeleton variant={validVariant} />
+              </div>
+            </>
+          ) : rows.length > 0 ? (
+            rows.map((m, i) => (
+              <div
+                key={`${validVariant}-${page}-${m.id}`}
+                className="py-3 animate-fade-in-feed-stagger"
+                style={{ '--stagger-delay': `${Math.min(i, 11) * 52}ms` }}
+              >
+                <MainMatchupCard
+                  matchup={m}
+                  variant={validVariant}
+                  rank={validVariant === 'best' ? (page - 1) * PAGE_SIZE + i + 1 : undefined}
+                  eagerMedia={(page - 1) * PAGE_SIZE + i < 2}
+                />
+              </div>
+            ))
+          ) : (
+            <div className="animate-fade-in-feed py-16 text-center text-sm text-gray-400">
+              아직 매치업이 없어요
             </div>
-          ))
-        ) : (
-          <div className="animate-fade-in-feed py-16 text-center text-sm text-gray-400">
-            아직 매치업이 없어요
+          )}
+        </div>
+
+        {!loading && totalCount > 0 && (
+          <div className="mt-8 mb-6 pb-28 sm:pb-10 flex justify-center animate-fade-in-soft">
+            <div className="inline-flex items-center gap-2 px-5 py-4 bg-gradient-to-b from-slate-100/95 to-slate-200/35 rounded-2xl border border-gray-200/70 shadow-md shadow-slate-200/60">
+              <MainPagination current={page} total={totalPages} onPage={goPage} />
+            </div>
           </div>
         )}
       </div>
-
-      {!loading && totalCount > 0 && (
-        <div className="mt-8 mb-6 pb-28 sm:pb-10 flex justify-center animate-fade-in-soft">
-          <div className="inline-flex items-center gap-2 px-5 py-4 bg-gradient-to-b from-slate-100/95 to-slate-200/35 rounded-2xl border border-gray-200/70 shadow-md shadow-slate-200/60">
-            <MainPagination current={page} total={totalPages} onPage={goPage} />
-          </div>
-        </div>
-      )}
     </div>
   )
 }

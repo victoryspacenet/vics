@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
-import { Flame, Sparkles } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { ChevronRight, Flame, Sparkles } from 'lucide-react'
 import { fetchMainMatchupsQuick, enrichMainFeedCreatorRanks, MAIN_FEED_BEST_LIMIT, MAIN_FEED_HOT_LIMIT } from '../lib/mainFeed'
 import { fetchActiveMainSpotlightMatchup } from '../lib/mainSpotlight'
 import { runWhenIdle } from '../lib/runDeferred'
@@ -166,6 +167,17 @@ export function MainPage() {
                 </div>
               ))}
         </MatchupCarousel>
+        {!quickLoading && data.best.length >= MAIN_FEED_BEST_LIMIT && (
+          <div className="mt-3 flex justify-end px-4">
+            <Link
+              to="/feed/best"
+              className="inline-flex flex-row items-center gap-1 whitespace-nowrap rounded-full border border-amber-200/80 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700 transition-colors hover:bg-amber-100"
+            >
+              더보기
+              <ChevronRight size={14} strokeWidth={2.5} aria-hidden />
+            </Link>
+          </div>
+        )}
       </section>
 
       {/* ── 추천 매치업 ── */}
@@ -201,6 +213,17 @@ export function MainPage() {
                 </div>
               ))}
         </MatchupCarousel>
+        {!quickLoading && data.hot.length >= MAIN_FEED_HOT_LIMIT && (
+          <div className="mt-3 flex justify-end px-4">
+            <Link
+              to="/feed/hot"
+              className="inline-flex flex-row items-center gap-1 whitespace-nowrap rounded-full border border-violet-200/80 bg-violet-50 px-3 py-1 text-xs font-bold text-violet-700 transition-colors hover:bg-violet-100"
+            >
+              더보기
+              <ChevronRight size={14} strokeWidth={2.5} aria-hidden />
+            </Link>
+          </div>
+        )}
       </section>
 
       <Suspense

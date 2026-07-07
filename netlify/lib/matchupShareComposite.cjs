@@ -20,13 +20,18 @@ const COLORS = {
 
 let fontWhite16 = null
 let fontWhite32 = null
+let fontWhite64 = null
+
+const VS_BADGE_R = 44
+const VS_BADGE_RING = 3
 
 async function getFonts() {
   if (!fontWhite16) {
     fontWhite16 = await Jimp.loadFont(Jimp.FONT_SANS_16_WHITE)
     fontWhite32 = await Jimp.loadFont(Jimp.FONT_SANS_32_WHITE)
+    fontWhite64 = await Jimp.loadFont(Jimp.FONT_SANS_64_WHITE)
   }
-  return { small: fontWhite16, large: fontWhite32 }
+  return { small: fontWhite16, large: fontWhite32, vs: fontWhite64 }
 }
 
 function absoluteMediaUrl(raw, baseUrl) {
@@ -71,22 +76,23 @@ function hasRightContent(matchup) {
 }
 
 async function renderSidePanel(side, fonts) {
-  let panel
+  let panel = new Jimp(HALF_W, OUT_H, side.bg)
+
   if (side.imageUrl) {
     try {
-      panel = await Jimp.read(side.imageUrl)
-      panel = panel.cover(HALF_W, OUT_H)
+      const img = await Jimp.read(side.imageUrl)
+      img.scaleToFit(HALF_W, OUT_H)
+      const x = Math.floor((HALF_W - img.bitmap.width) / 2)
+      const y = Math.floor((OUT_H - img.bitmap.height) / 2)
+      panel.composite(img, x, y)
     } catch {
       panel = new Jimp(HALF_W, OUT_H, side.bg)
     }
-  } else {
-    panel = new Jimp(HALF_W, OUT_H, side.bg)
-    if (side.type === 'challenge') {
-      panel.print(fonts.large, 0, Math.floor(OUT_H / 2) - 20, {
-        text: '?',
-        alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
-      }, HALF_W, OUT_H)
-    }
+  } else if (side.type === 'challenge') {
+    panel.print(fonts.large, 0, Math.floor(OUT_H / 2) - 20, {
+      text: '?',
+      alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
+    }, HALF_W, OUT_H)
   }
 
   const labelStrip = new Jimp(40, 26, side.labelBg)
@@ -101,19 +107,31 @@ async function renderSidePanel(side, fonts) {
 function drawVsBadge(canvas) {
   const cx = HALF_W
   const cy = Math.floor(OUT_H / 2)
-  const r = 44
-  for (let y = cy - r - 4; y <= cy + r + 4; y++) {
+  const r = VS_BADGE_R
+  const ring = VS_BADGE_RING
+  for (let y = cy - r - ring; y <= cy + r + ring; y++) {
     if (y < 0 || y >= OUT_H) continue
-    for (let x = cx - r - 4; x <= cx + r + 4; x++) {
+    for (let x = cx - r - ring; x <= cx + r + ring; x++) {
       if (x < 0 || x >= OUT_W) continue
       const d2 = (x - cx) ** 2 + (y - cy) ** 2
-      if (d2 <= (r + 3) ** 2 && d2 >= (r + 1) ** 2) {
+      if (d2 <= (r + ring) ** 2 && d2 >= (r + 1) ** 2) {
         canvas.setPixelColor(COLORS.badgeRing, x, y)
       } else if (d2 <= r * r) {
         canvas.setPixelColor(COLORS.badgeFill, x, y)
       }
     }
   }
+}
+
+function printVsLabel(canvas, fonts) {
+  const cx = HALF_W
+  const cy = Math.floor(OUT_H / 2)
+  const box = VS_BADGE_R * 2 + 8
+  canvas.print(fonts.vs, cx - Math.floor(box / 2), cy - Math.floor(box / 2), {
+    text: 'VS',
+    alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
+    alignmentY: Jimp.VERTICAL_ALIGN_MIDDLE,
+  }, box, box)
 }
 
 async function composeMatchupShareImage(matchup, baseUrl) {
@@ -142,16 +160,9 @@ async function composeMatchupShareImage(matchup, baseUrl) {
   }
 
   drawVsBadge(canvas)
-  canvas.print(fonts.small, HALF_W - 12, cyTextY(), {
-    text: 'VS',
-    alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
-  }, 24, 20)
+  printVsLabel(canvas, fonts)
 
   return canvas.quality(88).getBufferAsync(Jimp.MIME_JPEG)
-}
-
-function cyTextY() {
-  return Math.floor(OUT_H / 2) - 8
 }
 
 module.exports = {
