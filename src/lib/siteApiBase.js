@@ -6,6 +6,8 @@
  * 네이티브 빌드: `vite build` 시 `VITE_SITE_ORIGIN=https://배포도메인` 필수 권장.
  */
 
+import { isCapacitorNativeShell, MOBILE_OAUTH_CALLBACK_URL } from './capacitorShell'
+
 function trimSlash(s) {
   return String(s || '').trim().replace(/\/+$/, '')
 }
@@ -38,6 +40,10 @@ export function resolveSiteUrl(path) {
  * @returns {string}
  */
 export function getOAuthRedirectToUrl() {
+  // Capacitor WebView(https://localhost)는 OAuth 후 운영 도메인으로 나가면 세션이 앱에 남지 않음
+  if (isCapacitorNativeShell()) {
+    return MOBILE_OAUTH_CALLBACK_URL
+  }
   if (typeof window !== 'undefined' && window.location?.origin) {
     const origin = window.location.origin
     const host = window.location.hostname

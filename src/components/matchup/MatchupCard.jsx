@@ -16,6 +16,7 @@ import { getTier, tierAtLeast } from '../../lib/tiers'
 import { isFeedBannerHighlightActive } from '../../lib/bannerHighlightBoost'
 import { isMatchupCreatorVipTierGlow, VIP_MATCHUP_SURFACE_CLASS } from '../../lib/matchupCreatorVipGlow'
 import { formatDate, formatNumber, calcPercent, cn } from '../../lib/utils'
+import { formatMatchupRegisteredAt } from '../../lib/matchupRegisteredAt'
 import { copyMatchupShareLink, getMatchupSharePageUrl } from '../../lib/socialShare'
 import { voteViaApi } from '../../lib/voteApi'
 import { fandomTierHasDiamondListNicknameAura } from '../../lib/fandomTiers'
@@ -201,7 +202,7 @@ export function MatchupCard({ matchup: initialMatchup, compact, onVoteUpdate }) 
             <FoundingMemberBadge profile={creator} size={12} />
             <FeaturedBadgeSpan profile={creator} rankInfo={matchup._creatorRankInfo} className="translate-y-px" />
             <TierBadge profile={creator} rankInfo={matchup._creatorRankInfo || {}} variant="compact" />
-            <span className="text-xs text-gray-400">{formatDate(matchup.created_at)}</span>
+            <span className="text-xs text-gray-400">{formatMatchupRegisteredAt(matchup, formatDate)}</span>
           </div>
           <Link to={`/matchup/${matchup.id}`}>
             <h3 className="text-sm font-bold text-[#22282E] mt-0.5 hover:underline line-clamp-1">

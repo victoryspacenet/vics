@@ -20,7 +20,11 @@ export function ChallengeCompleteShareModal() {
   }
 
   const handleShareAndGo = async () => {
-    await copyMatchupShareLink({ matchupId, showToast })
+    await copyMatchupShareLink({
+      matchupId,
+      title: matchupTitle ? `⚔️ ${matchupTitle}` : undefined,
+      showToast,
+    })
     goToMatchup()
   }
 

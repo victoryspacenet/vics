@@ -299,6 +299,12 @@ export const useAuthStore = create((set, get) => ({
                 return
               }
 
+              // Safari 등: 토큰 갱신·락 경합 중 session=null 이벤트는 로그아웃으로 취급하지 않음
+              if (event !== 'SIGNED_OUT' && event !== 'INITIAL_SESSION') {
+                finishInitialSession()
+                return
+              }
+
               useAdminPermissionStore.getState().reset()
               clearAuthSessionCache()
               invalidateProfileFetchCache()
@@ -319,6 +325,20 @@ export const useAuthStore = create((set, get) => ({
               initialSessionDone,
               new Promise((r) => setTimeout(r, 4000)),
             ])
+
+            // 모바일 Safari 등: INITIAL_SESSION이 URL 해시 처리보다 먼저 null로 올 수 있음
+            if (gen === authInitGeneration && !get().user) {
+              try {
+                const { data: { session } } = await supabase.auth.getSession()
+                if (session?.user && gen === authInitGeneration) {
+                  setAuthSessionCache(session)
+                  set({ user: session.user, loading: false })
+                  void get().fetchProfile(session.user.id, { force: true })
+                }
+              } catch (err) {
+                console.warn('[Auth] post-INITIAL_SESSION getSession:', err?.message || err)
+              }
+            }
 
             // 타임아웃으로 INITIAL_SESSION이 오지 않았으면 loading 강제 해제
             if (gen === authInitGeneration && get().loading) {

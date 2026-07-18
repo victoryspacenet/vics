@@ -7,6 +7,14 @@ import { safeMediaUrl } from '../lib/sanitize'
 import { Logo } from '../components/ui/Logo'
 import { VsBadge } from '../components/ui/VsBadge'
 import { TIERS, TIER_MIN_HOLD_POINTS } from '../lib/tiers'
+import {
+  POINTS_CREATOR_DRAW,
+  POINTS_CREATOR_LOSE,
+  POINTS_CREATOR_WIN,
+  POINTS_VOTER_DRAW,
+  POINTS_VOTER_HIT,
+  POINTS_VOTER_MISS,
+} from '../lib/pointRewards'
 
 const HALL_TIER_CARD_STYLE = {
   player: { color: 'from-gray-500/20 to-gray-700/20', glow: '' },
@@ -610,13 +618,13 @@ export function LandingPage() {
                               <span className="mt-1 block text-[8px] sm:text-[9px] text-white/35 leading-snug">(서비스 내 실제 1회 지급 포인트)</span>
                             </td>
                             <td className="py-2 px-1.5 align-top">
-                              <span className="block">생성자 승 50P / 패 10P</span>
+                              <span className="block">생성자 승 {POINTS_CREATOR_WIN}P / 패 {POINTS_CREATOR_LOSE}P</span>
                               <span className="block text-white/50">(왼쪽·오른쪽 도전자 각각 본인 측 기준)</span>
-                              <span className="block text-white/50 mt-0.5">투표자 적중 25P / 패 5P</span>
+                              <span className="block text-white/50 mt-0.5">투표자 적중 {POINTS_VOTER_HIT}P / 패 {POINTS_VOTER_MISS}P</span>
                             </td>
                             <td className="py-2 px-1.5 align-top">—</td>
                             <td className="py-2 px-1.5 align-top">—</td>
-                            <td className="py-2 px-1.5 align-top">무승부: 생성자 30P / 투표자 15P</td>
+                            <td className="py-2 px-1.5 align-top">무승부: 생성자 {POINTS_CREATOR_DRAW}P / 투표자 {POINTS_VOTER_DRAW}P</td>
                           </tr>
                         </tbody>
                       </table>

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from 'react'
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   ChevronLeft, ChevronRight, Plus, ChevronDown,
@@ -17,6 +17,7 @@ import { MatchupEngagementProvider } from '../components/matchup/MatchupEngageme
 import {
   MATCHUPS_CAT_STORAGE_KEY,
   MATCHUPS_CAT_URL_PARAM,
+  MATCHUPS_TAG_URL_PARAM,
   VALID_MATCHUPS_FEED_FILTERS,
   readInitialMatchupsFeedCategory,
   useMatchupsFeedCategories,
@@ -26,6 +27,8 @@ import {
 } from '../components/matchup/MatchupsFeedLnb'
 import { cn } from '../lib/utils'
 import { storedCategoryValuesForFilter } from '../lib/matchupCategoryAliases'
+import { sanitizeMatchupTagToken } from '../lib/matchupTags'
+import { parseListPageParam, patchSearchParamsPage } from '../lib/listPageNav'
 
 const SORT_OPTIONS = [
   { id: 'newest',  label: '최신순', icon: '🔃' },
@@ -41,6 +44,7 @@ export function HomePage({ refreshRef }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const filterParam = searchParams.get('filter')
   const filter = VALID_FILTERS.includes(filterParam) ? filterParam : 'active'
+  const tagFilter = sanitizeMatchupTagToken(searchParams.get(MATCHUPS_TAG_URL_PARAM) || '')
 
   const [category,   setCategory]   = useState(readInitialMatchupsFeedCategory)
   const [sortBy,     setSortBy]     = useState('newest')
@@ -48,8 +52,8 @@ export function HomePage({ refreshRef }) {
   const [data,       setData]       = useState([])
   const [totalCount, setTotalCount] = useState(0)
   const [loading,    setLoading]    = useState(true)
-  const [page,       setPage]       = useState(1)
   const [lnbOpen,    setLnbOpen]    = useState(false)
+  const pageFromUrl = parseListPageParam(searchParams.get('page'))
   const feedCategories = useMatchupsFeedCategories()
   const fetchSeqRef = useRef(0)
   const { openCreateDrawer, openLoginModal } = useUIStore()
@@ -65,23 +69,21 @@ export function HomePage({ refreshRef }) {
     [feedCategories, category]
   )
 
+  const patchMatchupsSearch = useCallback((page, otherPatch = {}, opts = {}) => {
+    patchSearchParamsPage(setSearchParams, page, otherPatch, opts)
+  }, [setSearchParams])
+
   const lnbProps = {
     category,
     filter,
     feedCategories,
     user,
     onCategoryChange: (id) => {
-      setPage(1)
       setCategory(id)
       setLnbOpen(false)
     },
     onFilterChange: (id) => {
-      setPage(1)
-      setSearchParams((p) => {
-        const n = new URLSearchParams(p)
-        n.set('filter', id)
-        return n
-      })
+      patchMatchupsSearch(null, { filter: id })
       setLnbOpen(false)
     },
     onCreateClick: () => {
@@ -105,6 +107,7 @@ export function HomePage({ refreshRef }) {
         const n = new URLSearchParams(prev)
         if (category === 'all') n.delete(MATCHUPS_CAT_URL_PARAM)
         else n.set(MATCHUPS_CAT_URL_PARAM, category)
+        n.delete('page')
         return n
       },
       { replace: true }
@@ -116,9 +119,19 @@ export function HomePage({ refreshRef }) {
     if (!ids.has(category)) setCategory('all')
   }, [feedCategories, category])
 
-  useEffect(() => { void fetchMatchups() }, [category, filter, sortBy, user?.id, page])
+  useEffect(() => { void fetchMatchups() }, [category, filter, sortBy, user?.id, pageFromUrl, tagFilter])
   useEffect(() => { if (refreshRef) refreshRef.current = fetchMatchups }, [])
-  useEffect(() => { setPage(1); window.scrollTo({ top: 0, behavior: 'smooth' }) }, [category, filter, sortBy])
+
+  const prevFilterRef = useRef(filter)
+  const prevTagRef = useRef(tagFilter)
+  useEffect(() => {
+    if (prevFilterRef.current === filter && prevTagRef.current === tagFilter) return
+    prevFilterRef.current = filter
+    prevTagRef.current = tagFilter
+    if (searchParams.get('page')) {
+      patchMatchupsSearch(null, {}, { replace: true })
+    }
+  }, [filter, tagFilter, searchParams, patchMatchupsSearch])
 
   const fetchMatchups = async () => {
     const seq = ++fetchSeqRef.current
@@ -146,8 +159,11 @@ export function HomePage({ refreshRef }) {
         const catVals = storedCategoryValuesForFilter(category)
         if (catVals.length) q = q.in('category', catVals)
       }
+      if (tagFilter) {
+        q = q.contains('tags', [tagFilter])
+      }
       if (queryFilter === 'mine' && user?.id) {
-        q = q.eq('user_id', user.id).eq('status', 'active')
+        q = q.or(`user_id.eq.${user.id},right_user_id.eq.${user.id}`).eq('status', 'active')
       } else if (queryFilter === 'active') {
         q = q.eq('status', 'active')
         const now = new Date().toISOString()
@@ -164,7 +180,7 @@ export function HomePage({ refreshRef }) {
         q = q.order('created_at', { ascending: false })
       }
 
-      const from = (page - 1) * PAGE_SIZE
+      const from = (pageFromUrl - 1) * PAGE_SIZE
       const to = from + PAGE_SIZE - 1
       const { data: base, error, count } = await q.range(from, to)
       if (seq !== fetchSeqRef.current) return
@@ -219,8 +235,23 @@ export function HomePage({ refreshRef }) {
   }, [])
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+  const page = Math.min(pageFromUrl, totalPages)
+
+  useEffect(() => {
+    if (loading || pageFromUrl <= totalPages) return
+    patchMatchupsSearch(totalPages <= 1 ? null : totalPages, {}, { replace: true })
+  }, [pageFromUrl, totalPages, loading, patchMatchupsSearch])
+
   const goPage = (p) => {
-    setPage(p)
+    patchMatchupsSearch(p)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const handleSortChange = (sortId) => {
+    setSortBy(sortId)
+    if (searchParams.get('page')) {
+      patchMatchupsSearch(null, {}, { replace: true })
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -260,7 +291,7 @@ export function HomePage({ refreshRef }) {
                 type="button"
                 role="tab"
                 aria-selected={sortBy === s.id}
-                onClick={() => { setPage(1); setSortBy(s.id) }}
+                onClick={() => handleSortChange(s.id)}
                 className={cn(
                   'flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold transition-all',
                   sortBy === s.id
@@ -310,7 +341,7 @@ export function HomePage({ refreshRef }) {
                     {SORT_OPTIONS.map((s) => (
                       <button
                         key={s.id}
-                        onClick={() => { setPage(1); setSortBy(s.id); setSortOpen(false) }}
+                        onClick={() => { handleSortChange(s.id); setSortOpen(false) }}
                         className={cn(
                           'w-full flex items-center gap-2 px-4 py-2.5 text-sm font-bold transition-colors',
                           sortBy === s.id

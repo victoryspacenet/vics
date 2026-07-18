@@ -36,6 +36,7 @@ import { captureVideoPosterJpegFile } from '../../lib/videoPoster'
 import { cameraPhotoToFile } from '../../lib/cameraPhotoToFile'
 import { uploadMatchupMediaValidated, warmupMatchupMediaUploadSession } from '../../lib/matchupMediaBucketUpload'
 import { SmartphoneCameraCapture } from '../mobile/SmartphoneCameraCapture'
+import { MatchupTextContentInput } from './MatchupTextContentInput'
 import { checkMatchupChallengeSimilarity } from '../../lib/matchupChallengeSimilarityApi'
 import { getCategoryLabelById } from '../../lib/categoryAdminStorage'
 import {
@@ -44,6 +45,7 @@ import {
   matchupSideTypeLabel,
   mediaFileMatchesMatchupSideType,
 } from '../../lib/matchupSideType'
+import { readMatchupTextHydrateValue } from '../../lib/matchupTextInput'
 
 const DESC_MAX = 200
 
@@ -654,15 +656,11 @@ export function ChallengeDrawer() {
                   </div>
                   <UserBUploadBox
                     key={`b-${boxKey}`}
+                    hydrateKey={boxKey}
                     content={rightContent}
                     onChange={setRightContent}
                     disabled={uploading}
                     requiredSideType={requiredSideType}
-                    initialText={
-                      challengeMatchupEdit && challengeMatchup?.right_type === 'text'
-                        ? challengeMatchup.right_text || ''
-                        : undefined
-                    }
                   />
                 </div>
               </div>
@@ -857,14 +855,13 @@ function UserAPreview({ matchup }) {
 }
 
 // ── User B 업로드 박스 ────────────────────────────────────────────
-function UserBUploadBox({ content, onChange, disabled, requiredSideType = null, initialText }) {
+function UserBUploadBox({ content, onChange, disabled, requiredSideType = null, hydrateKey = 0 }) {
   const fileRef = useRef(null)
   const [contentType, setContentType] = useState(() =>
     isMatchupSideType(requiredSideType) ? requiredSideType : 'image',
   )
   const effectiveType = isMatchupSideType(requiredSideType) ? requiredSideType : contentType
   const [dragging, setDragging] = useState(false)
-  const [textInput, setTextInput] = useState(() => (typeof initialText === 'string' ? initialText : ''))
   const [sizeError, setSizeError] = useState('')
   const [processingLabel, setProcessingLabel] = useState('')
   const [showCamera, setShowCamera] = useState(false)
@@ -879,7 +876,6 @@ function UserBUploadBox({ content, onChange, disabled, requiredSideType = null, 
   useEffect(() => {
     if (!content) return
     if (content.type === 'text') {
-      setTextInput(typeof content.text === 'string' ? content.text : '')
       if (!isMatchupSideType(requiredSideType)) setContentType('text')
       return
     }
@@ -889,15 +885,10 @@ function UserBUploadBox({ content, onChange, disabled, requiredSideType = null, 
   }, [content, requiredSideType])
 
   useEffect(() => {
-    if (typeof initialText === 'string') setTextInput(initialText)
-  }, [initialText])
-
-  useEffect(() => {
     if (!content || !isMatchupSideType(requiredSideType)) return
     if (content.type === requiredSideType) return
     if (content.preview?.startsWith?.('blob:')) URL.revokeObjectURL(content.preview)
     onChange(null)
-    setTextInput('')
     const check = assertMatchupSideTypeEquals(requiredSideType, content.type)
     if (!check.ok) setSizeError(check.message)
   }, [requiredSideType, content, onChange])
@@ -992,7 +983,6 @@ function UserBUploadBox({ content, onChange, disabled, requiredSideType = null, 
     setSizeError('')
     setShowCamera(false)
     onChange(null)
-    setTextInput('')
   }
 
   return (
@@ -1027,17 +1017,15 @@ function UserBUploadBox({ content, onChange, disabled, requiredSideType = null, 
 
       {/* 텍스트 입력 */}
       {effectiveType === 'text' ? (
-        <textarea
-          value={textInput}
-          onChange={(e) => {
-            setTextInput(e.target.value)
-            onChange(e.target.value.trim() ? { type: 'text', text: e.target.value.trim() } : null)
-          }}
+        <MatchupTextContentInput
+          key={`text-${hydrateKey}-${effectiveType}`}
+          initialValue={readMatchupTextHydrateValue(content)}
+          onContentChange={onChange}
           placeholder="내 의견을 입력하세요"
           rows={6}
           maxLength={200}
           disabled={disabled}
-          className="w-full px-3 py-3 text-xs bg-gradient-to-br from-emerald-50/90 via-teal-50/60 to-cyan-50/40 border border-emerald-200/60 rounded-xl outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-300/30 resize-none text-center text-emerald-900/80 placeholder:text-emerald-500/60 disabled:opacity-60"
+          className="w-full px-3 py-3 text-xs bg-gradient-to-br from-emerald-50/90 via-teal-50/60 to-cyan-50/40 border border-emerald-200/60 rounded-xl outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-300/30 resize-none text-left whitespace-pre-wrap text-emerald-900/80 placeholder:text-emerald-500/60 disabled:opacity-60"
         />
       ) : (
         /* 파일 드롭 박스 */

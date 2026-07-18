@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
+import { parseListPageIndexFromUrl, patchSearchParamsPage } from '../lib/listPageNav'
 import { Search, ArrowLeft, SlidersHorizontal, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { cn } from '../lib/utils'
@@ -38,9 +39,9 @@ export function SearchPage() {
   const [results, setResults]         = useState([])
   const [totalCount, setTotalCount]   = useState(0)
   const [loading, setLoading]         = useState(false)
-  const [page, setPage]               = useState(0)
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE)
+  const page = Math.min(parseListPageIndexFromUrl(searchParams.get('page')), Math.max(0, totalPages - 1))
 
   const doSearch = useCallback(async (q, sort, p) => {
     if (!q.trim()) {
@@ -125,8 +126,14 @@ export function SearchPage() {
     const q = searchParams.get('q') || ''
     setInputValue(q)
     setQuery(q)
-    setPage(0)
   }, [searchParams])
+
+  useEffect(() => {
+    if (loading || totalPages <= 0) return
+    const pageFromUrl = parseListPageIndexFromUrl(searchParams.get('page'))
+    if (pageFromUrl < totalPages) return
+    patchSearchParamsPage(setSearchParams, totalPages <= 1 ? null : totalPages, {}, { replace: true })
+  }, [loading, totalPages, searchParams, setSearchParams])
 
   useEffect(() => {
     doSearch(query, sortId, page)
@@ -136,17 +143,16 @@ export function SearchPage() {
     e.preventDefault()
     const q = inputValue.trim()
     if (!q) return
-    setPage(0)
     setSearchParams({ q })
   }
 
   const handleSort = (id) => {
     setSortId(id)
-    setPage(0)
+    patchSearchParamsPage(setSearchParams, null, {}, { replace: true })
   }
 
   const goTo = (p) => {
-    setPage(p)
+    patchSearchParamsPage(setSearchParams, p + 1)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 

@@ -112,6 +112,18 @@
 schedule = "@hourly"
 
 [[redirects]]
+  from = "/api/tendency-og-image"
+  to = "/.netlify/functions/tendency-og-image"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/report/tendency/s/*"
+  to = "/.netlify/functions/tendency-og"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/ranking/share"
   to = "/.netlify/functions/ranking-og"
   status = 200

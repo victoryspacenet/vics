@@ -14,6 +14,37 @@ import {
 import { applyMatchupAdminUserSuspension, sendWarning } from '../../lib/warnSanctionStorage'
 import { Modal } from '../../components/ui/Modal'
 import { VsBadge } from '../../components/ui/VsBadge'
+import { safeMediaUrl } from '../../lib/sanitize'
+
+function AdminMatchupSideMedia({ side, sideType, sideText, imageUrl, label }) {
+  const isLeft = side === 'left'
+  if (sideType === 'text') {
+    return (
+      <div
+        className={`flex h-full w-full items-center justify-center p-3 ${
+          isLeft
+            ? 'bg-gradient-to-br from-amber-950/90 via-orange-900/80 to-rose-950/85'
+            : 'bg-gradient-to-br from-violet-950/90 via-fuchsia-900/80 to-indigo-950/85'
+        }`}
+      >
+        <p className="line-clamp-6 whitespace-pre-wrap text-center text-xs font-bold leading-relaxed text-white/90">
+          {sideText || '—'}
+        </p>
+      </div>
+    )
+  }
+
+  const src = safeMediaUrl(imageUrl || '')
+  if (src && (sideType === 'image' || sideType === 'video')) {
+    return <img src={src} alt={label || (isLeft ? 'A' : 'B')} className="h-full w-full object-cover" />
+  }
+
+  return (
+    <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
+      미디어 없음
+    </div>
+  )
+}
 
 const ADMIN_ACTION_MODAL = {
   approve: {
@@ -237,15 +268,13 @@ export function AdminMatchupDetailPage() {
             <p className="text-xs font-bold text-gray-500 mb-2">USER A</p>
             <p className="text-base font-black text-[#22282E] mb-3 truncate max-w-full">{matchup.userA?.name ?? '-'}</p>
             <div className="w-full aspect-square max-w-[120px] sm:max-w-[140px] rounded-xl overflow-hidden bg-gray-200 mb-3">
-              {matchup.userA?.imageUrl ? (
-                <img
-                  src={matchup.userA.imageUrl}
-                  alt={matchup.userA?.name}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">미디어 없음</div>
-              )}
+              <AdminMatchupSideMedia
+                side="left"
+                sideType={matchup.userA?.sideType}
+                sideText={matchup.userA?.sideText}
+                imageUrl={matchup.userA?.imageUrl}
+                label={matchup.userA?.title}
+              />
             </div>
             <p className="text-sm font-medium text-gray-600 text-center break-words max-w-full">"{matchup.userA?.title ?? '-'}"</p>
           </div>
@@ -260,17 +289,13 @@ export function AdminMatchupDetailPage() {
                   {matchup.userB?.name ?? '-'}
                 </p>
                 <div className="w-full aspect-square max-w-[120px] sm:max-w-[140px] rounded-xl overflow-hidden bg-gray-200 mb-3">
-                  {matchup.userB?.imageUrl ? (
-                    <img
-                      src={matchup.userB.imageUrl}
-                      alt={matchup.userB?.name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
-                      미디어 없음
-                    </div>
-                  )}
+                  <AdminMatchupSideMedia
+                    side="right"
+                    sideType={matchup.userB?.sideType}
+                    sideText={matchup.userB?.sideText}
+                    imageUrl={matchup.userB?.imageUrl}
+                    label={matchup.userB?.title}
+                  />
                 </div>
                 <p className="text-sm font-medium text-gray-600 text-center break-words max-w-full">
                   "{matchup.userB?.title ?? '-'}"

@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
-import { toPng } from 'html-to-image'
 import {
   ArrowLeft,
   BarChart3,
@@ -17,8 +16,7 @@ import {
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
 import { cn } from '../lib/utils'
-import { DEFAULT_OG_IMAGE_PATH, resolvePublicShareUrl } from '../lib/socialShare'
-import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../lib/layoutShellClasses'
+import { resolvePublicShareUrl } from '../lib/socialShare'
 import {
   ackTendencyReport,
   buildTendencyReportForUser,
@@ -35,12 +33,18 @@ import {
 import {
   fetchSharedTendencyReport,
   getTendencyReportSharePageUrl,
+  getTendencyReportLandingUrl,
   publishTendencyReportShare,
   readTendencyShareToken,
+  buildTendencyShareMiddleLine,
+  extractTendencyShareId,
+  getTendencyReportOgImageUrl,
 } from '../lib/tendencyReportShare'
-import { TendencyReportShareCard } from '../components/tendency/TendencyReportShareCard'
+import { TendencyReportShareSheet } from '../components/tendency/TendencyReportShareSheet'
 
 const PAGE_BG = 'min-h-screen bg-gradient-to-br from-[#0f0c1d] via-[#1a1035] to-[#0f172a]'
+/** 모바일은 가득, 웹(lg+)은 중앙 카드형 폭 */
+const TENDENCY_REPORT_CONTENT_WIDTH = 'mx-auto w-full min-w-0 max-w-lg lg:max-w-xl'
 
 function StatBar({ label, value, colorClass }) {
   return (
@@ -72,7 +76,6 @@ export function TendencyReportPage() {
   const demoNicknameParam = searchParams.get('nickname')
   const { user, profile } = useAuthStore()
   const { openLoginModal, showToast } = useUIStore()
-  const shareCardRef = useRef(null)
 
   const [loading, setLoading] = useState(true)
   const [report, setReport] = useState(null)
@@ -81,6 +84,7 @@ export function TendencyReportPage() {
   const [saving, setSaving] = useState(false)
   const [sharing, setSharing] = useState(false)
   const [sharePreviewUrl, setSharePreviewUrl] = useState('')
+  const [shareSheetOpen, setShareSheetOpen] = useState(false)
   const [error, setError] = useState(null)
 
   const isSharedView = Boolean(shareToken)
@@ -225,10 +229,23 @@ export function TendencyReportPage() {
     () => (sharePreviewUrl || (shareToken ? getTendencyReportSharePageUrl(shareToken) : '')),
     [sharePreviewUrl, shareToken],
   )
-  const shareOgImage = useMemo(
-    () => (typeof window !== 'undefined' ? resolvePublicShareUrl(`${window.location.origin}${DEFAULT_OG_IMAGE_PATH}`) : ''),
-    [],
-  )
+  const shareOgDescription = useMemo(() => {
+    if (report) return 'VictorySpace · 투표 성향 리포트'
+    if (isSharedView) return 'VictorySpace · 투표 성향 리포트'
+    return '10회 투표 후 열리는 나만의 Vics 투표 성향 리포트'
+  }, [report, isSharedView])
+
+  const shareOgTitle = useMemo(() => {
+    if (report) return buildTendencyShareMiddleLine(report)
+    return 'VictorySpace 성향 리포트'
+  }, [report])
+
+  const shareOgImage = useMemo(() => {
+    const url = shareUrl || sharePreviewUrl
+    const sid = extractTendencyShareId(url)
+    const line = report ? buildTendencyShareMiddleLine(report) : ''
+    return getTendencyReportOgImageUrl({ shareId: sid, middleLine: line, shareUrl: url })
+  }, [report, shareUrl, sharePreviewUrl])
 
   const handleShare = useCallback(async () => {
     if (!report || sharing) return
@@ -260,56 +277,8 @@ export function TendencyReportPage() {
       flushSync(() => {
         setSharePreviewUrl(publicUrl)
       })
-      await new Promise((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(resolve))
-      })
 
-      let shareFile = null
-      if (shareCardRef.current) {
-        try {
-          const dataUrl = await toPng(shareCardRef.current, {
-            pixelRatio: 2,
-            cacheBust: true,
-            skipFonts: true,
-          })
-          const blob = await (await fetch(dataUrl)).blob()
-          shareFile = new File([blob], 'vics-tendency-report.png', { type: 'image/png' })
-        } catch (e) {
-          console.warn('[TendencyReportPage] share card image:', e)
-        }
-      }
-
-      if (!shareFile) {
-        showToast('공유 카드 이미지를 만들지 못했어요', 'error')
-        return
-      }
-
-      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-        try {
-          const payload = { files: [shareFile] }
-          if (!navigator.canShare || navigator.canShare(payload)) {
-            await navigator.share(payload)
-            showToast('공유 카드 이미지가 준비됐어요!', 'success')
-            return
-          }
-        } catch (e) {
-          if (e?.name === 'AbortError') return
-        }
-      }
-
-      const objectUrl = URL.createObjectURL(shareFile)
-      try {
-        const anchor = document.createElement('a')
-        anchor.href = objectUrl
-        anchor.download = shareFile.name
-        anchor.rel = 'noopener'
-        document.body.appendChild(anchor)
-        anchor.click()
-        anchor.remove()
-        showToast('공유 카드 이미지가 저장됐어요. 카카오톡에 보내주세요', 'success')
-      } finally {
-        URL.revokeObjectURL(objectUrl)
-      }
+      setShareSheetOpen(true)
     } catch {
       showToast('공유에 실패했어요', 'error')
     } finally {
@@ -319,35 +288,37 @@ export function TendencyReportPage() {
 
   if (!user && !isDevDemo && !isSharedView) {
     return (
-      <div className={cn(PAGE_BG, 'flex flex-col items-center justify-center px-6 py-20 text-center')}>
-        <Sparkles className="size-10 text-violet-400 mb-4" />
-        <h1 className="text-lg font-black text-white">Vics 성향 리포트</h1>
-        <p className="mt-2 text-sm text-violet-200/70">로그인 후 10회 투표를 완료하면 열려요</p>
-        <button
-          type="button"
-          onClick={openLoginModal}
-          className="mt-6 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-3 text-sm font-black text-white"
-        >
-          로그인하기
-        </button>
+      <div className={cn(PAGE_BG, '-mx-4 px-4 flex flex-col items-center justify-center py-20 text-center')}>
+        <div className={cn(TENDENCY_REPORT_CONTENT_WIDTH, 'px-2')}>
+          <Sparkles className="size-10 text-violet-400 mb-4 mx-auto" />
+          <h1 className="text-lg font-black text-white">Vics 성향 리포트</h1>
+          <p className="mt-2 text-sm text-violet-200/70">로그인 후 10회 투표를 완료하면 열려요</p>
+          <button
+            type="button"
+            onClick={openLoginModal}
+            className="mt-6 rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-3 text-sm font-black text-white"
+          >
+            로그인하기
+          </button>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className={PAGE_BG}>
+    <div className={cn(PAGE_BG, '-mx-4 px-4')}>
       <Helmet>
         <title>Vics 성향 리포트</title>
-        <meta name="description" content="10회 투표 후 열리는 나만의 Vics 투표 성향 리포트" />
+        <meta name="description" content={shareOgDescription} />
         <meta property="og:type" content="website" />
-        <meta property="og:title" content="Vics 성향 리포트" />
-        <meta property="og:description" content={isSharedView ? '친구가 공유한 Vics 투표 성향 리포트' : '10회 투표 후 열리는 나만의 Vics 투표 성향 리포트'} />
+        <meta property="og:title" content={shareOgTitle} />
+        <meta property="og:description" content={shareOgDescription} />
         {shareUrl ? <meta property="og:url" content={shareUrl} /> : null}
         {shareOgImage ? <meta property="og:image" content={shareOgImage} /> : null}
         <meta name="twitter:card" content="summary_large_image" />
         {shareUrl ? <meta name="twitter:url" content={shareUrl} /> : null}
       </Helmet>
-      <div className={cn('mx-auto w-full min-w-0 px-4 pb-24 pt-4', LAYOUT_CONTENT_MAX_WIDTH_CLASS)}>
+      <div className={cn(TENDENCY_REPORT_CONTENT_WIDTH, 'pb-24 pt-4')}>
         {/* 헤더 */}
         <div className="mb-6 flex items-center gap-3">
           <button
@@ -570,9 +541,13 @@ export function TendencyReportPage() {
           </div>
         )}
       </div>
-      {report && shareUrl ? (
-        <TendencyReportShareCard ref={shareCardRef} report={report} shareUrl={shareUrl} />
-      ) : null}
+      <TendencyReportShareSheet
+        open={shareSheetOpen}
+        onClose={() => setShareSheetOpen(false)}
+        report={report}
+        shareUrl={shareUrl || sharePreviewUrl || getTendencyReportLandingUrl()}
+        showToast={showToast}
+      />
     </div>
   )
 }

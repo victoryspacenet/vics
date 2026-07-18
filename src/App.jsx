@@ -25,6 +25,12 @@ import { consumeStoredLoginReturn, getSafeReturnPath } from './lib/loginReturn'
 import { RoutePageSkeleton } from './components/ui/RoutePageSkeleton'
 import { prefetchCommonRoutes, prefetchRoute } from './lib/routePrefetch'
 import { runWhenIdle } from './lib/runDeferred'
+import { registerMobileOAuthCallbackListener } from './lib/mobileOAuth'
+import {
+  bootstrapOAuthCallbackFromUrl,
+  startOAuthCallbackHashListener,
+} from './lib/oauthCallbackBootstrap'
+import { DevEmbeddedBrowserBanner } from './components/dev/DevEmbeddedBrowserBanner'
 
 function RouteLoadingFallback() {
   return <RoutePageSkeleton />
@@ -88,33 +94,55 @@ function App() {
   const homeRefreshRef = useRef(null)
 
   useEffect(() => {
-    initialize()
-    prefetchRoute(window.location.pathname)
-    runWhenIdle(() => {
-      prefetchCommonRoutes()
-      LazyDrawers.prefetchMatchupDrawers()
-    }, { timeoutMs: 2000 })
+    registerMobileOAuthCallbackListener()
 
-    // OAuth 콜백 · 이메일 인증 링크 클릭 후 URL 해시에 에러가 있는 경우 감지
-    const hash = window.location.hash
-    if (hash.includes('error=')) {
-      const params = new URLSearchParams(hash.replace('#', ''))
-      const errorCode = params.get('error_code') || ''
-      const errorDesc = params.get('error_description') || params.get('error') || '로그인 실패'
-      const humanError = errorDesc.replace(/\+/g, ' ')
-      console.error('[Auth callback] 에러:', errorCode, humanError)
-      // otp_expired: 가입 확인·매직링크·비밀번호 재설정 메일의 인증 링크가 만료됐거나 이미 쓴 경우
-      // (소셜 로그인 실패와는 다른 케이스라 별도 안내 + 재전송 동선 제공)
-      if (errorCode === 'otp_expired') {
-        showToast(
-          '메일 속 인증 링크가 만료됐거나 이미 사용됐어요. 로그인 화면에서 인증 메일을 다시 받아 주세요.',
-          'error',
+    const stopHashListener = startOAuthCallbackHashListener(() => {
+      showToast('로그인 됐어요!', 'success')
+    })
+
+    void (async () => {
+      const hash = window.location.hash
+      const search = window.location.search
+      if (hash.includes('error=') || search.includes('error=')) {
+        const params = new URLSearchParams(
+          (hash.includes('error=') ? hash : search).replace(/^[#?]/, ''),
         )
-      } else {
-        showToast(`소셜 로그인 실패: ${humanError}`, 'error')
+        const errorCode = params.get('error_code') || ''
+        const errorDesc = params.get('error_description') || params.get('error') || '로그인 실패'
+        const humanError = errorDesc.replace(/\+/g, ' ')
+        console.error('[Auth callback] 에러:', errorCode, humanError)
+        if (errorCode === 'otp_expired') {
+          showToast(
+            '메일 속 인증 링크가 만료됐거나 이미 사용됐어요. 로그인 화면에서 인증 메일을 다시 받아 주세요.',
+            'error',
+          )
+        } else {
+          showToast(`소셜 로그인 실패: ${humanError}`, 'error')
+        }
+        window.history.replaceState(null, '', window.location.pathname)
+        await initialize()
+        return
       }
-      window.history.replaceState(null, '', window.location.pathname)
-    }
+
+      const oauth = await bootstrapOAuthCallbackFromUrl()
+      if (oauth.ok) showToast('로그인 됐어요!', 'success')
+      else if (oauth.error) {
+        showToast(`소셜 로그인 실패: ${oauth.error.message}`, 'error')
+      }
+
+      if (oauth.handled) {
+        await new Promise((r) => setTimeout(r, 80))
+      }
+
+      await initialize()
+      prefetchRoute(window.location.pathname)
+      runWhenIdle(() => {
+        prefetchCommonRoutes()
+        LazyDrawers.prefetchMatchupDrawers()
+      }, { timeoutMs: 2000 })
+    })()
+
+    return () => stopHashListener()
   }, [])
 
   // 로그인 상태 변경 시 알림 구독 (초기 fetch는 지연 — auth·피드와 Supabase 락 경합 완화)
@@ -196,6 +224,7 @@ function App() {
 
   return (
     <BrowserRouter>
+      <DevEmbeddedBrowserBanner />
       <GoogleAnalyticsBridge />
       <HubSpotBridge />
       <ProfileLastVisitBridge />

@@ -1,6 +1,8 @@
 import { supabase } from './supabase'
 import { MY_PAGE_MATCHUP_CARD_COLUMNS } from './matchupQueryColumns'
+import { getMatchupRegisteredAtIso } from './matchupRegisteredAt'
 import { mapTierSnapshotRow } from './creatorRankSnapshot'
+import { requestDueMatchupSettlement } from './matchupResultSettlement'
 
 const VOTES_SELECT = `side, matchup_id, created_at, matchups(${MY_PAGE_MATCHUP_CARD_COLUMNS})`
 
@@ -9,6 +11,8 @@ const VOTES_SELECT = `side, matchup_id, created_at, matchups(${MY_PAGE_MATCHUP_C
  * @param {string} userId
  */
 export async function fetchMyPageListsBundle(userId) {
+  await requestDueMatchupSettlement()
+
   const [createdRes, challengedRes, votesRes, tierRes] = await Promise.all([
     supabase
       .from('matchups')
@@ -47,4 +51,34 @@ export async function fetchMyPageListsBundle(userId) {
     },
     tierRankSnapshot: tierInfo,
   }
+}
+
+/**
+ * 생성(A) + 도전 참여(B) 매치업을 마이페이지 「내가 만든 매치업」 탭용으로 합칩니다.
+ * @param {object[]} created
+ * @param {object[]} challenged
+ * @param {string} [userId]
+ */
+export function mergeMyLedMatchups(created = [], challenged = [], userId) {
+  const result = []
+  const seen = new Set()
+
+  for (const m of created) {
+    if (!m?.id || seen.has(m.id)) continue
+    seen.add(m.id)
+    result.push({ ...m, _myRole: 'creator', _sortAt: getMatchupRegisteredAtIso(m) || m.created_at })
+  }
+
+  for (const m of challenged) {
+    if (!m?.id || seen.has(m.id)) continue
+    if (userId && m.user_id === userId) continue
+    seen.add(m.id)
+    result.push({
+      ...m,
+      _myRole: 'challenger',
+      _sortAt: getMatchupRegisteredAtIso(m) || m.created_at,
+    })
+  }
+
+  return result
 }

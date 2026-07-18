@@ -11,10 +11,13 @@ import {
   fetchMatchupCommentsWindow,
 } from '../lib/matchupComments'
 import { voteViaApi } from '../lib/voteApi'
+import { isMatchupVotingFinalized } from '../lib/matchupResultPoints'
+import { requestMatchupSettlement } from '../lib/matchupResultSettlement'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
 import { Avatar } from '../components/ui/Avatar'
 import { formatDate, formatNumber, calcPercent, cn } from '../lib/utils'
+import { formatMatchupRegisteredAt } from '../lib/matchupRegisteredAt'
 import { toPng } from 'html-to-image'
 import { sanitizeText, safeMediaUrl, reportSuspiciousInputIfNeeded } from '../lib/sanitize'
 import { getTier, tierAtLeast } from '../lib/tiers'
@@ -32,8 +35,10 @@ import {
   getMatchupSharePageUrl,
   copyMatchupShareLink,
   tryOpenInstagramApp,
-  isNativeCapacitorApp,
+  isNativeGallerySaveContext,
+  isMobileShareDevice,
   saveImageBlobToNativeGallery,
+  saveImageBlobToMobileWebGallery,
 } from '../lib/socialShare'
 import { fandomTierHasGoldCommentAura, fandomTierFromClaps } from '../lib/fandomTiers'
 import { FANDOM_POINTS_PER_CLAP } from '../lib/fandomPoints'
@@ -58,6 +63,7 @@ import {
   MatchupsFeedLnbPageLayout,
   MatchupsFeedLnbMobileTrigger,
 } from '../components/matchup/MatchupsFeedLnb'
+import { buildMatchupTagFeedUrl, normalizeMatchupTagsForDisplay } from '../lib/matchupTags'
 
 const MATCHUP_DETAIL_SELECT = `${MATCHUP_DETAIL_MATCHUP_COLUMNS}, profiles:user_id(${MATCHUP_CREATOR_PROFILE_FIELDS}), right_profiles:right_user_id(${MATCHUP_CREATOR_PROFILE_FIELDS})`
 const MATCHUP_DETAIL_SELECT_FALLBACK = `${MATCHUP_DETAIL_MATCHUP_COLUMNS}, profiles:user_id(id, nickname, avatar_url), right_profiles:right_user_id(id, nickname, avatar_url)`
@@ -72,6 +78,49 @@ function shouldRetryMatchupDetailSelect(err) {
     msg.includes('creator_wins') ||
     msg.includes('schema cache')
   )
+}
+
+function MatchupTagChipList({ tags, variant = 'form' }) {
+  const list = normalizeMatchupTagsForDisplay(tags)
+  if (list.length === 0) return null
+
+  const tagLinkClass =
+    variant === 'form'
+      ? 'inline-flex items-center gap-1 text-xs font-bold bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white px-2.5 py-1 rounded-full shadow-[0_2px_8px_-2px_rgba(192,38,211,0.4)] hover:brightness-110 active:scale-95 transition-all'
+      : 'inline-flex items-center px-2.5 py-1 text-[11px] font-bold rounded-full bg-gradient-to-r from-fuchsia-100 to-violet-100 text-fuchsia-700 border border-fuchsia-200/60 hover:from-fuchsia-200 hover:to-violet-200 hover:border-fuchsia-300/70 active:scale-95 transition-all'
+
+  const chips = list.map((tag) => (
+    <Link key={tag} to={buildMatchupTagFeedUrl(tag)} className={tagLinkClass}>
+      {variant === 'form' ? <Hash size={9} aria-hidden /> : null}
+      #{tag}
+    </Link>
+  ))
+
+  if (variant === 'comments') {
+    return (
+      <div className="px-1 sm:px-0 mb-4">
+        <div className="rounded-2xl border border-violet-200/45 bg-gradient-to-br from-white/90 via-violet-50/55 to-fuchsia-50/35 px-5 py-4 shadow-[0_8px_28px_-14px_rgba(139,92,246,0.22)]">
+          <p className="text-[10px] font-black text-fuchsia-700 mb-2 flex items-center gap-1.5">🏷️ 태그</p>
+          <div className="flex flex-wrap gap-1.5">{chips}</div>
+        </div>
+      </div>
+    )
+  }
+
+  if (variant === 'form') {
+    return (
+      <div className="space-y-1.5">
+        <label className="text-xs font-black bg-gradient-to-r from-purple-600 to-fuchsia-600 bg-clip-text text-transparent flex items-center gap-1">
+          🏷️ 태그
+        </label>
+        <div className="flex flex-wrap gap-2 min-h-[42px] px-3 py-2 bg-gradient-to-br from-purple-50/90 via-violet-50/70 to-fuchsia-50/50 border border-purple-200/50 rounded-xl">
+          {chips}
+        </div>
+      </div>
+    )
+  }
+
+  return <div className="flex flex-wrap justify-center gap-1.5 pt-1">{chips}</div>
 }
 
 const MAX_IMAGE_BYTES = MAX_IMAGE_MB * 1024 * 1024
@@ -281,11 +330,36 @@ function useCountdown(expiresAt) {
 }
 
 /** 투표 결과 스토리 카드 → JPEG 공유 파일 */
+async function waitForStoryCardImages(cardEl, timeoutMs = 5000) {
+  const imgs = [...cardEl.querySelectorAll('img')]
+  if (!imgs.length) return
+  await Promise.race([
+    Promise.all(
+      imgs.map(
+        (img) =>
+          new Promise((resolve) => {
+            if (img.complete && img.naturalWidth > 0) {
+              resolve()
+              return
+            }
+            img.addEventListener('load', () => resolve(), { once: true })
+            img.addEventListener('error', () => resolve(), { once: true })
+          }),
+      ),
+    ),
+    new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+  ])
+}
+
 async function captureStoryCardShareFile(cardEl, matchupId) {
+  await waitForStoryCardImages(cardEl)
   const dataUrl = await toPng(cardEl, {
     pixelRatio: 2,
     cacheBust: true,
     skipFonts: true,
+    useCORS: true,
+    imagePlaceholder:
+      'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
   })
   const jpegBlob = await new Promise((resolve, reject) => {
     const img = new Image()
@@ -309,34 +383,6 @@ async function captureStoryCardShareFile(cardEl, matchupId) {
     dataUrl,
     fileName,
   }
-}
-
-/** Web Share API — `canShare` false여도 실제 share는 될 수 있어 직접 시도 */
-async function tryShareStoryImageFile(file) {
-  if (typeof navigator === 'undefined' || typeof navigator.share !== 'function') return false
-
-  const payload = { files: [file] }
-  try {
-    if (typeof navigator.canShare !== 'function' || navigator.canShare(payload)) {
-      await navigator.share(payload)
-      return true
-    }
-  } catch (err) {
-    if (err?.name === 'AbortError') return true
-  }
-
-  try {
-    await navigator.share(payload)
-    return true
-  } catch (err) {
-    if (err?.name === 'AbortError') return true
-    return false
-  }
-}
-
-function isMobileShareDevice() {
-  if (typeof navigator === 'undefined') return false
-  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
 }
 
 // ── SNS 공유 설정 ─────────────────────────────────────────────────
@@ -599,11 +645,20 @@ export function MatchupDetailPage() {
     // 1) 티어 RPC 전에 본문·미디어를 먼저 반영해 체감 로딩 단축
     const base = {
       ...data,
+      tags: normalizeMatchupTagsForDisplay(data.tags),
       _creatorRankInfo: { ...EMPTY_TIER_RANK_INFO },
     }
     setMatchup(base)
     setAuthorProfile(data.profiles)
     setMatchupLoadStatus('ready')
+
+    if (isMatchupVotingFinalized(data) || (data.right_type && data.expires_at)) {
+      const settled = await requestMatchupSettlement(data.id)
+      const uid = user?.id
+      if (settled && uid && (uid === data.user_id || uid === data.right_user_id)) {
+        void fetchProfile(uid, { force: true })
+      }
+    }
 
     const pid = data.profiles?.id
     if (!pid) return
@@ -911,7 +966,12 @@ export function MatchupDetailPage() {
   }
 
   const handleCopyLink = async () => {
-    const ok = await copyMatchupShareLink({ matchupId: matchup?.id || id, showToast })
+    const ok = await copyMatchupShareLink({
+      matchupId: matchup?.id || id,
+      matchup,
+      title: ogTitle,
+      showToast,
+    })
     if (ok) {
       setLinkCopied(true)
       setTimeout(() => setLinkCopied(false), 2500)
@@ -1033,21 +1093,6 @@ export function MatchupDetailPage() {
       id="matchup-new-author-panel"
       className="mt-5 pt-4 space-y-4 border-t border-violet-100/55 scroll-mt-24"
     >
-      {matchup.tags?.length > 0 && (
-        <div>
-          <p className="text-[10px] font-black text-fuchsia-700 mb-2 flex items-center gap-1.5">
-            🏷️ 태그 (작성자 A 설정)
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            {matchup.tags.map((tag) => (
-              <span key={tag} className="inline-flex items-center px-2.5 py-1 text-[11px] font-bold rounded-full bg-gradient-to-r from-fuchsia-100 to-violet-100 text-fuchsia-700 border border-fuchsia-200/60">
-                #{tag}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
       {isMyMatchup && !matchup?.right_type && (
         <div className="rounded-2xl overflow-hidden bg-gradient-to-br from-emerald-950/85 via-teal-950/80 to-cyan-950/75 border border-emerald-500/30 shadow-[0_4px_20px_-6px_rgba(16,185,129,0.4)]">
           <div className="px-4 py-3.5">
@@ -1136,6 +1181,9 @@ export function MatchupDetailPage() {
         <meta property="og:title" content={ogTitle} />
         <meta property="og:description" content={ogDesc} />
         {ogImage && <meta property="og:image" content={ogImage} />}
+        {ogImage && <meta property="og:image:secure_url" content={ogImage} />}
+        {ogImage && <meta property="og:image:width" content="1200" />}
+        {ogImage && <meta property="og:image:height" content="630" />}
         {ogUrl && <meta property="og:url" content={ogUrl} />}
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content={ogTitle} />
@@ -1375,7 +1423,7 @@ export function MatchupDetailPage() {
                         )}
                         {matchup.left_type === 'text' && (
                           <div className="absolute inset-0 flex items-center justify-center p-4 bg-gradient-to-br from-amber-900/90 via-orange-950/85 to-rose-950/80">
-                            <p className="text-sm font-bold text-center text-amber-100">{matchup.left_text}</p>
+                            <p className="whitespace-pre-wrap text-sm font-bold text-center text-amber-100">{matchup.left_text}</p>
                           </div>
                         )}
                         <span className="absolute top-2 left-2 text-[10px] font-black bg-gradient-to-r from-amber-500 to-orange-500 text-white px-1.5 py-0.5 rounded-md shadow-sm">
@@ -1428,6 +1476,8 @@ export function MatchupDetailPage() {
                     </div>
                   </div>
                 </div>
+
+                <MatchupTagChipList tags={matchup.tags} />
 
                 {newMatchupAuthorPanel}
 
@@ -1507,7 +1557,7 @@ export function MatchupDetailPage() {
             /* 완료된 매치업: 베스트/추천 이미지 형식 (제목, 날짜, 설명) */
             <>
               <div className="px-6 pt-6 pb-5 space-y-4">
-                <p className="text-sm text-violet-400/90">{formatDate(matchup.created_at)}</p>
+                <p className="text-sm text-violet-400/90">{formatMatchupRegisteredAt(matchup, formatDate)}</p>
                 <div className="flex flex-col items-center gap-2 text-center">
                   <h1 className="text-xl sm:text-2xl font-black leading-snug bg-gradient-to-r from-violet-700 via-fuchsia-600 to-violet-700 bg-clip-text text-transparent">
                     {matchup.title}
@@ -1694,6 +1744,8 @@ export function MatchupDetailPage() {
         </div>
       )}
 
+      {isComplete && <MatchupTagChipList tags={matchup.tags} variant="comments" />}
+
       {/* ══ 댓글 섹션 (완료된 매치업만) ──────────────────────────────────────────── */}
       {isComplete && (
         <section
@@ -1871,6 +1923,9 @@ export function MatchupDetailPage() {
 }
 
 // ── 댓글 아이템 (트리: 답글 재귀) ─────────────────────────────────
+/** 이 개수 이상이면 기본 접힘 — 「댓글 N개 모두 보기」 */
+const REPLY_COLLAPSE_MIN_COUNT = 2
+
 function CommentItem({
   node,
   depth = 0,
@@ -1888,9 +1943,12 @@ function CommentItem({
   const [likeCount, setLikeCount] = useState(0)
   const [showReply, setShowReply] = useState(false)
   const [replyText, setReplyText] = useState('')
+  const [repliesExpanded, setRepliesExpanded] = useState(false)
   const replyTextareaRef = useRef(null)
   const isOwn = currentUserId === comment.user_id
   const isSubmittingThis = submittingReplyFor === comment.id
+  const hasManyReplies = children.length >= REPLY_COLLAPSE_MIN_COUNT
+  const visibleChildren = hasManyReplies && !repliesExpanded ? [] : children
 
   const handleReplySubmit = async (e) => {
     e.preventDefault()
@@ -1902,6 +1960,7 @@ function CommentItem({
     if (ok) {
       setReplyText('')
       setShowReply(false)
+      setRepliesExpanded(true)
     }
   }
 
@@ -2034,9 +2093,20 @@ function CommentItem({
         </div>
       </div>
 
-      {children.length > 0 && (
+      {hasManyReplies && (
+        <button
+          type="button"
+          onClick={() => setRepliesExpanded((v) => !v)}
+          className="mt-2.5 ml-11 sm:ml-12 flex items-center gap-1 text-xs font-bold text-violet-600 hover:text-violet-900 transition-colors"
+        >
+          <CornerDownRight size={12} className={cn('shrink-0 transition-transform', repliesExpanded && 'rotate-90')} />
+          {repliesExpanded ? '댓글 모두 숨기기' : `댓글 ${children.length}개 모두 보기`}
+        </button>
+      )}
+
+      {visibleChildren.length > 0 && (
         <div className="space-y-0">
-          {children.map((child) => (
+          {visibleChildren.map((child) => (
             <CommentItem
               key={child.id}
               node={child}
@@ -2208,7 +2278,7 @@ function OptionCard({
                 ? 'bg-gradient-to-br from-amber-950/90 via-orange-900/80 to-rose-950/85'
                 : 'bg-gradient-to-br from-violet-950/90 via-fuchsia-900/80 to-indigo-950/85',
             )}>
-              <p className="text-center text-sm font-bold leading-relaxed text-white/90 drop-shadow-sm sm:text-base">{text}</p>
+              <p className="whitespace-pre-wrap text-center text-sm font-bold leading-relaxed text-white/90 drop-shadow-sm sm:text-base">{text}</p>
             </div>
           )}
           {type !== 'text' && (
@@ -2401,7 +2471,6 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
   const [animated, setAnimated] = useState(false)
   const [visible, setVisible]   = useState(false)
   const [exporting, setExporting] = useState(false)
-  const [shareReady, setShareReady] = useState(false)
   const cardRef = useRef(null)
   const shareFileRef = useRef(null)
   const shareExportPromiseRef = useRef(null)
@@ -2423,8 +2492,9 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
     : generateAIInsight(voteStats, winPct)
 
   // 인스타 스토리 해시태그
-  const hashTag = matchup.tags?.length
-    ? '#' + matchup.tags[0].replace(/\s/g, '_')
+  const displayTags = normalizeMatchupTagsForDisplay(matchup.tags)
+  const hashTag = displayTags.length
+    ? '#' + displayTags[0].replace(/\s/g, '_')
     : '#VICS_매치업'
 
   const handleClose = () => { setVisible(false); setTimeout(onClose, 300) }
@@ -2461,21 +2531,31 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
 
       const { file, dataUrl, fileName } = await ensureShareFile()
 
-      // 네이티브 앱(Capacitor WebView)에서는 파일 공유 시트·다운로드 링크가 불안정해서
-      // 사진첩에 직접 저장한 뒤 인스타 스토리로 딥링크한다.
-      if (await isNativeCapacitorApp()) {
-        const saved = await saveImageBlobToNativeGallery(file, { fileName: 'vics-vote-story' })
+      if (await isNativeGallerySaveContext()) {
+        const saved = await saveImageBlobToNativeGallery(file, { fileName: 'vics-vote-story', useAppAlbum: false })
         if (saved.ok) {
-          showToast('스토리 카드를 사진첩에 저장했어요! 인스타 스토리에서 방금 저장한 사진을 선택해 올려 주세요 📸', 'info')
+          showToast('스토리 카드를 사진첩에 저장했어요! 인스타 스토리·게시물에서 방금 저장한 사진을 선택해 올려 주세요 📸', 'info')
+          await new Promise((resolve) => setTimeout(resolve, 700))
           void tryOpenInstagramApp({ preferStory: true })
           return
         }
         console.warn('[VoteResultModal] native gallery save failed', saved.reason)
       }
 
-      if (await tryShareStoryImageFile(file)) {
-        showToast('공유 메뉴가 열렸어요. 인스타그램 → 스토리를 선택해 주세요!', 'success')
-        return
+      if (isMobileShareDevice()) {
+        const saved = await saveImageBlobToMobileWebGallery(file, { fileName: `${fileName}.jpg` })
+        if (saved.reason === 'cancelled') return
+        if (saved.ok) {
+          showToast(
+            /iPhone|iPad|iPod/i.test(navigator.userAgent)
+              ? '「이미지 저장」을 선택한 뒤, 인스타 스토리·게시물에서 사진을 고르세요 📸'
+              : '스토리 카드 이미지를 저장했어요. 인스타 스토리·게시물에서 방금 저장한 사진을 선택해 올려 주세요 📸',
+            'info',
+          )
+          await new Promise((resolve) => setTimeout(resolve, 700))
+          void tryOpenInstagramApp({ preferStory: true })
+          return
+        }
       }
 
       const a = document.createElement('a')
@@ -2483,11 +2563,15 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
       a.download = fileName
       a.click()
 
+      showToast(
+        isMobileShareDevice()
+          ? '스토리 카드 이미지를 저장했어요. 인스타 앱 → 스토리 → 갤러리에서 선택해 올려 주세요.'
+          : '이미지를 다운로드했어요. 폰으로 옮긴 뒤 인스타 스토리에 올려 주세요.',
+        'info',
+      )
       if (isMobileShareDevice()) {
-        showToast('스토리 카드 이미지를 저장했어요. 인스타 앱 → 스토리 → 갤러리에서 선택해 올려 주세요.', 'info')
+        await new Promise((resolve) => setTimeout(resolve, 700))
         void tryOpenInstagramApp({ preferStory: true })
-      } else {
-        showToast('이미지를 다운로드했어요. 폰으로 옮긴 뒤 인스타 스토리에 올려 주세요.', 'info')
       }
     } catch (err) {
       console.error('[VoteResultModal] story share:', err)
@@ -2505,21 +2589,17 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
     })
   }, [])
 
-  /** 버튼 탭 시 PNG 생성 대기 없이 바로 공유 시트 — 모달 표시 후 미리 JPEG 생성 */
+  /** 모달 표시 후 백그라운드에서 공유 이미지 미리 생성 (버튼 문구는 바꾸지 않음) */
   useEffect(() => {
     if (!animated || !cardRef.current) return undefined
-    shareFileRef.current = null
-    setShareReady(false)
     const t = window.setTimeout(() => {
-      void ensureShareFile()
-        .then(() => setShareReady(true))
-        .catch((e) => {
-          console.warn('[VoteResultModal] share preload failed', e)
-          setShareReady(false)
-        })
-    }, 550)
+      shareFileRef.current = null
+      void ensureShareFile().catch((e) => {
+        console.warn('[VoteResultModal] share preload failed', e)
+      })
+    }, 700)
     return () => window.clearTimeout(t)
-  }, [animated, ensureShareFile, leftPct, rightPct, votedSide, isDraw, aiInsight])
+  }, [animated, ensureShareFile])
 
   return (
     <div
@@ -2666,7 +2746,7 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
                 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 disabled:opacity-60 disabled:pointer-events-none"
             >
               <Zap size={16} className="fill-current" />
-              {exporting ? '이미지 만드는 중…' : !shareReady ? '공유 준비 중…' : '📸 인스타그램 스토리에 자랑하기'}
+              {exporting ? '이미지 만드는 중…' : '📸 인스타그램 스토리에 자랑하기'}
             </button>
 
             {/* Secondary: 다른 라이벌과 재경쟁 (아웃라인) */}
@@ -2720,7 +2800,7 @@ function StoryCardSide({ type, url, text, label, pct, isDraw, isWin, isVoted, an
       {/* 미디어 영역 */}
       <div className="aspect-square relative overflow-hidden">
         {type === 'image' && url ? (
-          <img src={safeMediaUrl(url)} alt={label} className={`absolute inset-0 w-full h-full object-cover transition-all duration-500 ${dimmed ? 'brightness-50 saturate-50' : ''}`} />
+          <img src={safeMediaUrl(url)} alt={label} crossOrigin="anonymous" className={`absolute inset-0 w-full h-full object-cover transition-all duration-500 ${dimmed ? 'brightness-50 saturate-50' : ''}`} />
         ) : type === 'text' ? (
           <div className={`absolute inset-0 flex items-center justify-center p-3 ${isDraw ? 'bg-violet-500/20' : 'bg-white/10'}`}>
             <p className="text-white text-xs font-bold text-center leading-snug">{text}</p>

@@ -4,8 +4,17 @@
 const OUT_W = 1200
 const OUT_H = 630
 const HALF_W = OUT_W / 2
-const VS_BADGE_R = 44
-const VS_BADGE_FONT_PX = 42
+const VS_BADGE_R = 48
+const VS_BADGE_RING = 4
+const VS_GRADIENT_STOPS = [
+  [0, '#0284c7'],
+  [0.12, '#0ea5e9'],
+  [0.26, '#38bdf8'],
+  [0.5, '#6366f1'],
+  [0.68, '#fb7185'],
+  [0.84, '#ef4444'],
+  [1, '#dc2626'],
+]
 
 function absoluteMediaUrl(raw, baseUrl, safeMediaUrlFn) {
   if (!raw || typeof raw !== 'string') return null
@@ -116,24 +125,61 @@ async function drawSidePanel(ctx, side, x) {
   drawLabel(ctx, side.label, side.labelBg, x + 14, 14)
 }
 
-function drawVsBadge(ctx) {
+function createVsBadgeGradient(ctx, cx, cy, r) {
+  const grad = ctx.createLinearGradient(cx - r, cy, cx + r, cy)
+  for (const [stop, color] of VS_GRADIENT_STOPS) {
+    grad.addColorStop(stop, color)
+  }
+  return grad
+}
+
+async function drawVsBadge(ctx, baseOrigin = '') {
   const cx = HALF_W
   const cy = OUT_H / 2
   const r = VS_BADGE_R
+  const ring = VS_BADGE_RING
+
+  ctx.save()
+  ctx.shadowColor = 'rgba(14, 165, 233, 0.4)'
+  ctx.shadowBlur = 16
+  ctx.shadowOffsetY = 4
   ctx.beginPath()
-  ctx.arc(cx, cy, r + 3, 0, Math.PI * 2)
-  ctx.fillStyle = '#fff'
-  ctx.fill()
+  ctx.arc(cx, cy, r + ring, 0, Math.PI * 2)
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth = ring * 2
+  ctx.stroke()
+  ctx.restore()
+
+  ctx.save()
   ctx.beginPath()
   ctx.arc(cx, cy, r, 0, Math.PI * 2)
-  ctx.fillStyle = '#4f46e5'
+  ctx.closePath()
+  ctx.fillStyle = createVsBadgeGradient(ctx, cx, cy, r)
   ctx.fill()
-  ctx.fillStyle = '#fff'
-  ctx.font = `bold ${VS_BADGE_FONT_PX}px system-ui, -apple-system, sans-serif`
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillText('VS', cx, cy + 1)
+
+  const highlight = ctx.createLinearGradient(cx, cy - r, cx, cy)
+  highlight.addColorStop(0, 'rgba(255, 255, 255, 0.18)')
+  highlight.addColorStop(1, 'rgba(255, 255, 255, 0)')
+  ctx.fillStyle = highlight
+  ctx.fill()
+  ctx.restore()
+
+  const logoUrl = baseOrigin
+    ? `${String(baseOrigin).replace(/\/+$/, '')}/logo.png`
+    : '/logo.png'
+  try {
+    const logo = await loadImage(logoUrl)
+    const target = Math.round(VS_BADGE_R * 1.55)
+    const ratio = Math.min(target / logo.width, target / logo.height)
+    const drawW = logo.width * ratio
+    const drawH = logo.height * ratio
+    ctx.drawImage(logo, cx - drawW / 2, cy - drawH / 2, drawW, drawH)
+  } catch {
+    /* logo optional */
+  }
+
   ctx.strokeStyle = 'rgba(255,255,255,0.8)'
+  ctx.lineWidth = 1
   ctx.beginPath()
   ctx.moveTo(cx, 0)
   ctx.lineTo(cx, OUT_H)
@@ -169,7 +215,7 @@ export async function composeMatchupShareBlob(matchup, safeMediaUrlFn, baseOrigi
 
   await drawSidePanel(ctx, left, 0)
   await drawSidePanel(ctx, right, HALF_W)
-  drawVsBadge(ctx)
+  await drawVsBadge(ctx, baseOrigin)
 
   return new Promise((resolve, reject) => {
     canvas.toBlob(

@@ -8,6 +8,8 @@ const { withIpRateLimit } = require('../lib/rateLimitMiddleware.cjs')
 const supabaseUrl = process.env.VITE_SUPABASE_URL || ''
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || ''
 
+const CRAWLER_REGEX = /bot|crawler|spider|crawling|facebookexternalhit|kakaotalk|kakaostory|twitterbot|linkedinbot|slurp|whatsapp|telegram|line|pinterest|duckduckbot|googlebot|bingbot|yandexbot|slackbot|discordbot/i
+
 function isValidSupabaseUrl(url) {
   if (!url) return false
   try {
@@ -104,6 +106,9 @@ function buildFallbackOgHtml(meta, baseUrl) {
   <meta property="og:title" content="${ogTitle}" />
   <meta property="og:description" content="${d}" />
   <meta property="og:image" content="${img}" />
+  <meta property="og:image:secure_url" content="${img}" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
   <meta property="og:site_name" content="VICS" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="${ogTitle}" />
@@ -142,7 +147,7 @@ const ogHandler = async (event) => {
     const supabase = createClient(supabaseUrl, supabaseAnonKey)
     const { data: matchup, error } = await supabase
       .from('matchups')
-      .select('id, title, left_label, right_label, left_type, right_type, left_url, right_url, left_thumbnail_url, right_thumbnail_url')
+      .select('id, title, left_label, right_label, left_type, right_type, left_url, right_url, left_thumbnail_url, right_thumbnail_url, left_text, right_text, is_complete')
       .eq('id', id)
       .single()
 
@@ -154,16 +159,24 @@ const ogHandler = async (event) => {
     }
 
     const meta = getOgMeta(matchup, baseUrl, requestUrl)
+    const ua = event.headers['user-agent'] || event.headers['User-Agent'] || ''
+    const isCrawler = CRAWLER_REGEX.test(ua)
+
     let html
-    try {
-      const idxRes = await fetch(`${baseUrl}/`, { headers: { 'User-Agent': 'Netlify-OG-Bot' } })
-      if (idxRes.ok) {
-        html = injectOgIntoHtml(await idxRes.text(), meta)
-      } else {
+    if (isCrawler) {
+      // 카카오·SNS 스크래퍼: SPA HTML 대신 OG 전용 경량 HTML (썸네일 메타 파싱 안정)
+      html = buildFallbackOgHtml(meta, baseUrl)
+    } else {
+      try {
+        const idxRes = await fetch(`${baseUrl}/`, { headers: { 'User-Agent': 'Netlify-OG-Bot' } })
+        if (idxRes.ok) {
+          html = injectOgIntoHtml(await idxRes.text(), meta)
+        } else {
+          html = buildFallbackOgHtml(meta, baseUrl)
+        }
+      } catch {
         html = buildFallbackOgHtml(meta, baseUrl)
       }
-    } catch {
-      html = buildFallbackOgHtml(meta, baseUrl)
     }
 
     return {

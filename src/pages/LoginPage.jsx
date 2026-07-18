@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowRight, Eye, EyeOff, Sparkles, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { messageForSignInWithPasswordError, resendSignupVerificationEmail } from '../lib/signInPasswordErrors'
-import { useAuthStore } from '../store/authStore'
+import { completeEmailPasswordSignIn } from '../lib/emailPasswordSignIn'
 import { useUIStore } from '../store/uiStore'
 import {
   clearStoredLoginReturn,
@@ -15,6 +15,10 @@ import {
 import { Button } from '../components/ui/Button'
 import { Logo } from '../components/ui/Logo'
 import { resolveSiteUrl, getOAuthRedirectToUrl } from '../lib/siteApiBase'
+import { isCapacitorNativeShell } from '../lib/capacitorShell'
+import { signInWithOAuthNative } from '../lib/mobileOAuth'
+import { isInAppBrowser, getExternalBrowserLabel } from '../lib/inAppBrowser'
+import { InAppBrowserLoginBanner } from '../components/auth/InAppBrowserLoginBanner'
 import {
   PasswordRecoveryShell,
   RecoveryHeading,
@@ -87,9 +91,22 @@ function SocialButtons({ oauthReturnPath = '/', tone = 'default' }) {
   const isMz = tone === 'mz'
 
   const handleSocial = async (provider) => {
+    if (isInAppBrowser()) {
+      const browser = getExternalBrowserLabel()
+      showToast(
+        `${provider === 'kakao' ? '카카오' : 'Google'} 로그인은 ${browser}에서만 가능해요. 위 안내를 참고해 주세요.`,
+        'error',
+      )
+      return
+    }
     setLoadingProvider(provider)
     try {
       storeLoginReturnForOAuth(oauthReturnPath)
+      if (isCapacitorNativeShell()) {
+        await signInWithOAuthNative(provider)
+        setLoadingProvider(null)
+        return
+      }
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider,
         options: {
@@ -147,7 +164,6 @@ export function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { fetchProfile } = useAuthStore()
   const { showToast } = useUIStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -209,7 +225,7 @@ export function LoginPage() {
         password,
       })
       if (error) throw error
-      await fetchProfile(data.user.id, { force: true })
+      await completeEmailPasswordSignIn(data)
       clearStoredLoginReturn()
       showToast('로그인 됐어요!', 'success')
       navigate(returnAfterLogin, { replace: true })
@@ -278,6 +294,8 @@ export function LoginPage() {
           </div>
         </div>
       )}
+
+      <InAppBrowserLoginBanner tone="mz" />
 
       <RecoveryGlassCard>
         <SocialButtons oauthReturnPath={returnAfterLogin} tone="mz" />
@@ -387,7 +405,6 @@ const MZ_INPUT =
 export function LoginModal({ onClose }) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { fetchProfile } = useAuthStore()
   const { showToast, loginModalContext } = useUIStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -425,7 +442,7 @@ export function LoginModal({ onClose }) {
         password,
       })
       if (error) throw error
-      await fetchProfile(data.user.id, { force: true })
+      await completeEmailPasswordSignIn(data)
       clearStoredLoginReturn()
       showToast('로그인 됐어요!', 'success')
       onClose()
@@ -492,6 +509,10 @@ export function LoginModal({ onClose }) {
             {headline}
           </h2>
           <p className="mt-1.5 text-sm font-medium leading-relaxed text-fuchsia-950/55">{subline}</p>
+        </div>
+
+        <div className="mb-4">
+          <InAppBrowserLoginBanner tone="mz" />
         </div>
 
         <SocialButtons oauthReturnPath={oauthReturnPath} tone="mz" />

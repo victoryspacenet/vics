@@ -62,7 +62,7 @@ async function fetchMatchup(id) {
   if (!supabaseUrl || !anonKey || !isValidSupabaseUrl(supabaseUrl)) return null
 
   const res = await fetch(
-    `${supabaseUrl}/rest/v1/matchups?id=eq.${id}&select=id,title,left_label,right_label,left_thumbnail_url,right_thumbnail_url,left_url,right_url,left_type,right_type`,
+    `${supabaseUrl}/rest/v1/matchups?id=eq.${id}&select=id,title,left_label,right_label,left_thumbnail_url,right_thumbnail_url,left_url,right_url,left_type,right_type,left_text,right_text,is_complete`,
     {
       headers: {
         apikey: anonKey,
@@ -101,6 +101,9 @@ function buildOGHtml(matchup, canonicalUrl) {
   <meta property="og:title" content="${escapedTitle}" />
   <meta property="og:description" content="${escapedDesc}" />
   <meta property="og:image" content="${escapedImage}" />
+  <meta property="og:image:secure_url" content="${escapedImage}" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
   <meta property="og:url" content="${escapedUrl}" />
   <meta property="og:site_name" content="VICS" />
   <meta property="og:locale" content="ko_KR" />

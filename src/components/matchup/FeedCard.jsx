@@ -8,6 +8,7 @@ import { MatchupThumbFrame } from '../ui/MatchupThumbFrame'
 import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
 import { formatDate, formatNumber, calcPercent, cn } from '../../lib/utils'
+import { formatMatchupRegisteredAt } from '../../lib/matchupRegisteredAt'
 import { safeMediaUrl } from '../../lib/sanitize'
 import { getTier, tierAtLeast } from '../../lib/tiers'
 import { isFeedBannerHighlightActive } from '../../lib/bannerHighlightBoost'
@@ -16,6 +17,7 @@ import { MatchupMediaOpenButton, MatchupMediaViewer } from './MatchupMediaViewer
 import { matchupSideToMedia } from '../../lib/matchupMediaView'
 import { useMatchupEngagement } from './MatchupEngagementContext'
 import { MatchupFeedParticipants } from './MatchupFeedParticipants'
+import { resolveMatchupSideType, readMatchupSideText } from '../../lib/matchupSideDisplay'
 
 // variant별 스타일 맵
 const VARIANT_STYLE = {
@@ -266,7 +268,9 @@ export function FeedCard({
           </Link>
         </div>
         <span className="text-[11px] text-gray-400 shrink-0 whitespace-nowrap">
-          {!listBadge && variant === 'new' ? `🆕 ${formatDate(matchup.created_at)} 생성됨` : formatDate(matchup.created_at)}
+          {!listBadge && variant === 'new'
+            ? `🆕 ${formatMatchupRegisteredAt(matchup, formatDate)} 생성됨`
+            : formatMatchupRegisteredAt(matchup, formatDate)}
         </span>
       </div>
 
@@ -438,6 +442,8 @@ function ThumbnailCell({
   media,
   onOpenMedia,
 }) {
+  const resolvedType = resolveMatchupSideType(type, { text, url, thumbnail })
+  const displayText = readMatchupSideText(resolvedType, text)
   const ring =
     side === 'left'
       ? 'ring-[2.5px] ring-fuchsia-500 shadow-[0_0_18px_rgba(217,70,239,0.35)]'
@@ -451,7 +457,7 @@ function ThumbnailCell({
       <MatchupThumbFrame side={side} className="h-full w-full rounded-xl">
         <MatchupMediaOpenButton media={media} onOpen={onOpenMedia} className="h-full min-h-0">
         {/* 콘텐츠 */}
-        {type === 'image' && (url || thumbnail) && (
+        {resolvedType === 'image' && (url || thumbnail) && (
           <img
             src={safeMediaUrl(thumbnail || url)}
             alt={side === 'left' ? 'A측' : 'B측'}
@@ -461,7 +467,7 @@ function ThumbnailCell({
             fetchPriority={eagerMedia ? 'high' : 'low'}
           />
         )}
-        {type === 'video' && (
+        {resolvedType === 'video' && (
           <>
             {(thumbnail || url) && (
               <img
@@ -480,19 +486,19 @@ function ThumbnailCell({
             </div>
           </>
         )}
-        {type === 'text' && (
+        {resolvedType === 'text' && (
           <div className={cn(
             'flex h-full w-full items-center justify-center p-3',
             side === 'left'
               ? 'bg-gradient-to-br from-amber-950/90 via-orange-900/80 to-rose-950/85'
               : 'bg-gradient-to-br from-violet-950/90 via-fuchsia-900/80 to-indigo-950/85',
           )}>
-            <p className="line-clamp-4 text-center text-xs font-bold leading-relaxed text-white/90 drop-shadow-sm">{text}</p>
+            <p className="line-clamp-4 whitespace-pre-wrap text-center text-xs font-bold leading-relaxed text-white/90 drop-shadow-sm">{displayText || '—'}</p>
           </div>
         )}
 
         {/* 그라데이션 오버레이 */}
-        {type !== 'text' && (
+        {resolvedType !== 'text' && (
           <div className="pointer-events-none absolute inset-0 z-[8] bg-gradient-to-t from-black/50 via-transparent to-transparent" />
         )}
 

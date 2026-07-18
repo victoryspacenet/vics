@@ -115,7 +115,7 @@ BEGIN
           AND pt.source IN ('creator_win', 'creator_lose', 'creator_draw')
           AND pt.reversed_at IS NULL
       ) THEN
-        IF v_winner != 'draw' THEN
+        IF v_winner = v_creator_rec.creator_side THEN
           IF v_has_season THEN
             UPDATE public.profiles
             SET creator_wins = creator_wins + 1,
@@ -138,7 +138,7 @@ BEGIN
                 updated_at = now()
             WHERE id = v_creator_rec.uid;
           END IF;
-        ELSE
+        ELSIF v_winner = 'draw' THEN
           IF v_has_season THEN
             UPDATE public.profiles
             SET champion_points = champion_points + v_creator_pts,
@@ -150,6 +150,24 @@ BEGIN
           ELSE
             UPDATE public.profiles
             SET champion_points = champion_points + v_creator_pts,
+                points = points + v_creator_pts,
+                updated_at = now()
+            WHERE id = v_creator_rec.uid;
+          END IF;
+        ELSE
+          IF v_has_season THEN
+            UPDATE public.profiles
+            SET creator_win_streak = 0,
+                champion_points = champion_points + v_creator_pts,
+                season_champion_points = season_champion_points + v_creator_pts,
+                points = points + v_creator_pts,
+                season_points = season_points + v_creator_pts,
+                updated_at = now()
+            WHERE id = v_creator_rec.uid;
+          ELSE
+            UPDATE public.profiles
+            SET creator_win_streak = 0,
+                champion_points = champion_points + v_creator_pts,
                 points = points + v_creator_pts,
                 updated_at = now()
             WHERE id = v_creator_rec.uid;

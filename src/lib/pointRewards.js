@@ -7,7 +7,7 @@
  * - Creator(Champion): LEFT(user_id)와 RIGHT(right_user_id 도전자) 모두 본인 측 승/패 기준.
  * - Voter(Oracle): 모든 투표 정산 — 본인 생성·참여 매치업 투표 포함.
  *
- * @see supabase_champion_oracle_track_points.sql, supabase_points_no_immediate_vote_or_create.sql
+ * @see supabase_matchup_result_settlement.sql, supabase_challenger_creator_points_fix.sql
  */
 
 /** Voter — 매치업 결과 반영 시 (적중 / 패 / 무) */

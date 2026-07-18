@@ -8,6 +8,8 @@ import { Capacitor } from '@capacitor/core'
  * @returns {Promise<File>}
  */
 export async function cameraPhotoToFile(photo, filename = 'capture.jpg') {
+  if (photo?.file instanceof File) return photo.file
+
   const { webPath, path } = photo
   let url = webPath
   if (path && Capacitor.isNativePlatform()) {

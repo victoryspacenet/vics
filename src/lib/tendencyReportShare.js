@@ -31,6 +31,30 @@ export function buildTendencyShareText(report, shareUrl) {
   ].join('\n')
 }
 
+/** 공유 URL에서 shareId 추출 */
+export function extractTendencyShareId(shareUrl) {
+  const m = String(shareUrl || '').match(/\/report\/tendency\/s\/([^/?#]+)/i)
+  if (!m?.[1]) return ''
+  try {
+    return decodeURIComponent(m[1]).trim()
+  } catch {
+    return m[1].trim()
+  }
+}
+
+/** 성향 리포트 전용 OG 이미지 (로고 + 성향 문구 + URL) */
+export function getTendencyReportOgImageUrl({ shareId, middleLine, shareUrl } = {}) {
+  const qs = new URLSearchParams()
+  const sid = shareId || extractTendencyShareId(shareUrl)
+  if (sid) qs.set('sid', sid)
+  if (middleLine) qs.set('line', middleLine)
+  if (shareUrl) qs.set('url', shareUrl)
+  const q = qs.toString()
+  const path = `/api/tendency-og-image${q ? `?${q}` : ''}`
+  if (typeof window === 'undefined') return path
+  return resolvePublicShareUrl(`${window.location.origin}${path}`)
+}
+
 /** ?share= 쿼리·경로 파라미터·window.location 에서 공유 ID 추출 */
 export function readTendencyShareToken({ shareIdParam, searchParams } = {}) {
   const fromPath = typeof shareIdParam === 'string' ? shareIdParam.trim() : ''

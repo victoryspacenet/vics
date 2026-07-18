@@ -6,6 +6,7 @@ import { matchupSideToMedia } from '../../lib/matchupMediaView'
 import { isFeedDemoMatchupId } from '../../lib/matchupIds'
 import { useUIStore } from '../../store/uiStore'
 import { formatNumber, formatDate, calcPercent, cn } from '../../lib/utils'
+import { formatMatchupRegisteredAt } from '../../lib/matchupRegisteredAt'
 import { VsBadge } from '../ui/VsBadge'
 import { MatchupThumbFrame } from '../ui/MatchupThumbFrame'
 import { safeMediaUrl } from '../../lib/sanitize'
@@ -13,15 +14,18 @@ import { isFeedBannerHighlightActive } from '../../lib/bannerHighlightBoost'
 import { isMatchupCreatorVipTierGlow, VIP_MATCHUP_SURFACE_CLASS } from '../../lib/matchupCreatorVipGlow'
 import { MatchupFeedParticipants } from '../matchup/MatchupFeedParticipants'
 import { matchupSideBadge } from '../../lib/matchupContentSide'
+import { resolveMatchupSideType, readMatchupSideText } from '../../lib/matchupSideDisplay'
 
 /** 이미지·영상·텍스트 썸네일 (영상은 썸네일 없을 때 video 태그로 표시 — img에 mp4 넣으면 깨짐) */
 function MatchupSidePreview({ side, matchup: m, eagerMedia = false }) {
   const isLeft = side === 'left'
-  const type = isLeft ? m.left_type : m.right_type
+  const rawType = isLeft ? m.left_type : m.right_type
   const url = isLeft ? m.left_url : m.right_url
   const thumb = isLeft ? m.left_thumbnail_url : m.right_thumbnail_url
   const sideBadge = matchupSideBadge(side)
-  const text = isLeft ? m.left_text : m.right_text
+  const rawText = isLeft ? m.left_text : m.right_text
+  const type = resolveMatchupSideType(rawType, { text: rawText, url, thumbnail: thumb })
+  const text = readMatchupSideText(type, rawText)
 
   const safeThumb = safeMediaUrl(thumb || '')
   const safeUrl = safeMediaUrl(url || '')
@@ -325,7 +329,7 @@ export function MainMatchupCard({ matchup: m, variant, rank, eagerMedia = false 
 
         {variant === 'new' && (
           <p className="mt-2 text-[10px] font-semibold text-emerald-600/90">
-            🆕 {formatDate(m.created_at)} 등록
+            🆕 {formatMatchupRegisteredAt(m, formatDate)} 등록
           </p>
         )}
         </Link>

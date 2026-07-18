@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, ChevronLeft, ChevronRight, ClipboardList, Lightbulb, Loader2, Plus } from 'lucide-react'
 import { getAppealKeywordHints, INQUIRY_STATUS, fetchUserInquiriesPaged } from '../lib/inquiryStorage'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import { cn } from '../lib/utils'
 import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../lib/layoutShellClasses'
+import { parseListPageParam, patchSearchParamsPage } from '../lib/listPageNav'
 
 /** MZ 파스텔 — 마이페이지·프로필 편집 계열 */
 const PAGE_BG =
@@ -97,17 +98,21 @@ function InquiryCardTitle({ item, isReplied }) {
 
 export function InquiryHistoryPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuthStore()
-  const [page, setPage] = useState(1)
+  const pageFromUrl = parseListPageParam(searchParams.get('page'))
   const [items, setItems] = useState([])
   const [totalCount, setTotalCount] = useState(0)
   const [autoRepliedIds, setAutoRepliedIds] = useState(new Set())
   const [manualRepliedIds, setManualRepliedIds] = useState(new Set())
   const [loading, setLoading] = useState(true)
 
+  const prevUserIdRef = useRef(user?.id)
   useEffect(() => {
-    setPage(1)
-  }, [user?.id])
+    if (prevUserIdRef.current === user?.id) return
+    prevUserIdRef.current = user?.id
+    patchSearchParamsPage(setSearchParams, null, {}, { replace: true })
+  }, [user?.id, setSearchParams])
 
   const loadHistory = useCallback(async () => {
     if (!user) {
@@ -119,7 +124,7 @@ export function InquiryHistoryPage() {
     }
     setLoading(true)
     try {
-      const { rows, totalCount: tc } = await fetchUserInquiriesPaged(user.id, { page, pageSize: PAGE_SIZE })
+      const { rows, totalCount: tc } = await fetchUserInquiriesPaged(user.id, { page: pageFromUrl, pageSize: PAGE_SIZE })
       setItems(rows)
       setTotalCount(tc)
 
@@ -151,18 +156,24 @@ export function InquiryHistoryPage() {
     } finally {
       setLoading(false)
     }
-  }, [user, page])
+  }, [user, pageFromUrl])
 
   useEffect(() => {
     void loadHistory()
   }, [loadHistory])
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+  const page = Math.min(pageFromUrl, totalPages)
 
   useEffect(() => {
-    const maxP = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
-    if (page > maxP) setPage(maxP)
-  }, [totalCount, page])
+    if (loading || pageFromUrl <= totalPages) return
+    patchSearchParamsPage(setSearchParams, totalPages <= 1 ? null : totalPages, {}, { replace: true })
+  }, [pageFromUrl, totalPages, loading, setSearchParams])
+
+  const goPage = (p) => {
+    patchSearchParamsPage(setSearchParams, p)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
 
   return (
     <div className={cn('min-h-screen relative overflow-hidden', PAGE_BG)}>
@@ -287,7 +298,7 @@ export function InquiryHistoryPage() {
 
               {totalPages > 1 && (
                 <div className="flex items-center justify-center gap-2 mt-6">
-                  <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}
+                  <button onClick={() => goPage(Math.max(1, page - 1))} disabled={page === 1}
                     className="w-9 h-9 rounded-xl border border-pink-200/80 bg-white/80 flex items-center justify-center text-fuchsia-700 hover:bg-gradient-to-br hover:from-fuchsia-50 hover:to-pink-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm">
                     <ChevronLeft size={16} />
                   </button>
@@ -295,7 +306,7 @@ export function InquiryHistoryPage() {
                     const p = page <= 3 ? i + 1 : Math.max(1, page - 2 + i)
                     if (p > totalPages) return null
                     return (
-                      <button key={p} onClick={() => setPage(p)}
+                      <button key={p} onClick={() => goPage(p)}
                         className={cn('w-9 h-9 rounded-xl text-sm font-black transition-all',
                           page === p
                             ? 'bg-gradient-to-br from-fuchsia-600 to-pink-500 text-white shadow-[0_4px_14px_-4px_rgba(192,38,211,0.5)] scale-105 ring-1 ring-white/50'
@@ -304,7 +315,7 @@ export function InquiryHistoryPage() {
                       </button>
                     )
                   })}
-                  <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+                  <button onClick={() => goPage(Math.min(totalPages, page + 1))} disabled={page === totalPages}
                     className="w-9 h-9 rounded-xl border border-pink-200/80 bg-white/80 flex items-center justify-center text-fuchsia-700 hover:bg-gradient-to-br hover:from-fuchsia-50 hover:to-pink-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm">
                     <ChevronRight size={16} />
                   </button>

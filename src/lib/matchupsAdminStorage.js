@@ -4,6 +4,11 @@
 import { getAdminUiJson, setAdminUiJson } from './adminUiConfig'
 import { getCategoryLabelById } from './categoryAdminStorage'
 import { supabase } from './supabase'
+import {
+  resolveMatchupSideMediaUrl,
+  resolveMatchupSideType,
+  readMatchupSideText,
+} from './matchupSideDisplay'
 
 const KEY_STATUS_OVERRIDES = 'admin_matchup_status_overrides_v1'
 
@@ -262,6 +267,7 @@ async function fetchMatchupDetailFromSupabase(id) {
     .from('matchups')
     .select(
       `id, title, category, status, created_at, updated_at, challenger_joined_at, left_label, right_label, right_type, expires_at,
+      left_type, left_text, right_text,
       left_url, left_thumbnail_url, right_url, right_thumbnail_url,
       user_id, right_user_id,
       profiles:user_id(id, nickname, avatar_url),
@@ -284,28 +290,49 @@ async function fetchMatchupDetailFromSupabase(id) {
     hasChallenger: row.right_type != null,
   }
 
-  const mediaA = row.left_thumbnail_url || row.left_url || null
   const hasChallenger = row.right_type != null
+
+  const mapAdminSide = (side) => {
+    const isLeft = side === 'left'
+    const rawType = isLeft ? row.left_type : row.right_type
+    const text = isLeft ? row.left_text : row.right_text
+    const url = isLeft ? row.left_url : row.right_url
+    const thumb = isLeft ? row.left_thumbnail_url : row.right_thumbnail_url
+    const sideType = resolveMatchupSideType(rawType, { text, url, thumbnail: thumb })
+    return {
+      sideType,
+      sideText: readMatchupSideText(sideType, text),
+      mediaUrl: resolveMatchupSideMediaUrl(sideType, { url, thumbnail: thumb }),
+    }
+  }
+
+  const leftSide = mapAdminSide('left')
+  const rightSide = hasChallenger ? mapAdminSide('right') : null
 
   return {
     ...listBase,
     userA: {
       name: row.profiles?.nickname ?? '-',
-      imageUrl: mediaA || row.profiles?.avatar_url || null,
+      imageUrl: leftSide.mediaUrl,
+      sideType: leftSide.sideType,
+      sideText: leftSide.sideText,
       title: row.left_label ?? '-',
       userId: row.user_id,
     },
     userB: hasChallenger
       ? {
           name: row.right_profiles?.nickname ?? '-',
-          imageUrl:
-            row.right_thumbnail_url || row.right_url || row.right_profiles?.avatar_url || null,
+          imageUrl: rightSide.mediaUrl,
+          sideType: rightSide.sideType,
+          sideText: rightSide.sideText,
           title: row.right_label ?? '-',
           userId: row.right_user_id,
         }
       : {
           name: null,
           imageUrl: null,
+          sideType: null,
+          sideText: '',
           title: null,
           userId: null,
         },

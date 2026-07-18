@@ -6,11 +6,12 @@ import { cn } from '../../lib/utils'
 export const MATCHUPS_FEED_FILTERS = [
   { id: 'active', label: '투표진행중 매치업' },
   { id: 'completed', label: '투표완료 매치업' },
-  { id: 'mine', label: '내가 올린 매치업' },
+  { id: 'mine', label: '내 매치업' },
 ]
 
 export const MATCHUPS_CAT_STORAGE_KEY = 'vics_matchups_feed_category'
 export const MATCHUPS_CAT_URL_PARAM = 'cat'
+export const MATCHUPS_TAG_URL_PARAM = 'tag'
 export const VALID_MATCHUPS_FEED_FILTERS = ['active', 'completed', 'mine']
 
 export const MATCHUPS_FEED_LNB_SHELL_CLASS =
@@ -42,10 +43,12 @@ export function readInitialMatchupsFeedCategory() {
   return 'all'
 }
 
-export function buildMatchupsListUrl({ filter = 'active', category = 'all' } = {}) {
+export function buildMatchupsListUrl({ filter = 'active', category = 'all', tag = null } = {}) {
   const params = new URLSearchParams()
   params.set('filter', filter || 'active')
   if (category && category !== 'all') params.set(MATCHUPS_CAT_URL_PARAM, category)
+  const tagToken = String(tag ?? '').trim()
+  if (tagToken) params.set(MATCHUPS_TAG_URL_PARAM, tagToken)
   return `/matchups?${params.toString()}`
 }
 

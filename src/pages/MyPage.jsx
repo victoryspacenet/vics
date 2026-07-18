@@ -8,9 +8,15 @@ import {
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
-import { formatNumber, calcPercent, cn } from '../lib/utils'
+import { formatNumber, calcPercent, cn, formatDate } from '../lib/utils'
+import { formatMatchupRegisteredAt } from '../lib/matchupRegisteredAt'
 import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../lib/layoutShellClasses'
 import { sanitizeText, safeMediaUrl } from '../lib/sanitize'
+import {
+  resolveMatchupSideType,
+  resolveMatchupSideMediaUrl,
+  readMatchupSideText,
+} from '../lib/matchupSideDisplay'
 import {
   getTier,
   getTierIndex,
@@ -20,11 +26,18 @@ import {
 } from '../lib/tiers'
 import { TierBadge } from '../components/ui/TierBadge'
 import { EMPTY_TIER_RANK_INFO } from '../lib/creatorRankSnapshot'
-import { fetchMyPageListsBundle } from '../lib/myPageData'
+import { fetchMyPageListsBundle, mergeMyLedMatchups } from '../lib/myPageData'
 import { VipPromoButton } from '../components/main/VipPromoButton'
 import { VsBadge } from '../components/ui/VsBadge'
 import { MatchupThumbFrame } from '../components/ui/MatchupThumbFrame'
-import { POINTS_VOTER_DRAW, POINTS_VOTER_HIT, POINTS_VOTER_MISS } from '../lib/pointRewards'
+import {
+  analyzeChampionMatchup,
+  analyzeVotedMatchupEntry,
+  isChampionSideWin,
+  isMatchupVotingFinalized,
+  isVotePeriodExpired,
+} from '../lib/matchupResultPoints'
+import { POINTS_VOTER_HIT } from '../lib/pointRewards'
 import { getMyPageNeonShell } from '../lib/neonProfileTheme'
 import { FandomBronzeStarBadge } from '../components/fandom/FandomBronzeStarBadge'
 import { FoundingMemberBadge } from '../components/profile/FoundingMemberBadge'
@@ -63,7 +76,6 @@ const VOTED_FILTER = [
   { id: 'live',  label: '진행중' },
   { id: 'draw',  label: '무승부' },
 ]
-const VOTER_RESULT_POINTS = { win: POINTS_VOTER_HIT, lose: POINTS_VOTER_MISS, draw: POINTS_VOTER_DRAW }
 const ATTENDANCE_POINTS = 10  // 출석 기본 포인트
 const ATTENDANCE_STREAK_BONUS = 70 // 7일 연속 출석 시(매 7일마다) 보너스 — 7·14·21…일째
 
@@ -75,20 +87,6 @@ const LIST_CARD =
 /** 웹(lg+) 마이페이지 매치업 피드 — 카드가 화면 전체를 채우지 않도록 */
 const MY_PAGE_MATCHUP_FEED_WIDTH = 'w-full lg:max-w-xl xl:max-w-2xl lg:mx-auto'
 
-/** 투표 마감·결과 확정 매치업 (status=active여도 expires_at 지난 경우 포함) */
-function isVotePeriodExpired(expiresAt) {
-  if (!expiresAt) return false
-  const t = new Date(expiresAt).getTime()
-  return Number.isFinite(t) && t <= Date.now()
-}
-
-function isMatchupVotingFinalized(m) {
-  if (!m || m.right_type == null) return false
-  if ((m.total_votes || 0) <= 0) return false
-  if (m.status !== 'active') return true
-  return isVotePeriodExpired(m.expires_at)
-}
-
 /** 내가 만든 매치업 UI 단계 — admin·메인 피드 NEW 탭과 동일 */
 function getCreatedMatchupPhase(m) {
   if (!m) return 'ended'
@@ -99,34 +97,17 @@ function getCreatedMatchupPhase(m) {
   return 'live'
 }
 
-/** 내가 투표한 매치업 1건 — phase·적중 여부 */
-function analyzeVotedEntry(v) {
-  const m = v?.matchups
-  if (!m) return null
-  const phase = getCreatedMatchupPhase(m)
-  const hasVotes = (m.total_votes || 0) > 0
-  const isDraw = (m.left_votes || 0) === (m.right_votes || 0)
-  const winner = isDraw ? null : (m.left_votes > m.right_votes ? 'left' : 'right')
-  const isLive = phase === 'live'
-  const isEnded = phase === 'ended'
-  const isWaiting = phase === 'waiting'
-  const myWin = isEnded && hasVotes && !isDraw && winner && v.side === winner
-  const myLose = isEnded && hasVotes && !isDraw && winner && v.side !== winner
-  const myDraw = isEnded && hasVotes && isDraw
-  return { m, phase, isLive, isEnded, isWaiting, hasVotes, isDraw, winner, myWin, myLose, myDraw }
-}
-
 function nonNegInt(v, fallback = 0) {
   const n = Number(v)
   return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : fallback
 }
 
-function isChampionSideWin(m, side) {
-  if (!isMatchupVotingFinalized(m)) return false
-  const lv = m.left_votes || 0
-  const rv = m.right_votes || 0
-  if (lv === rv) return false
-  return side === 'left' ? lv > rv : rv > lv
+/** 투표 탭 — UI phase 포함 분석 */
+function analyzeVotedEntry(v) {
+  const o = analyzeVotedMatchupEntry(v)
+  if (!o) return null
+  const phase = getCreatedMatchupPhase(o.m)
+  return { ...o, phase, isLive: phase === 'live', isWaiting: phase === 'waiting' }
 }
 
 export function MyPage() {
@@ -150,15 +131,18 @@ export function MyPage() {
   const createdListRef = useRef(null)
   const votedListRef   = useRef(null)
 
-  const patchSearch = useCallback((updates) => {
+  const patchSearch = useCallback((updates, { replace = true } = {}) => {
     setSearchParams((prev) => {
       const n = new URLSearchParams(prev)
       Object.entries(updates).forEach(([k, v]) => {
-        if (v === null || v === undefined || v === '') n.delete(k)
-        else n.set(k, String(v))
+        if (v === null || v === undefined || v === '' || (k === 'cp' && Number(v) <= 1) || (k === 'vp' && Number(v) <= 1)) {
+          n.delete(k)
+        } else {
+          n.set(k, String(v))
+        }
       })
       return n
-    }, { replace: true })
+    }, { replace })
   }, [setSearchParams])
 
   const neonShell = useMemo(() => getMyPageNeonShell(profile), [profile])
@@ -231,10 +215,26 @@ export function MyPage() {
     void fetchAttendanceStatus()
   }, [user])
 
+  /** 생성(A) + 도전자 참여(B) — 「내가 만든 매치업」 탭 목록 */
+  const myLedMatchups = useMemo(
+    () => mergeMyLedMatchups(createdMatchups, challengedMatchups, user?.id),
+    [createdMatchups, challengedMatchups, user?.id],
+  )
+
+  const myLedRoleCounts = useMemo(() => {
+    let created = 0
+    let challenged = 0
+    for (const m of myLedMatchups) {
+      if (m._myRole === 'challenger') challenged += 1
+      else created += 1
+    }
+    return { created, challenged }
+  }, [myLedMatchups])
+
   const sortedCreated = useMemo(() => {
-    const list = [...createdMatchups]
+    const list = [...myLedMatchups]
     if (sortCreated === 'latest') {
-      return list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      return list.sort((a, b) => new Date(b._sortAt || b.created_at) - new Date(a._sortAt || a.created_at))
     }
     if (sortCreated === 'rate') {
       return list.sort((a, b) => {
@@ -253,20 +253,20 @@ export function MyPage() {
         })
     }
     return list
-  }, [createdMatchups, sortCreated])
+  }, [myLedMatchups, sortCreated])
 
   const createdPhaseCounts = useMemo(() => {
     let waiting = 0
     let live = 0
     let ended = 0
-    for (const m of createdMatchups) {
+    for (const m of myLedMatchups) {
       const phase = getCreatedMatchupPhase(m)
       if (phase === 'waiting') waiting += 1
       else if (phase === 'live') live += 1
       else ended += 1
     }
     return { waiting, live, ended }
-  }, [createdMatchups])
+  }, [myLedMatchups])
 
   const filteredCreated = sortedCreated.filter((m) => {
     const phase = getCreatedMatchupPhase(m)
@@ -320,7 +320,7 @@ export function MyPage() {
   )
 
   const goCreatedPage = (p) => {
-    patchSearch({ tab: 'created', cp: p })
+    patchSearch({ tab: 'created', cp: p }, { replace: false })
     createdListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
@@ -342,17 +342,12 @@ export function MyPage() {
     return votedMatchups.reduce((sum, v) => {
       const o = analyzeVotedEntry(v)
       if (!o || !o.isEnded || !o.hasVotes) return sum
-      const pts = o.isDraw
-        ? VOTER_RESULT_POINTS.draw
-        : o.myWin
-          ? VOTER_RESULT_POINTS.win
-          : VOTER_RESULT_POINTS.lose
-      return sum + pts
+      return sum + (o.pointsEarned || 0)
     }, 0)
   }, [votedMatchups])
 
   const goVotedPage = (p) => {
-    patchSearch({ tab: 'voted', vp: p })
+    patchSearch({ tab: 'voted', vp: p }, { replace: false })
     votedListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
   const handleVotedFilterChange = (id) => {
@@ -429,8 +424,8 @@ export function MyPage() {
         dayStart.setHours(0, 0, 0, 0)
         const dayEnd = new Date(d)
         dayEnd.setHours(23, 59, 59, 999)
-        const realCreated = createdMatchups.filter((m) => {
-          const t = new Date(m.created_at).getTime()
+        const realCreated = myLedMatchups.filter((m) => {
+          const t = new Date(m._sortAt || m.created_at).getTime()
           return t >= dayStart.getTime() && t <= dayEnd.getTime()
         }).length
         created.push(realCreated)
@@ -452,8 +447,8 @@ export function MyPage() {
         weekStart.setHours(0, 0, 0, 0)
         weekEnd.setHours(23, 59, 59, 999)
         labels.push(`${i + 1}주`)
-        const realCreated = createdMatchups.filter((m) => {
-          const t = new Date(m.created_at).getTime()
+        const realCreated = myLedMatchups.filter((m) => {
+          const t = new Date(m._sortAt || m.created_at).getTime()
           return t >= weekStart.getTime() && t <= weekEnd.getTime()
         }).length
         created.push(realCreated)
@@ -464,7 +459,7 @@ export function MyPage() {
       }
       return { labels, created, voted }
     }
-  }, [chartPeriod, createdMatchups, votedMatchups])
+  }, [chartPeriod, myLedMatchups, votedMatchups])
 
   if (authLoading) {
     return (
@@ -770,7 +765,7 @@ export function MyPage() {
           {/* 탭 */}
           <div className="flex bg-white/60 rounded-xl p-1 mb-5 min-w-0 border border-pink-200/50 shadow-[inset_0_2px_6px_rgba(244,114,182,0.1)]">
             {[
-              { id: 'created', label: '내가 만든 매치업', count: createdMatchups.length },
+              { id: 'created', label: '내가 만든 매치업', count: myLedMatchups.length },
               { id: 'voted',   label: '내가 투표한 매치업', count: votedMatchups.length },
             ].map((tab) => (
               <button
@@ -805,16 +800,20 @@ export function MyPage() {
                 <p className="text-sm text-white/75 mb-0.5 relative z-10">{profile?.nickname || '사용자'}님은 지금까지</p>
                 <p className="text-lg font-black flex items-center gap-2 relative z-10">
                   <Flame size={18} className="text-amber-300" />
-                  {createdMatchups.length}개의 매치업을 이끌었습니다!
+                  {myLedMatchups.length}개의 매치업에 참여했어요!
                 </p>
                 <div className="flex items-center gap-4 mt-3 text-xs text-white/70 relative z-10 flex-wrap">
+                  <span>생성 {myLedRoleCounts.created}개</span>
+                  <span>·</span>
+                  <span>도전 {myLedRoleCounts.challenged}개</span>
+                  <span>·</span>
                   <span>대기중 {createdPhaseCounts.waiting}개</span>
                   <span>·</span>
                   <span>진행 중 {createdPhaseCounts.live}개</span>
                   <span>·</span>
                   <span>종료됨 {createdPhaseCounts.ended}개</span>
                   <span>·</span>
-                  <span>총 {formatNumber(createdMatchups.reduce((s, m) => s + (m.total_votes || 0), 0))}표 획득</span>
+                  <span>총 {formatNumber(myLedMatchups.reduce((s, m) => s + (m.total_votes || 0), 0))}표 획득</span>
                 </div>
               </div>
 
@@ -893,7 +892,7 @@ export function MyPage() {
                       style={{ scrollSnapType: 'y proximity' }}
                     >
                       {pagedCreated.map((m) => (
-                        <CreatedMatchupFullCard key={m.id} matchup={m} />
+                        <CreatedMatchupFullCard key={m.id} matchup={m} myRole={m._myRole} />
                       ))}
                     </div>
                     {/* 페이지네이션 */}
@@ -965,7 +964,7 @@ export function MyPage() {
                   </div>
                   <div>
                     <p className="text-sm font-black text-white">지금 핫한 매치업 투표하러 가기</p>
-                    <p className="text-[10px] text-white/70">종료 후 결과에 따라 최대 {VOTER_RESULT_POINTS.win}P!</p>
+                    <p className="text-[10px] text-white/70">종료 후 결과에 따라 최대 {POINTS_VOTER_HIT}P!</p>
                   </div>
                 </div>
                 <ArrowRight size={18} className="text-white/70 group-hover:translate-x-1 transition-transform" />
@@ -1006,14 +1005,7 @@ export function MyPage() {
                       {pagedVoted.map((v) => {
                         const o = analyzeVotedEntry(v)
                         const m = o?.m
-                        const pts =
-                          o && o.isEnded && o.hasVotes
-                            ? (o.isDraw
-                              ? VOTER_RESULT_POINTS.draw
-                              : o.myWin
-                                ? VOTER_RESULT_POINTS.win
-                                : VOTER_RESULT_POINTS.lose)
-                            : 0
+                        const pts = o?.pointsEarned || 0
                         return (
                           <VotedMatchupFullCard
                             key={v.matchup_id}
@@ -1093,18 +1085,33 @@ function CircularTierRing({ tierEmoji, rankLabel, progressPercent }) {
 }
 
 // ── 내가 만든 매치업 풀카드 (세로 리스트) ───────────────────────────
-function CreatedMatchupFullCard({ matchup: m }) {
+function CreatedMatchupFullCard({ matchup: m, myRole = 'creator' }) {
   const phase = getCreatedMatchupPhase(m)
+  const isChallenger = myRole === 'challenger'
+  const mySide = isChallenger ? 'right' : 'left'
+  const champion = analyzeChampionMatchup(m, mySide)
   const isWaiting = phase === 'waiting'
   const isLive = phase === 'live'
   const isEnded = phase === 'ended'
   const isComplete = m.right_type != null
-  const hasVotes   = (m.total_votes || 0) > 0
-  const isDraw     = (m.left_votes || 0) === (m.right_votes || 0)
-  const winner     = isDraw ? 'draw' : (m.left_votes > m.right_votes ? 'left' : 'right')
+  const hasVotes   = champion?.hasVotes ?? false
+  const isDraw     = champion?.isDraw ?? false
+  const winner     = champion?.winner ?? null
 
-  const leftThumb  = m.left_thumbnail_url  || (m.left_type  === 'image' ? m.left_url  : null)
-  const rightThumb = m.right_thumbnail_url || (m.right_type === 'image' ? m.right_url : null)
+  const leftType = resolveMatchupSideType(m.left_type, {
+    text: m.left_text,
+    url: m.left_url,
+    thumbnail: m.left_thumbnail_url,
+  })
+  const rightType = resolveMatchupSideType(m.right_type, {
+    text: m.right_text,
+    url: m.right_url,
+    thumbnail: m.right_thumbnail_url,
+  })
+  const leftThumb = resolveMatchupSideMediaUrl(leftType, { url: m.left_url, thumbnail: m.left_thumbnail_url })
+  const rightThumb = resolveMatchupSideMediaUrl(rightType, { url: m.right_url, thumbnail: m.right_thumbnail_url })
+  const leftText = readMatchupSideText(leftType, m.left_text)
+  const rightText = readMatchupSideText(rightType, m.right_text)
   const { left, right } = calcPercent(m.left_votes, m.right_votes)
 
   const topBarClass = isLive
@@ -1128,6 +1135,10 @@ function CreatedMatchupFullCard({ matchup: m }) {
             <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-amber-600 bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200/70 shadow-sm">
               ⏳ 대기중
             </span>
+          ) : isChallenger ? (
+            <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-emerald-700 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200/70 shadow-sm">
+              ⚔️ 도전 참여
+            </span>
           ) : isLive ? (
             <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-emerald-50 to-teal-50 text-emerald-600 text-[10px] font-black border border-emerald-200/70 shadow-sm">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -1150,11 +1161,11 @@ function CreatedMatchupFullCard({ matchup: m }) {
             {leftThumb
               ? <img src={safeMediaUrl(leftThumb)} alt="A" className="h-full w-full object-cover" />
               : <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-amber-950/90 via-orange-900/80 to-rose-950/85 p-3">
-                  <p className="line-clamp-4 text-center text-xs font-bold text-white/90">{m.left_text}</p>
+                  <p className="line-clamp-4 whitespace-pre-wrap text-center text-xs font-bold text-white/90">{leftText || '—'}</p>
                 </div>
             }
             {/* A WIN 뱃지 */}
-            {isComplete && hasVotes && isEnded && winner === 'left' && (
+            {isComplete && hasVotes && isEnded && winner === 'left' && mySide === 'left' && (
               <div className="absolute right-1.5 top-1.5 z-10">
                 <span className="inline-flex items-center gap-0.5 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 px-1.5 py-0.5 text-[10px] font-black text-white shadow-[0_2px_8px_rgba(16,185,129,0.5)]">
                   <CheckCircle2 size={9} /> WIN
@@ -1174,7 +1185,7 @@ function CreatedMatchupFullCard({ matchup: m }) {
               ? rightThumb
                 ? <img src={safeMediaUrl(rightThumb)} alt="B" className="h-full w-full object-cover" />
                 : <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-violet-950/90 via-fuchsia-900/80 to-indigo-950/85 p-3">
-                    <p className="line-clamp-4 text-center text-xs font-bold text-white/90">{m.right_text}</p>
+                    <p className="line-clamp-4 whitespace-pre-wrap text-center text-xs font-bold text-white/90">{rightText || '—'}</p>
                   </div>
               : <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-emerald-950/85 via-teal-950/75 to-cyan-950/80 border border-dashed border-emerald-400/30">
                   <span className="text-2xl">⚔️</span>
@@ -1182,7 +1193,7 @@ function CreatedMatchupFullCard({ matchup: m }) {
                 </div>
             }
             {/* B WIN 뱃지 */}
-            {isComplete && hasVotes && isEnded && winner === 'right' && (
+            {isComplete && hasVotes && isEnded && winner === 'right' && mySide === 'right' && (
               <div className="absolute left-1.5 top-1.5 z-10">
                 <span className="inline-flex items-center gap-0.5 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 px-1.5 py-0.5 text-[10px] font-black text-white shadow-[0_2px_8px_rgba(16,185,129,0.5)]">
                   <CheckCircle2 size={9} /> WIN
@@ -1208,8 +1219,16 @@ function CreatedMatchupFullCard({ matchup: m }) {
         </div>
       )}
 
-      {/* 카드 하단: 참여자 + CTA */}
-      <div className="px-4 py-3 border-t border-pink-100/30 flex items-center justify-between">
+      {/* 카드 하단: 참여자 + 보상 + CTA */}
+      <div className="px-4 py-3 border-t border-pink-100/30 space-y-2">
+        {isEnded && hasVotes && champion?.pointsEarned > 0 && (
+          <div className="flex items-center gap-1.5 text-xs">
+            <Gift size={12} className="text-violet-400" />
+            <span className="text-violet-600 font-black">보상: +{champion.pointsEarned}P 획득 완료</span>
+            {champion.myWin && <span className="text-green-500 font-bold ml-1">· 승리 보너스!</span>}
+          </div>
+        )}
+        <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5 text-sm text-gray-500">
           <Users size={13} className="text-fuchsia-400" />
           {isLive
@@ -1224,6 +1243,7 @@ function CreatedMatchupFullCard({ matchup: m }) {
           {isEnded ? '결과 보기' : '현황 보기'}
           <ArrowRight size={11} />
         </Link>
+        </div>
       </div>
     </div>
   )
@@ -1351,7 +1371,7 @@ function CreatedMatchupCard({ matchup: m }) {
             </div>
           </>
         ) : (
-          <p className="text-[10px] text-gray-400">{formatDate(m.created_at)}</p>
+          <p className="text-[10px] text-gray-400">{formatMatchupRegisteredAt(m, formatDate)}</p>
         )}
       </div>
     </Link>

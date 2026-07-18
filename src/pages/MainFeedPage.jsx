@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState, useCallback, useRef } from 'react'
-import { useParams, Navigate } from 'react-router-dom'
+import { useParams, Navigate, useSearchParams } from 'react-router-dom'
 import {
   fetchMainBestFeedPage,
   fetchMainHotFeedPage,
@@ -8,6 +8,7 @@ import {
 } from '../lib/mainFeed'
 import { enrichMatchupsWithCreatorRankInfo } from '../lib/creatorRankSnapshot'
 import { runWhenIdle } from '../lib/runDeferred'
+import { parseListPageParam, patchSearchParamsPage } from '../lib/listPageNav'
 import {
   MainMatchupCard,
   MainFeedCardSkeleton,
@@ -23,11 +24,12 @@ const PAGE_SIZE = 12
 
 export function MainFeedPage() {
   const { variant } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [rows, setRows] = useState([])
   const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [enriching, setEnriching] = useState(false)
-  const [page, setPage] = useState(1)
+  const pageFromUrl = parseListPageParam(searchParams.get('page'))
 
   const rowsRef = useRef(rows)
   useEffect(() => {
@@ -35,6 +37,8 @@ export function MainFeedPage() {
   }, [rows])
 
   const validVariant = ['best', 'hot', 'new'].includes(variant) ? variant : null
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+  const page = Math.min(pageFromUrl, totalPages)
 
   const loadSeqRef = useRef(0)
 
@@ -98,12 +102,20 @@ export function MainFeedPage() {
     void loadFeed()
   }, [loadFeed])
 
+  const prevVariantRef = useRef(validVariant)
   useEffect(() => {
-    setPage(1)
+    if (prevVariantRef.current === validVariant) return
+    prevVariantRef.current = validVariant
     setRows([])
     setTotalCount(0)
     setLoading(true)
-  }, [validVariant])
+    patchSearchParamsPage(setSearchParams, null, {}, { replace: true })
+  }, [validVariant, setSearchParams])
+
+  useEffect(() => {
+    if (loading || pageFromUrl <= totalPages) return
+    patchSearchParamsPage(setSearchParams, totalPages <= 1 ? null : totalPages, {}, { replace: true })
+  }, [pageFromUrl, totalPages, loading, setSearchParams])
 
   useEffect(() => {
     const on = () => {
@@ -114,10 +126,8 @@ export function MainFeedPage() {
     return () => window.removeEventListener('vics:matchup-banner-highlight:updated', on)
   }, [loadFeed])
 
-  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
-
   const goPage = (p) => {
-    setPage(p)
+    patchSearchParamsPage(setSearchParams, p)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 

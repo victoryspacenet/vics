@@ -55,5 +55,21 @@
 	<string>VICS에서 사진을 선택해 등록하기 위해 사진 보관함에 접근합니다.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>VICS에서 촬영한 사진을 보관함에 저장할 때 사용합니다.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.vics.space.oauth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>app.vics.space</string>
+			</array>
+		</dict>
+	</array>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>instagram</string>
+		<string>instagram-stories</string>
+	</array>
 </dict>
 </plist>

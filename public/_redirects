@@ -14,6 +14,8 @@
 /api/ranking-share-image /.netlify/functions/ranking-share-image 200!
 /api/matchup-share-image /.netlify/functions/matchup-share-image 200!
 /api/site-og-image /.netlify/functions/site-og-image 200!
+/api/tendency-og-image /.netlify/functions/tendency-og-image 200!
+/report/tendency/s/* /.netlify/functions/tendency-og 200!
 /ranking/share /.netlify/functions/ranking-og 200!
 /matchup/* /.netlify/functions/matchup-og 200!
 /* /index.html 200

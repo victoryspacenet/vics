@@ -40,15 +40,17 @@ import { getClipboardMediaFiles } from '../../lib/clipboardPasteFiles'
 import { uploadMatchupMediaValidated, warmupMatchupMediaUploadSession } from '../../lib/matchupMediaBucketUpload'
 import { mediaFileMatchesMatchupSideType } from '../../lib/matchupSideType'
 import { SmartphoneCameraCapture } from '../mobile/SmartphoneCameraCapture'
+import { MatchupTextContentInput } from './MatchupTextContentInput'
 import { getMatchupCategories } from '../../lib/categoryAdminStorage'
 import { checkMatchupCategorySimilarity } from '../../lib/matchupCategorySimilarityApi'
-const MAX_TAGS = 3
+import {
+  clampMatchupTags,
+  MAX_MATCHUP_TAGS,
+  mergeMatchupTagsForSubmit,
+  parseMatchupTagTokens,
+} from '../../lib/matchupTags'
+import { readMatchupTextHydrateValue, readMatchupTextFromTextareaElement } from '../../lib/matchupTextInput'
 const TITLE_MAX = 60
-
-function clampMatchupTags(arr) {
-  if (!Array.isArray(arr)) return []
-  return arr.slice(0, MAX_TAGS)
-}
 
 /** select에 표시되는 라벨은 이모지 접두어가 붙어있어 AI 프롬프트용으로 순수 텍스트만 추출 */
 function cleanCategoryLabel(categoryValue, categories) {
@@ -57,14 +59,6 @@ function cleanCategoryLabel(categoryValue, categories) {
     .normalize('NFC')
     .replace(/^[^\p{L}\p{N}]+/u, '')
     .trim()
-}
-
-/** 한글은 NFD(자모 분해)로 들어올 수 있어 NFC로 맞춘 뒤 필터 (완성형 가-힣·영숫자만) */
-function sanitizeTagToken(s) {
-  return String(s)
-    .normalize('NFC')
-    .replace(/[^가-힣a-zA-Z0-9]/g, '')
-    .slice(0, 15)
 }
 
 /** MZ 톤 입력 공통 + 플레이스홀더 (세대별 컬러) */
@@ -382,21 +376,9 @@ export function CreateMatchupDrawer({ onCreated }) {
   const handleLeftChange = useCallback((newContent) => setLeftContent(newContent), [])
 
   // 태그
-  /** 쉼표·세미콜론 붙여넣기 시 여러 개로 나누되, 항상 MAX_TAGS개까지만 반영 */
+  /** 쉼표·세미콜론 붙여넣기 시 여러 개로 나누되, 항상 MAX_MATCHUP_TAGS개까지만 반영 */
   const addTag = useCallback((rawInput) => {
-    const raw = String(rawInput ?? '').trim()
-    if (!raw) {
-      setTagInput('')
-      return
-    }
-
-    const pieces = raw.split(/[,，;]+/).map((s) => s.trim()).filter(Boolean)
-    const fromPieces = pieces.map((p) => sanitizeTagToken(p)).filter(Boolean)
-    const tokens =
-      fromPieces.length > 0
-        ? fromPieces
-        : [sanitizeTagToken(raw)].filter(Boolean)
-
+    const tokens = parseMatchupTagTokens(rawInput)
     if (tokens.length === 0) {
       setTagInput('')
       return
@@ -405,7 +387,7 @@ export function CreateMatchupDrawer({ onCreated }) {
     setTags((p) => {
       let next = [...p]
       for (const cleaned of tokens) {
-        if (next.length >= MAX_TAGS) break
+        if (next.length >= MAX_MATCHUP_TAGS) break
         if (!next.includes(cleaned)) next = [...next, cleaned]
       }
       return next
@@ -415,7 +397,7 @@ export function CreateMatchupDrawer({ onCreated }) {
 
   // 어떤 경로로든 태그가 MAX를 넘으면 즉시 잘라냄 (렌더 전 동기화)
   useLayoutEffect(() => {
-    if (tags.length > MAX_TAGS) setTags((t) => clampMatchupTags(t))
+    if (tags.length > MAX_MATCHUP_TAGS) setTags((t) => clampMatchupTags(t))
   }, [tags])
 
   const handleTagKeyDown = (e) => {
@@ -533,25 +515,35 @@ export function CreateMatchupDrawer({ onCreated }) {
         throw new Error('로그인이 필요해요. 다시 로그인한 뒤 시도해 주세요.')
       }
 
+      let effectiveLeft = leftContent
+      const flushedText = readMatchupTextFromTextareaElement(
+        typeof document !== 'undefined' ? document.getElementById('create-matchup-drawer-root') : null,
+      )
+      if (effectiveLeft?.type === 'text' && flushedText?.type === 'text') {
+        effectiveLeft = { ...effectiveLeft, text: flushedText.text }
+      }
+
       let leftUrl = null
       let leftThumb = null
 
-      if (leftContent?.file) {
-        const r = await uploadFile(leftContent.file, 'left', {
-          imageAlreadyCropped: leftContent.type === 'image' && leftContent.imagePrepared === true,
+      if (effectiveLeft?.file) {
+        const r = await uploadFile(effectiveLeft.file, 'left', {
+          imageAlreadyCropped: effectiveLeft.type === 'image' && effectiveLeft.imagePrepared === true,
         })
         leftUrl = r.url
         leftThumb = r.thumbnail
-      } else if (leftContent?.fromExisting && (leftContent.type === 'image' || leftContent.type === 'video')) {
-        leftUrl = leftContent.persistUrl
-        leftThumb = leftContent.persistThumb ?? leftContent.persistUrl
+      } else if (effectiveLeft?.fromExisting && (effectiveLeft.type === 'image' || effectiveLeft.type === 'video')) {
+        leftUrl = effectiveLeft.persistUrl
+        leftThumb = effectiveLeft.persistThumb ?? effectiveLeft.persistUrl
       }
 
-      if (leftContent?.type !== 'text' && !leftUrl) {
+      if (effectiveLeft?.type !== 'text' && !leftUrl) {
         throw new Error('A 측(작성자) 이미지·영상을 선택해주세요')
       }
 
-      const safeTags = clampMatchupTags(tags)
+      const safeTags = mergeMatchupTagsForSubmit(tags, tagInput)
+      setTagInput('')
+      if (!tagsArrayEqual(tags, safeTags)) setTags(safeTags)
       const editRow = createDrawerEditMatchup
       const expiresAt = duration
         ? computeExpiresAtIso({
@@ -576,9 +568,9 @@ export function CreateMatchupDrawer({ onCreated }) {
         category: category || null,
         categoryLabel: cleanCategoryLabel(category, CATEGORIES),
         left:
-          leftContent.type === 'text'
-            ? { type: 'text', text: (leftContent.text || '').trim() }
-            : { type: leftContent.type, url: leftUrl, thumb: leftThumb ?? leftUrl },
+          effectiveLeft.type === 'text'
+            ? { type: 'text', text: (effectiveLeft.text || '').trim() }
+            : { type: effectiveLeft.type, url: leftUrl, thumb: leftThumb ?? leftUrl },
       })
 
       if (editRow?.id) {
@@ -586,10 +578,10 @@ export function CreateMatchupDrawer({ onCreated }) {
         const patch = {
           title: title.trim(),
           description: description.trim() || null,
-          left_type: leftContent.type,
-          left_url: leftContent.type === 'text' ? null : leftUrl,
-          left_text: leftContent.type === 'text' ? (leftContent.text || '').trim() || null : null,
-          left_thumbnail_url: leftContent.type === 'text' ? null : leftThumb,
+          left_type: effectiveLeft.type,
+          left_url: effectiveLeft.type === 'text' ? null : leftUrl,
+          left_text: effectiveLeft.type === 'text' ? (effectiveLeft.text || '').trim() || null : null,
+          left_thumbnail_url: effectiveLeft.type === 'text' ? null : leftThumb,
           left_label: myNickname,
           tags: safeTags.length > 0 ? safeTags : null,
           category: category || null,
@@ -621,10 +613,10 @@ export function CreateMatchupDrawer({ onCreated }) {
         user_id: user.id,
         title: title.trim(),
         description: description.trim() || null,
-        left_type: leftContent.type,
-        left_url: leftUrl,
-        left_text: leftContent.text || null,
-        left_thumbnail_url: leftThumb,
+        left_type: effectiveLeft.type,
+        left_url: effectiveLeft.type === 'text' ? null : leftUrl,
+        left_text: effectiveLeft.type === 'text' ? (effectiveLeft.text || '').trim() || null : null,
+        left_thumbnail_url: effectiveLeft.type === 'text' ? null : leftThumb,
         left_label: myNickname,
         right_type: null,
         right_url: null,
@@ -666,7 +658,7 @@ export function CreateMatchupDrawer({ onCreated }) {
       title={isEditMode ? '✏️ 작성자(A) 쪽 수정' : '🔥 NEW 매치업 만들기'}
       className="max-w-[min(64rem,calc(100vw-1.5rem))]"
     >
-      <div className="flex h-full min-w-0 flex-col overflow-x-hidden">
+      <div id="create-matchup-drawer-root" className="flex h-full min-w-0 flex-col overflow-x-hidden">
 
         {/* ── 폼 ── */}
         <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-5 space-y-5">
@@ -777,6 +769,7 @@ export function CreateMatchupDrawer({ onCreated }) {
                   </div>
                   <ContentBox
                     key={`left-${boxKey}`}
+                    hydrateKey={boxKey}
                     content={leftContent}
                     onChange={handleLeftChange}
                     disabled={uploading}
@@ -833,7 +826,7 @@ export function CreateMatchupDrawer({ onCreated }) {
           </FormSection>
 
           {/* 4. 태그 */}
-          <FormSection label="🏷️ 태그" hint={`최대 ${MAX_TAGS}개`}>
+          <FormSection label="🏷️ 태그" hint={`최대 ${MAX_MATCHUP_TAGS}개`}>
             <div className={MZ_TAG_WRAP}>
               {tags.map((t) => (
                 <span key={t} className="flex items-center gap-1 text-xs font-bold bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white px-2.5 py-1 rounded-full shadow-[0_2px_8px_-2px_rgba(192,38,211,0.4)]">
@@ -843,7 +836,7 @@ export function CreateMatchupDrawer({ onCreated }) {
                   </button>
                 </span>
               ))}
-              {tags.length < MAX_TAGS && (
+              {tags.length < MAX_MATCHUP_TAGS && (
                 <input
                   type="text"
                   value={tagInput}
@@ -1066,12 +1059,11 @@ function FormSection({ label, required, hint, children }) {
 }
 
 // ── ContentBox (A/B 공용) ─────────────────────────────────────────
-function ContentBox({ content, onChange, disabled, sideLabel, optional, requiredType, requiredCategory, categories = [], locked = false }) {
+function ContentBox({ content, onChange, disabled, sideLabel, optional, requiredType, requiredCategory, categories = [], locked = false, hydrateKey = 0 }) {
   const fileRef = useRef(null)
   const [contentType, setContentType] = useState('image')
   const effectiveType = requiredType ?? contentType
   const [dragging, setDragging] = useState(false)
-  const [textInput, setTextInput] = useState('')
   const [sizeError, setSizeError] = useState('')
   /** 영상 검사·이미지 1:1 준비 중 라벨 (빈 문자열이면 대기 아님) */
   const [processingLabel, setProcessingLabel] = useState('')
@@ -1081,9 +1073,11 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
   const inputLocked = disabled || locked
 
   useEffect(() => {
-    if (!content) return
+    if (!content) {
+      if (!requiredType) setContentType('image')
+      return
+    }
     if (content.type === 'text') {
-      setTextInput(typeof content.text === 'string' ? content.text : '')
       if (!requiredType) setContentType('text')
       return
     }
@@ -1163,7 +1157,7 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
     if (requiredType) return
     setContentType(t); setSizeError('')
     setShowCamera(false)
-    onChange(null); setTextInput('')
+    onChange(null); setSizeError('')
   }
 
   const handleCameraCapture = async (photo) => {
@@ -1214,17 +1208,14 @@ function ContentBox({ content, onChange, disabled, sideLabel, optional, required
       {/* 텍스트 — 이미지/영상 카드와 동일 aspect-square */}
       {effectiveType === 'text' ? (
         <div className={`${FEED_CARD_FRAME} border-2 border-dashed border-teal-200/50 bg-gradient-to-br from-teal-50/95 via-emerald-50/70 to-cyan-50/50`}>
-          <textarea
-            value={textInput}
-            onChange={(e) => {
-              setTextInput(e.target.value)
-              const base = e.target.value.trim() ? { type: 'text', text: e.target.value.trim() } : null
-              onChange(base ? (requiredCategory ? { ...base, category: requiredCategory } : base) : null)
-            }}
+          <MatchupTextContentInput
+            key={`text-${hydrateKey}-${effectiveType}`}
+            initialValue={readMatchupTextHydrateValue(content)}
+            onContentChange={(base) => onChange(base ? (requiredCategory ? { ...base, category: requiredCategory } : base) : null)}
             placeholder={locked ? '먼저 카테고리를 선택해주세요' : '내 의견을 입력하세요'}
             maxLength={200}
             disabled={inputLocked}
-            className="absolute inset-0 h-full w-full resize-none rounded-xl border-0 bg-transparent px-3 py-3 text-left text-xs outline-none ring-0 transition-all focus:ring-2 focus:ring-teal-400/40 placeholder:text-teal-600/65 disabled:opacity-60"
+            className="absolute inset-0 h-full w-full resize-none rounded-xl border-0 bg-transparent px-3 py-3 text-left text-xs whitespace-pre-wrap outline-none ring-0 transition-all focus:ring-2 focus:ring-teal-400/40 placeholder:text-teal-600/65 disabled:opacity-60"
           />
           <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-md bg-[#22282E]/70 px-1.5 py-0.5 text-[10px] font-black text-white">
             {sideLabel}

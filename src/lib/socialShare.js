@@ -288,15 +288,42 @@ export function getMatchupDetailPageUrl(matchupId) {
   return resolvePublicShareUrl(`${window.location.origin}/matchup/${id}`)
 }
 
-/** @param {{ matchupId: string, showToast?: (msg: string, type?: string) => void }} opts */
-export async function copyMatchupShareLink({ matchupId, showToast }) {
+/** @param {{ matchupId: string, matchup?: object }} opts */
+export async function warmMatchupSharePreview({ matchupId, matchup } = {}) {
+  const id = matchupId || matchup?.id
+  if (!id) return
+
+  const shareUrl = getMatchupSharePageUrl(id)
+  const imageUrl = matchup
+    ? getMatchupShareImageUrl(matchup)
+    : (() => {
+        const origin = getPublicShareOrigin()
+        return origin
+          ? `${origin.replace(/\/+$/, '')}/api/matchup-share-image?matchupId=${encodeURIComponent(String(id))}`
+          : null
+      })()
+
+  const tasks = []
+  if (shareUrl && /^https:\/\//i.test(shareUrl)) {
+    tasks.push(fetch(shareUrl, { mode: 'no-cors', cache: 'no-store' }).catch(() => {}))
+  }
+  if (imageUrl && /^https:\/\//i.test(imageUrl)) {
+    tasks.push(fetch(imageUrl, { mode: 'no-cors', cache: 'no-store' }).catch(() => {}))
+  }
+  await Promise.allSettled(tasks)
+}
+
+/** @param {{ matchupId: string, matchup?: object, title?: string, showToast?: (msg: string, type?: string) => void }} opts */
+export async function copyMatchupShareLink({ matchupId, matchup, title, showToast }) {
   const url = getMatchupSharePageUrl(matchupId)
   if (!url) {
     showToast?.('공유 링크를 만들 수 없어요', 'error')
     return false
   }
   try {
-    await copyToClipboard(url)
+    await warmMatchupSharePreview({ matchupId, matchup })
+    const clipText = title ? `${String(title).trim()}\n${url}` : url
+    await copyToClipboard(clipText)
     showToast?.('링크를 복사했어요. 카카오톡에 붙여넣으면 VS 썸네일 미리보기가 뜹니다', 'success')
     return true
   } catch {
@@ -397,19 +424,157 @@ async function ensureNativeGalleryAlbumId(Media, Capacitor) {
  * @param {{ fileName?: string }} [opts]
  * @returns {Promise<{ ok: boolean, reason?: string }>}
  */
-export async function saveImageBlobToNativeGallery(blob, { fileName = 'vics-matchup-vs' } = {}) {
+export async function saveImageBlobToNativeGallery(blob, { fileName = 'vics-matchup-vs', useAppAlbum = false } = {}) {
   try {
     const [{ Media }, { Capacitor }] = await Promise.all([
       import('@capacitor-community/media'),
       import('@capacitor/core'),
     ])
     const dataUri = await blobToDataUri(blob)
-    const albumIdentifier = await ensureNativeGalleryAlbumId(Media, Capacitor)
-    await Media.savePhoto({ path: dataUri, fileName, ...(albumIdentifier ? { albumIdentifier } : {}) })
+    const albumIdentifier = useAppAlbum
+      ? await ensureNativeGalleryAlbumId(Media, Capacitor)
+      : undefined
+    await Media.savePhoto({
+      path: dataUri,
+      fileName,
+      ...(albumIdentifier ? { albumIdentifier } : {}),
+    })
     return { ok: true }
   } catch (e) {
     console.warn('[socialShare] saveImageBlobToNativeGallery failed', e)
     return { ok: false, reason: e?.code || e?.message || 'save-failed' }
+  }
+}
+
+export function isMobileShareDevice() {
+  if (typeof navigator === 'undefined') return false
+  return isIosDevice() || isAndroidDevice()
+}
+
+/** 모바일 브라우저 — data URL 다운로드(Android) 또는 공유 시트「이미지 저장」(iOS) */
+export async function saveImageBlobToMobileWebGallery(blob, { fileName = 'vics-matchup-vs.jpg' } = {}) {
+  const file = await blobToShareFile(blob)
+  const payload = { files: [file] }
+
+  if (isIosDevice() && navigator.share) {
+    try {
+      if (!navigator.canShare || navigator.canShare(payload)) {
+        await navigator.share(payload)
+        return { ok: true, method: 'ios-share-save' }
+      }
+    } catch (e) {
+      if (e?.name === 'AbortError') return { ok: false, reason: 'cancelled' }
+    }
+  }
+
+  try {
+    const dataUri = await blobToDataUri(blob)
+    const link = document.createElement('a')
+    link.href = dataUri
+    link.download = fileName.endsWith('.jpg') ? fileName : `${fileName}.jpg`
+    link.rel = 'noopener'
+    link.style.display = 'none'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    return { ok: true, method: 'download' }
+  } catch (e) {
+    return { ok: false, reason: e?.message || 'download-failed' }
+  }
+}
+
+export async function isNativeGallerySaveContext() {
+  return isNativeOrAppShell() || await isNativeCapacitorApp()
+}
+
+/**
+ * 인스타 공유 — VS 합성 이미지를 갤러리(카메라 롤)에 저장한 뒤 인스타 앱 스토리/게시 화면으로 연다.
+ * (모바일 브라우저·Capacitor 앱 공통 — Web Share 파일 첨부 우회)
+ */
+async function shareViaInstagramGalleryFlow({
+  shareImageCtx,
+  url,
+  notify,
+  copyLink,
+  preferStory = true,
+}) {
+  let linkCopied = false
+  try {
+    await copyToClipboard(url)
+    linkCopied = true
+  } catch {
+    void 0
+  }
+
+  let blob
+  try {
+    blob = await resolveShareBlob(shareImageCtx)
+  } catch (e) {
+    console.warn('[socialShare] instagram image resolve failed', e)
+    if (linkCopied) {
+      notify('링크는 복사됐어요. 이미지 생성에 실패했어요 — 다시 시도해 주세요 📋', 'info')
+    } else {
+      await copyLink('이미지 생성에 실패했어요. 링크만 복사했습니다 📋')
+    }
+    return
+  }
+
+  const fileName = 'vics-matchup-vs'
+  let imageSaved = false
+
+  if (await isNativeGallerySaveContext()) {
+    const saved = await saveImageBlobToNativeGallery(blob, { fileName, useAppAlbum: false })
+    imageSaved = saved.ok
+    if (!saved.ok) {
+      console.warn('[socialShare] native gallery save failed', saved.reason)
+    }
+  } else if (isMobileShareDevice()) {
+    const saved = await saveImageBlobToMobileWebGallery(blob, { fileName: `${fileName}.jpg` })
+    imageSaved = saved.ok
+    if (!saved.ok && saved.reason !== 'cancelled') {
+      console.warn('[socialShare] mobile web gallery save failed', saved.reason)
+    }
+    if (saved.reason === 'cancelled') return
+  } else {
+    try {
+      await saveShareImageToDevice(shareImageCtx)
+      imageSaved = true
+    } catch {
+      imageSaved = false
+    }
+  }
+
+  if (imageSaved) {
+    if (await isNativeGallerySaveContext()) {
+      notify('VS 합성 이미지를 사진첩에 저장했어요! 인스타에서 방금 저장한 사진을 선택해 올려 주세요 📸', 'success')
+    } else if (isMobileShareDevice()) {
+      notify(
+        isIosDevice()
+          ? '「이미지 저장」을 선택한 뒤, 인스타 스토리·게시물에서 사진을 고르세요 📸 (링크도 복사됨)'
+          : 'VS 합성 이미지를 저장했어요! 인스타 스토리·게시물에서 방금 저장한 사진을 선택해 올려 주세요 📸 (링크도 복사됨)',
+        linkCopied ? 'success' : 'info',
+      )
+    } else {
+      notify(
+        linkCopied
+          ? 'VS 합성 이미지(다운로드) + 링크 복사 완료! 인스타 새 게시물에 올려 주세요 📸'
+          : 'VS 합성 이미지(다운로드) 완료! 링크는 주소창 URL을 복사해 주세요 📸',
+        linkCopied ? 'success' : 'info',
+      )
+    }
+
+    if (isMobileShareDevice()) {
+      await new Promise((resolve) => setTimeout(resolve, 700))
+      void tryOpenInstagramApp({ preferStory })
+    }
+    recordShareSuccess('matchup')
+    return
+  }
+
+  if (linkCopied) {
+    notify('링크는 복사됐어요. 이미지 저장만 실패했어요 — 다시 눌러 주세요 📋', 'info')
+  } else {
+    await copyLink('이미지 저장에 실패했어요. 링크만 복사했습니다 — 다시 시도해 주세요 📋')
   }
 }
 
@@ -482,7 +647,7 @@ export async function tryOpenInstagramApp({ preferStory = true, fallbackMs = 160
 
   let appUrl = getInstagramAppUrl({ preferStory })
   // Capacitor WebView: intent:// 대신 instagram:// scheme
-  if (await isNativeCapacitorApp()) {
+  if (await isNativeGallerySaveContext()) {
     appUrl = preferStory ? 'instagram://story-camera' : 'instagram://camera'
   }
 
@@ -760,70 +925,13 @@ export async function shareMatchupToSns(platform, opts) {
       return
     }
     case 'instagram': {
-      // 네이티브 앱(Capacitor WebView)에서는 <a download>·navigator.share 파일 첨부가
-      // 안 되거나 불안정해서, 사진첩(카메라 롤)에 직접 저장한 뒤 스토리로 딥링크한다.
-      if (await isNativeCapacitorApp()) {
-        let linkCopied = false
-        try {
-          await copyToClipboard(url)
-          linkCopied = true
-        } catch {
-          /* 사진첩 저장 후에도 재시도 가능 */
-        }
-        try {
-          const blob = await resolveShareBlob(shareImageCtx)
-          const saved = await saveImageBlobToNativeGallery(blob)
-          if (!saved.ok) throw new Error(saved.reason || 'save-failed')
-          notify('VS 합성 이미지를 사진첩에 저장했어요! 인스타 스토리에서 방금 저장한 사진을 선택해 올려 주세요 📸')
-          void tryOpenInstagramApp({ preferStory: true })
-        } catch (e) {
-          console.warn('[socialShare] instagram native gallery save failed', e)
-          if (linkCopied) {
-            notify('링크는 복사됐어요. 사진첩 저장에는 실패했어요 — 다시 시도해 주세요 📋', 'info')
-          } else {
-            await copyLink('사진첩 저장에 실패했어요. 링크만 복사했습니다 — 다시 시도해 주세요 📋')
-          }
-        }
-        return
-      }
-
-      // PC: 네이티브 공유창(취소 시 조기 종료) 대신 저장+복사. 모바일 브라우저만 파일 공유 시도.
-      if (isMobile && await tryNativeShareWithImage({ safeTitle, url, notify, ...shareImageCtx })) return
-
-      // 클립보드는 사용자 클릭 제스처가 유효할 때 먼저 복사 (await 이미지 생성 전)
-      let linkCopied = false
-      try {
-        await copyToClipboard(url)
-        linkCopied = true
-      } catch {
-        /* 이미지 저장 후 fallback 재시도 */
-      }
-
-      let imageSaved = false
-      try {
-        await saveShareImageToDevice(shareImageCtx)
-        imageSaved = true
-        notify(
-          linkCopied
-            ? (isMobile
-              ? 'VS 합성 이미지 저장 + 링크 복사! 인스타 앱에서 새 게시물로 올려 주세요 📸'
-              : 'VS 합성 이미지(다운로드) + 링크 복사 완료! 인스타 새 게시물에 이미지·링크를 붙여 넣어 주세요 📸')
-            : (isMobile
-              ? 'VS 합성 이미지 저장! 링크는 주소창에서 복사해 주세요 📸'
-              : 'VS 합성 이미지(다운로드) 완료! 링크는 주소창 URL을 복사해 주세요 📸'),
-          linkCopied ? 'success' : 'info',
-        )
-      } catch {
-        if (linkCopied) {
-          notify('링크는 복사됐어요. 이미지 저장만 실패했어요 — 다시 눌러 주세요 📋', 'info')
-        } else {
-          await copyLink('이미지 저장에 실패했어요. 링크만 복사했습니다 — 다시 시도해 주세요 📋')
-        }
-      }
-
-      if (isMobile && imageSaved) {
-        void tryOpenInstagramApp({ preferStory: false })
-      }
+      await shareViaInstagramGalleryFlow({
+        shareImageCtx,
+        url,
+        notify,
+        copyLink,
+        preferStory: true,
+      })
       return
     }
     default:
@@ -875,4 +983,141 @@ export async function shareRankingGallery({ nickname, rank, tierName, cardId, sh
   if (await tryWebShare()) return
 
   await copyLink()
+}
+
+/**
+ * OG 미리보기 + 클릭 가능한 URL 공유 (성향 리포트·랭킹 등)
+ * @param {{
+ *   title: string,
+ *   description?: string,
+ *   url: string,
+ *   imageUrl?: string,
+ *   buttonTitle?: string,
+ *   shareFile?: File | null,
+ *   showToast?: (msg: string, type?: string) => void,
+ *   recordKind?: string,
+ * }} opts
+ */
+export async function shareClickableLinkCard({
+  title,
+  description = '',
+  url: rawUrl,
+  imageUrl,
+  buttonTitle = '보러 가기',
+  shareFile = null,
+  showToast,
+  recordKind = 'tendency',
+}) {
+  const url = resolvePublicShareUrl(rawUrl)
+  const safeTitle = (title || 'VictorySpace').trim()
+  const notify = (msg, type = 'success') => showToast?.(msg, type)
+  const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+  const ogImage = imageUrl
+    ? resolvePublicShareUrl(imageUrl)
+    : resolvePublicShareUrl(`${getPublicShareOrigin()}${DEFAULT_OG_IMAGE_PATH}`)
+
+  const shareText = [safeTitle, description, url].filter(Boolean).join('\n')
+
+  const copyLink = async (hint) => {
+    try {
+      await copyToClipboard(url)
+      notify(hint || '공유 링크를 복사했어요. 카카오톡에 붙여넣으면 탭해서 열 수 있어요 📋')
+      recordShareSuccess(recordKind)
+    } catch {
+      notify('복사에 실패했어요. 아래 링크를 길게 눌러 복사해 주세요', 'error')
+    }
+  }
+
+  const tryWebShare = async () => {
+    if (typeof navigator === 'undefined' || !navigator.share) return false
+    const payload = shareFile
+      ? { title: safeTitle, text: shareText, url, files: [shareFile] }
+      : { title: safeTitle, text: shareText, url }
+    try {
+      if (navigator.canShare && !navigator.canShare(payload)) {
+        if (!shareFile) return false
+        const linkOnly = { title: safeTitle, text: shareText, url }
+        if (navigator.canShare && !navigator.canShare(linkOnly)) return false
+        await navigator.share(linkOnly)
+        notify('링크가 공유됐어요. 받는 분이 URL을 탭하면 리포트를 볼 수 있어요')
+        recordShareSuccess(recordKind)
+        return true
+      }
+      await navigator.share(payload)
+      notify(shareFile ? '이미지와 링크가 공유됐어요!' : '링크가 공유됐어요. URL을 탭하면 리포트를 볼 수 있어요')
+      recordShareSuccess(recordKind)
+      return true
+    } catch (e) {
+      if (e?.name === 'AbortError') return true
+      return false
+    }
+  }
+
+  const tryKakaoSdk = () =>
+    runKakaoFeedSdkShare({
+      safeTitle,
+      description,
+      url,
+      imageUrl: ogImage,
+      buttonTitle,
+      notify,
+    })
+
+  const handleKakaoFallback = async (sdk) => {
+    if (sdk.ok) {
+      notify('카카오톡 공유창이 열렸어요. 「보러 가기」를 누르면 리포트로 이동해요')
+      recordShareSuccess(recordKind)
+      return true
+    }
+    if (sdk.reason === '4011') {
+      await copyLink('운영 링크를 복사했어요. 카카오톡 채팅에 붙여넣으면 탭해서 열 수 있어요 📋')
+      return true
+    }
+    if (['no-key', 'no-https-origin', 'http-share-url', 'http-image-url', 'app-shell'].includes(sdk.reason)) {
+      notify?.(kakaoSdkSkipMessage(sdk.reason), 'info')
+      await copyLink()
+      return true
+    }
+    return false
+  }
+
+  const isNative = isNativeOrAppShell() || (await isNativeCapacitorApp())
+  if (isNative) {
+    if (await tryCapacitorShare({ url, notify })) {
+      recordShareSuccess(recordKind)
+      return
+    }
+    if (isMobile && (await tryWebShare())) return
+    await copyLink()
+    return
+  }
+
+  if (!isMobile) {
+    const sdk = await tryKakaoSdk()
+    if (await handleKakaoFallback(sdk)) return
+  }
+
+  if (isMobile && (await tryWebShare())) return
+
+  const sdk = await tryKakaoSdk()
+  if (await handleKakaoFallback(sdk)) return
+
+  await copyLink()
+}
+
+/** @param {File} file @param {string} [filename] */
+export function downloadShareFile(file, filename) {
+  if (!file || typeof document === 'undefined') return
+  const objectUrl = URL.createObjectURL(file)
+  try {
+    const anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = filename || file.name || 'vics-share.png'
+    anchor.rel = 'noopener'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
 }

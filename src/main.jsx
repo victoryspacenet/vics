@@ -4,8 +4,13 @@ import './index.css'
 import App from './App.jsx'
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
 import { startCategoryConfigRemoteSync } from './lib/categoryAdminStorage'
+import { setupDevEmbeddedBrowserReload } from './lib/devEmbeddedBrowser'
 
 startCategoryConfigRemoteSync()
+
+if (import.meta.env.DEV) {
+  setupDevEmbeddedBrowserReload()
+}
 
 const rootEl = document.getElementById('root')
 if (!rootEl) {
