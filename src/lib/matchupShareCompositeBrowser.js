@@ -32,6 +32,7 @@ function resolveSide(matchup, side, baseUrl, safeMediaUrlFn) {
   const label = String(isLeft ? (matchup.left_label || 'A') : (matchup.right_label || 'B')).slice(0, 12)
   const thumb = isLeft ? matchup.left_thumbnail_url : matchup.right_thumbnail_url
   const url = isLeft ? matchup.left_url : matchup.right_url
+  const textRaw = isLeft ? matchup.left_text : matchup.right_text
 
   let imageUrl = null
   if (type === 'image' || type === 'video') {
@@ -40,11 +41,47 @@ function resolveSide(matchup, side, baseUrl, safeMediaUrlFn) {
 
   return {
     imageUrl,
+    text: type === 'text' ? String(textRaw || '').trim().slice(0, 120) : '',
     label,
     bg: isLeft ? '#7c2d12' : '#064e3b',
     labelBg: isLeft ? '#f59e0b' : '#10b981',
     type: type || 'text',
   }
+}
+
+function wrapTextLines(text, maxCharsPerLine = 16, maxLines = 4) {
+  const raw = String(text || '').trim()
+  if (!raw) return []
+  const lines = []
+  let line = ''
+  for (const ch of raw) {
+    const next = line + ch
+    if (next.length > maxCharsPerLine && line) {
+      lines.push(line)
+      line = ch
+      if (lines.length >= maxLines) break
+    } else {
+      line = next
+    }
+  }
+  if (line && lines.length < maxLines) lines.push(line)
+  return lines.slice(0, maxLines)
+}
+
+function drawTextSidePanel(ctx, x, panelW, panelH, text) {
+  const lines = wrapTextLines(text, 16, 4)
+  const lineHeight = 36
+  const cx = x + panelW / 2
+  const startY = panelH / 2 - ((Math.max(lines.length, 1) - 1) * lineHeight) / 2
+
+  ctx.fillStyle = '#ffffff'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.font = '600 28px system-ui, "Pretendard Variable", "Noto Sans KR", sans-serif'
+
+  lines.forEach((line, index) => {
+    ctx.fillText(line, cx, startY + index * lineHeight)
+  })
 }
 
 function hasRightContent(matchup) {
@@ -55,6 +92,36 @@ function hasRightContent(matchup) {
     || matchup.right_text
     || matchup.is_complete,
   )
+}
+
+/** 도전자(B) 미참여 — 공유·OG 합성 썸네일 B 패널 */
+function drawChallengeRecruitPanel(ctx, x, panelW, panelH) {
+  ctx.fillStyle = '#022c22'
+  ctx.fillRect(x, 0, panelW, panelH)
+
+  const cx = x + panelW / 2
+  const cy = panelH / 2 - 8
+
+  ctx.strokeStyle = 'rgba(52, 211, 153, 0.35)'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.arc(cx, cy, 78, 0, Math.PI * 2)
+  ctx.stroke()
+
+  ctx.fillStyle = '#6ee7b7'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.font = '900 30px system-ui, "Pretendard Variable", "Noto Sans KR", sans-serif'
+
+  const lines = ['도전자', '모집 중']
+  const lineHeight = 38
+  const textTop = cy - ((lines.length - 1) * lineHeight) / 2
+  lines.forEach((line, index) => {
+    ctx.fillText(line, cx, textTop + index * lineHeight)
+  })
+
+  ctx.font = '34px system-ui, sans-serif'
+  ctx.fillText('⚔️', cx, cy + 62)
 }
 
 function loadImage(url) {
@@ -86,7 +153,7 @@ function drawContainImage(ctx, img, dx, dy, dw, dh) {
 }
 
 function drawLabel(ctx, label, labelBg, x, y) {
-  ctx.font = 'bold 14px system-ui, sans-serif'
+  ctx.font = '700 14px system-ui, "Pretendard Variable", "Noto Sans KR", sans-serif'
   const padX = 10
   const w = Math.min(ctx.measureText(label).width + padX * 2, 160)
   const h = 26
@@ -113,13 +180,9 @@ async function drawSidePanel(ctx, side, x) {
       ctx.fillRect(x, 0, HALF_W, OUT_H)
     }
   } else if (side.type === 'challenge') {
-    ctx.fillStyle = '#022c22'
-    ctx.fillRect(x, 0, HALF_W, OUT_H)
-    ctx.fillStyle = '#fff'
-    ctx.font = 'bold 72px system-ui, sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText('?', x + HALF_W / 2, OUT_H / 2)
+    drawChallengeRecruitPanel(ctx, x, HALF_W, OUT_H)
+  } else if (side.type === 'text' && side.text) {
+    drawTextSidePanel(ctx, x, HALF_W, OUT_H, side.text)
   }
 
   drawLabel(ctx, side.label, side.labelBg, x + 14, 14)
@@ -226,8 +289,21 @@ export async function composeMatchupShareBlob(matchup, safeMediaUrlFn, baseOrigi
   })
 }
 
+function matchupHasTextSide(matchup) {
+  return matchup?.left_type === 'text' || matchup?.right_type === 'text'
+}
+
 /** 서버 합성 API → 실패 시 브라우저 Canvas 폴백 */
 export async function fetchMatchupShareBlob({ imageUrl, matchup, safeMediaUrlFn, baseOrigin }) {
+  /** 도전자 대기·텍스트형 — 브라우저 Canvas가 한글·본문을 정확히 그림 */
+  if (matchup && safeMediaUrlFn && (!hasRightContent(matchup) || matchupHasTextSide(matchup))) {
+    try {
+      return await composeMatchupShareBlob(matchup, safeMediaUrlFn, baseOrigin)
+    } catch {
+      /* server / generic fallback below */
+    }
+  }
+
   if (imageUrl) {
     try {
       const res = await fetch(imageUrl)

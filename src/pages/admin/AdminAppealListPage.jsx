@@ -1,7 +1,12 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { ChevronDown, ChevronLeft, ChevronRight, Search } from 'lucide-react'
 import { useUIStore } from '../../store/uiStore'
+import {
+  parseListPageParam,
+  patchSearchParamsPage,
+  buildListReturnTo,
+} from '../../lib/listPageNav'
 import {
   getAdminAppealsPaged,
   getAdminAppealTotals,
@@ -38,6 +43,12 @@ const SEARCH_DEBOUNCE_MS = 400
 export function AdminAppealListPage() {
   const location = useLocation()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const pageFromUrl = parseListPageParam(searchParams.get('page'))
+  const listReturnTo = useMemo(
+    () => buildListReturnTo(location.pathname, location.search),
+    [location.pathname, location.search],
+  )
   const { showToast } = useUIStore()
   const [sanctionFilter, setSanctionFilter] = useState('')
   const [dateFilter, setDateFilter] = useState('all')
@@ -45,7 +56,6 @@ export function AdminAppealListPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [sanctionOpen, setSanctionOpen] = useState(false)
   const [dateOpen, setDateOpen] = useState(false)
-  const [page, setPage] = useState(1)
 
   const [stats, setStats] = useState({ pending: 0, completed: 0 })
   const [rows, setRows] = useState([])
@@ -62,9 +72,9 @@ export function AdminAppealListPage() {
     const toastMsg = location.state?.appealCompleteToast
     if (toastMsg) {
       showToast(toastMsg, 'success')
-      navigate('/admin/appeals', { replace: true, state: {} })
+      navigate(`${location.pathname}${location.search}`, { replace: true, state: {} })
     }
-  }, [location.state?.appealCompleteToast, showToast, navigate])
+  }, [location.state?.appealCompleteToast, location.pathname, location.search, showToast, navigate])
 
   const loadTotals = useCallback(async () => {
     const t = await getAdminAppealTotals()
@@ -94,8 +104,10 @@ export function AdminAppealListPage() {
     const sigChanged = prevFilterSigRef.current !== filterSig
     if (sigChanged) prevFilterSigRef.current = filterSig
 
-    const effectivePage = sigChanged ? 1 : page
-    if (sigChanged && page !== 1) setPage(1)
+    const effectivePage = sigChanged ? 1 : pageFromUrl
+    if (sigChanged && pageFromUrl !== 1) {
+      patchSearchParamsPage(setSearchParams, null, {}, { replace: true })
+    }
 
     setListLoading(true)
     ;(async () => {
@@ -114,15 +126,24 @@ export function AdminAppealListPage() {
     return () => {
       cancelled = true
     }
-  }, [page, filterSig, listTick])
+  }, [pageFromUrl, filterSig, listTick, setSearchParams])
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+  const page = listLoading && totalCount === 0
+    ? pageFromUrl
+    : Math.min(pageFromUrl, totalPages)
 
   useEffect(() => {
-    if (page > totalPages) setPage(totalPages)
-  }, [page, totalPages])
+    if (listLoading || (totalCount === 0 && rows.length === 0)) return
+    if (pageFromUrl > totalPages) {
+      patchSearchParamsPage(setSearchParams, totalPages <= 1 ? null : totalPages, {}, { replace: true })
+    }
+  }, [pageFromUrl, totalPages, listLoading, totalCount, rows.length, setSearchParams])
 
-  const goPage = useCallback((p) => setPage(Math.min(Math.max(1, p), totalPages)), [totalPages])
+  const goPage = useCallback(
+    (p) => patchSearchParamsPage(setSearchParams, Math.min(Math.max(1, p), totalPages), {}, { replace: false }),
+    [setSearchParams, totalPages],
+  )
 
   const applySearchNow = useCallback(() => {
     setDebouncedSearch(searchQuery.trim())
@@ -270,6 +291,7 @@ export function AdminAppealListPage() {
                       <td className="px-4 py-3 text-center">
                         <Link
                           to={`/admin/appeals/${row.id}`}
+                          state={{ adminAppealsReturnTo: listReturnTo }}
                           className="inline-block px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-700 text-xs font-bold hover:bg-emerald-200"
                         >
                           상세

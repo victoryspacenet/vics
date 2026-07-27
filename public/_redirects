@@ -15,7 +15,8 @@
 /api/matchup-share-image /.netlify/functions/matchup-share-image 200!
 /api/site-og-image /.netlify/functions/site-og-image 200!
 /api/tendency-og-image /.netlify/functions/tendency-og-image 200!
-/report/tendency/s/* /.netlify/functions/tendency-og 200!
+/report/tendency/s/* /.netlify/functions/tendency-og?shareId=:splat 200!
 /ranking/share /.netlify/functions/ranking-og 200!
-/matchup/* /.netlify/functions/matchup-og 200!
+/matchup/share/* /.netlify/functions/matchup-og?matchupId=:splat&sharePath=1 200!
+/matchup/* /.netlify/functions/matchup-og?matchupId=:splat 200!
 /* /index.html 200

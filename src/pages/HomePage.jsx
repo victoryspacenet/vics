@@ -16,6 +16,7 @@ import { FeedCard } from '../components/matchup/FeedCard'
 import { MatchupEngagementProvider } from '../components/matchup/MatchupEngagementContext'
 import {
   MATCHUPS_CAT_STORAGE_KEY,
+  MATCHUPS_FILTER_STORAGE_KEY,
   MATCHUPS_CAT_URL_PARAM,
   MATCHUPS_TAG_URL_PARAM,
   VALID_MATCHUPS_FEED_FILTERS,
@@ -91,6 +92,14 @@ export function HomePage({ refreshRef }) {
       user ? openCreateDrawer() : openLoginModal()
     },
   }
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(MATCHUPS_FILTER_STORAGE_KEY, filter)
+    } catch {
+      void 0
+    }
+  }, [filter])
 
   useEffect(() => {
     try {

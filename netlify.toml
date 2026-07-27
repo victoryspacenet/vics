@@ -119,7 +119,7 @@ schedule = "@hourly"
 
 [[redirects]]
   from = "/report/tendency/s/*"
-  to = "/.netlify/functions/tendency-og"
+  to = "/.netlify/functions/tendency-og?shareId=:splat"
   status = 200
   force = true
 
@@ -130,8 +130,14 @@ schedule = "@hourly"
   force = true
 
 [[redirects]]
+  from = "/matchup/share/*"
+  to = "/.netlify/functions/matchup-og?matchupId=:splat&sharePath=1"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/matchup/*"
-  to = "/.netlify/functions/matchup-og"
+  to = "/.netlify/functions/matchup-og?matchupId=:splat"
   status = 200
   force = true
 

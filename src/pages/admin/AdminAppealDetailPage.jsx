@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import { useUIStore } from '../../store/uiStore'
 import { ArrowLeft, ChevronDown, FileText, FileImage, X } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
+import { readListReturnToFromState, useNavigateBack } from '../../lib/listPageNav'
 import {
   getAdminAppealById,
   updateAdminAppeal,
@@ -63,7 +64,9 @@ function EvidenceViewerModal({ file, onClose }) {
 }
 
 export function AdminAppealDetailPage() {
-  const navigate = useNavigate()
+  const location = useLocation()
+  const listReturnTo = readListReturnToFromState(location.state) || '/admin/appeals'
+  const navigateBack = useNavigateBack(listReturnTo)
   const { id } = useParams()
   const { showToast } = useUIStore()
 
@@ -107,9 +110,13 @@ export function AdminAppealDetailPage() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <p className="text-gray-500 mb-4">이의 신청을 찾을 수 없어요.</p>
-          <Link to="/admin/appeals" className="text-emerald-600 font-bold hover:underline">
+          <button
+            type="button"
+            onClick={() => navigateBack()}
+            className="text-emerald-600 font-bold hover:underline"
+          >
             목록으로
-          </Link>
+          </button>
         </div>
       </div>
     )
@@ -128,7 +135,7 @@ export function AdminAppealDetailPage() {
   }
 
   const handleCancel = () => {
-    navigate('/admin/appeals')
+    navigateBack()
   }
 
   const handleCompleteClick = () => {
@@ -173,7 +180,8 @@ export function AdminAppealDetailPage() {
     await addAppealResultPush({ userId: appeal.userId, receiptId: appeal.receiptId, decision })
 
     setConfirmCompleteOpen(false)
-    navigate('/admin/appeals', { replace: true, state: { appealCompleteToast: '통보완료' } })
+    showToast('통보완료', 'success')
+    navigateBack()
   }
 
   const isCompleted = appeal.status === APPEAL_STATUS.completed
@@ -183,13 +191,14 @@ export function AdminAppealDetailPage() {
       <div className="max-w-3xl mx-auto px-4 py-6">
         {/* 헤더 */}
         <div className="flex items-center justify-between mb-6">
-          <Link
-            to="/admin/appeals"
+          <button
+            type="button"
+            onClick={() => navigateBack()}
             className="flex items-center gap-2 text-sm text-gray-600 hover:text-[#22282E]"
           >
             <ArrowLeft size={18} />
             목록으로 돌아가기
-          </Link>
+          </button>
           <div className="relative">
             <button
               onClick={() => !isCompleted && setStatusOpen(!statusOpen)}

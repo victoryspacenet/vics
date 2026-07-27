@@ -9,8 +9,6 @@ import {
 export const MAIN_FEED_BEST_LIMIT = 7
 export const MAIN_FEED_HOT_LIMIT = 7
 export const MAIN_FEED_NEW_LIMIT = 7
-/** HOT 백빙 선별용 후보 풀 (전체 행 embed 대신 id·표만 먼저 조회) */
-export const MAIN_FEED_HOT_POOL_LIMIT = 36
 
 /**
  * 베스트·추천 중복 노출 규칙
@@ -103,15 +101,30 @@ function sortHotVotePool(pool) {
     .map(({ m }) => m)
 }
 
-/** 백빙(투표 격차 비율) 순 — `excludeIds`에 있는 id(베스트 선정분)는 건너뜀 */
-function pickHotFromVotePool(pool, limit = 20, excludeIds = null) {
+/** 박빙(투표 격차 비율) 순 — `excludeIds`에 있는 id(베스트 선정분)는 건너뜀 */
+function pickHotIdsFromSortedPool(sortedIds, limit = MAIN_FEED_HOT_LIMIT, excludeIds = null) {
   const excluded = excludeIds instanceof Set ? excludeIds : new Set()
-  return sortHotVotePool(pool)
-    .filter((m) => {
-      const id = String(m?.id ?? '').trim().toLowerCase()
-      return id && !excluded.has(id)
-    })
-    .slice(0, limit)
+  const picked = []
+  for (const rawId of sortedIds || []) {
+    const id = String(rawId ?? '').trim().toLowerCase()
+    if (!id || excluded.has(id)) continue
+    picked.push(rawId)
+    if (picked.length >= limit) break
+  }
+  return picked
+}
+
+async function fetchActiveHotVotePoolRows() {
+  const { data, error } = await withVotingInProgressFilter(
+    supabase
+      .from('matchups')
+      .select(HOT_POOL_SELECT)
+      .eq('status', 'active')
+      .not('right_type', 'is', null)
+      .gt('total_votes', 0),
+  )
+  if (error) throw error
+  return data || []
 }
 
 const UUID_HEX_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -129,7 +142,7 @@ function bestMatchupIdSet(rows) {
  * 완료/신규 풀 조회는 병렬로 수행합니다.
  */
 export async function fetchMainMatchupsQuick() {
-  const [{ data: bestRows }, { data: hotPool }, { data: newPool }] = await Promise.all([
+  const [{ data: bestRows }, { data: newPool }, hotSortedIds] = await Promise.all([
     withVotingInProgressFilter(
       supabase
         .from('matchups')
@@ -141,17 +154,6 @@ export async function fetchMainMatchupsQuick() {
         .order('created_at', { ascending: false })
         .limit(MAIN_FEED_BEST_LIMIT + 1),
     ),
-    withVotingInProgressFilter(
-      supabase
-        .from('matchups')
-        .select(HOT_POOL_SELECT)
-        .eq('status', 'active')
-        .not('right_type', 'is', null)
-        .gt('total_votes', 0)
-        .order('total_votes', { ascending: false, nullsFirst: false })
-        .order('created_at', { ascending: false })
-        .limit(MAIN_FEED_HOT_POOL_LIMIT),
-    ),
     withNewWaitingMatchupFilter(
       supabase
         .from('matchups')
@@ -159,13 +161,13 @@ export async function fetchMainMatchupsQuick() {
         .order('created_at', { ascending: false })
         .limit(MAIN_FEED_NEW_LIMIT + 1),
     ),
+    fetchHotSortedMatchupIds(),
   ])
 
   const bestPicked = (bestRows || []).slice(0, MAIN_FEED_BEST_LIMIT)
   const bestIds = bestMatchupIdSet(bestPicked)
 
-  const hotPickedLean = pickHotFromVotePool(hotPool || [], MAIN_FEED_HOT_LIMIT + 1, bestIds)
-  const hotIds = hotPickedLean.map((m) => m.id).filter(Boolean)
+  const hotIds = pickHotIdsFromSortedPool(hotSortedIds, MAIN_FEED_HOT_LIMIT + 1, bestIds)
   let hotPicked = []
   if (hotIds.length > 0) {
     const { data: hotFullRows, error: hotFullErr } = await supabase
@@ -234,7 +236,7 @@ export async function fetchMainFeaturedFeedRestriction() {
     return featuredRestrictionCache
   }
 
-  const [{ data: bestRows }, { data: hotPool }] = await Promise.all([
+  const [{ data: bestRows }, hotSortedIds] = await Promise.all([
     withVotingInProgressFilter(
       supabase
         .from('matchups')
@@ -246,17 +248,7 @@ export async function fetchMainFeaturedFeedRestriction() {
         .order('created_at', { ascending: false })
         .limit(MAIN_FEED_BEST_LIMIT),
     ),
-    withVotingInProgressFilter(
-      supabase
-        .from('matchups')
-        .select(HOT_POOL_SELECT)
-        .eq('status', 'active')
-        .not('right_type', 'is', null)
-        .gt('total_votes', 0)
-        .order('total_votes', { ascending: false, nullsFirst: false })
-        .order('created_at', { ascending: false })
-        .limit(MAIN_FEED_HOT_POOL_LIMIT),
-    ),
+    fetchHotSortedMatchupIds(),
   ])
 
   const roleById = {}
@@ -265,8 +257,8 @@ export async function fetchMainFeaturedFeedRestriction() {
     if (id) roleById[id] = 'best'
   }
   const bestIds = new Set(Object.keys(roleById))
-  for (const m of pickHotFromVotePool(hotPool || [], MAIN_FEED_HOT_LIMIT, bestIds)) {
-    const id = normalizeFeaturedMatchupId(m?.id)
+  for (const rawId of pickHotIdsFromSortedPool(hotSortedIds, MAIN_FEED_HOT_LIMIT, bestIds)) {
+    const id = normalizeFeaturedMatchupId(rawId)
     if (id && !roleById[id]) roleById[id] = 'hot'
   }
 
@@ -290,17 +282,8 @@ async function fetchHotSortedMatchupIds() {
     return hotSortedIdCache
   }
 
-  const { data, error } = await withVotingInProgressFilter(
-    supabase
-      .from('matchups')
-      .select(HOT_POOL_SELECT)
-      .eq('status', 'active')
-      .not('right_type', 'is', null)
-      .gt('total_votes', 0),
-  )
-  if (error) throw error
-
-  const ids = sortHotVotePool(data || []).map((m) => m.id).filter(Boolean)
+  const data = await fetchActiveHotVotePoolRows()
+  const ids = sortHotVotePool(data).map((m) => m.id).filter(Boolean)
   hotSortedIdCache = ids
   hotSortedIdCacheAt = now
   return ids

@@ -144,7 +144,7 @@ export function MatchupCard({ matchup: initialMatchup, compact, onVoteUpdate }) 
   }
 
   const handleCopyLink = async () => {
-    const ok = await copyMatchupShareLink({ matchupId: matchup.id, showToast })
+    const ok = await copyMatchupShareLink({ matchupId: matchup.id, matchup, showToast })
     if (ok) {
       setLinkCopied(true)
       setTimeout(() => setLinkCopied(false), 2000)

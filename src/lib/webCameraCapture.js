@@ -32,11 +32,51 @@ export function stopWebCameraStream(stream) {
 }
 
 /**
+ * getUserMedia 직후 videoWidth/Height가 0인 경우 loadedmetadata까지 대기
+ * @param {HTMLVideoElement} video
+ * @param {number} [timeoutMs=5000]
+ */
+export function waitForVideoFrameReady(video, timeoutMs = 5000) {
+  if (!video) {
+    return Promise.reject(new Error('카메라 화면을 불러오지 못했어요.'))
+  }
+  if (video.videoWidth > 0 && video.videoHeight > 0) {
+    return Promise.resolve()
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false
+
+    const finish = (ok) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      video.removeEventListener('loadedmetadata', onReady)
+      video.removeEventListener('loadeddata', onReady)
+      video.removeEventListener('resize', onReady)
+      if (ok) resolve()
+      else reject(new Error('카메라 화면을 불러오지 못했어요.'))
+    }
+
+    const onReady = () => {
+      if (video.videoWidth > 0 && video.videoHeight > 0) finish(true)
+    }
+
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    video.addEventListener('loadedmetadata', onReady)
+    video.addEventListener('loadeddata', onReady)
+    video.addEventListener('resize', onReady)
+    onReady()
+  })
+}
+
+/**
  * 비디오 프레임을 1:1 중앙 크롭 JPEG blob으로 캡처
  * @param {HTMLVideoElement} video
  * @param {number} [quality=0.88] 0~1
  */
-export function captureSquareJpegFromVideo(video, quality = 0.88) {
+export async function captureSquareJpegFromVideo(video, quality = 0.88) {
+  await waitForVideoFrameReady(video)
   const vw = video?.videoWidth || 0
   const vh = video?.videoHeight || 0
   if (!vw || !vh) throw new Error('카메라 화면을 불러오지 못했어요.')

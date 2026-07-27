@@ -1,9 +1,15 @@
-import { useState, useMemo, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useMemo, useEffect, useRef } from 'react'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Search, AlertTriangle, Square, SquareCheck } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useUIStore } from '../../store/uiStore'
 import { Modal } from '../../components/ui/Modal'
+import {
+  LIST_PAGE_URL_PARAM,
+  buildListReturnTo,
+  parseListPageParam,
+  patchSearchParamsPage,
+} from '../../lib/listPageNav'
 import {
   getMatchups,
   bulkUpdateStatus,
@@ -47,6 +53,25 @@ function statusBadgeClass(status) {
 export function AdminMatchupsPage() {
   const { showToast } = useUIStore()
   const { canWrite } = useAdminGranularForMenu('matchups')
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const pageFromUrl = parseListPageParam(searchParams.get('page'))
+  const listReturnTo = useMemo(
+    () => buildListReturnTo(location.pathname, location.search),
+    [location.pathname, location.search],
+  )
+  const resetListPage = () => patchSearchParamsPage(setSearchParams, null, {}, { replace: true })
+  const goListPage = (p) => {
+    const next = new URLSearchParams(searchParams)
+    if (p <= 1) next.delete(LIST_PAGE_URL_PARAM)
+    else next.set(LIST_PAGE_URL_PARAM, String(p))
+    const search = next.toString()
+    navigate(
+      { pathname: location.pathname, search: search ? `?${search}` : '' },
+      { replace: false },
+    )
+  }
   const [matchups, setMatchups] = useState([])
   const [listLoading, setListLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('all')
@@ -56,10 +81,10 @@ export function AdminMatchupsPage() {
   const [dateTo, setDateTo] = useState('')
   const [sortBy, setSortBy] = useState('default') // 'default' | 'reports_desc'
   const [searchQuery, setSearchQuery] = useState('')
-  const [page, setPage] = useState(1)
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [confirmModal, setConfirmModal] = useState(null) // 'end' | 'block'
   const [categoryOptionsRev, setCategoryOptionsRev] = useState(0)
+  const hasLoadedOnceRef = useRef(false)
 
   useEffect(() => {
     const onCategories = () => setCategoryOptionsRev((n) => n + 1)
@@ -76,7 +101,7 @@ export function AdminMatchupsPage() {
     if (categoryFilter === 'all') return
     if (!categoryFilterOptions.some((c) => c.value === categoryFilter)) {
       setCategoryFilter('all')
-      setPage(1)
+      resetListPage()
     }
   }, [categoryFilterOptions, categoryFilter])
 
@@ -91,6 +116,7 @@ export function AdminMatchupsPage() {
       if (!cancelled) {
         setMatchups(list)
         setListLoading(false)
+        hasLoadedOnceRef.current = true
       }
     })
     return () => {
@@ -150,12 +176,22 @@ export function AdminMatchupsPage() {
     return list
   }, [matchups, statusFilter, categoryFilter, reportFilter, searchQuery, dateFrom, dateTo, sortBy])
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const page = listLoading && !hasLoadedOnceRef.current
+    ? pageFromUrl
+    : Math.min(pageFromUrl, totalPages)
+
+  useEffect(() => {
+    if (listLoading || !hasLoadedOnceRef.current) return
+    if (pageFromUrl > totalPages) {
+      patchSearchParamsPage(setSearchParams, totalPages <= 1 ? null : totalPages, {}, { replace: true })
+    }
+  }, [pageFromUrl, totalPages, listLoading, setSearchParams])
+
   const paginated = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE
     return filtered.slice(start, start + PAGE_SIZE)
   }, [filtered, page])
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
 
   const refresh = async () => {
     const list = await getMatchups({ force: true })
@@ -268,7 +304,7 @@ export function AdminMatchupsPage() {
         <select
           className={cn(FILTER_SELECT_BASE, FILTER_SELECT_STYLES.status)}
           value={statusFilter}
-          onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
+          onChange={(e) => { setStatusFilter(e.target.value); resetListPage() }}
         >
           {STATUS_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
@@ -279,7 +315,7 @@ export function AdminMatchupsPage() {
         <select
           className={cn(FILTER_SELECT_BASE, FILTER_SELECT_STYLES.category)}
           value={categoryFilter}
-          onChange={(e) => { setCategoryFilter(e.target.value); setPage(1) }}
+          onChange={(e) => { setCategoryFilter(e.target.value); resetListPage() }}
         >
           {categoryFilterOptions.map((c) => (
             <option key={c.value} value={c.value}>
@@ -290,7 +326,7 @@ export function AdminMatchupsPage() {
         <select
           className={cn(FILTER_SELECT_BASE, FILTER_SELECT_STYLES.report)}
           value={reportFilter}
-          onChange={(e) => { setReportFilter(e.target.value); setPage(1) }}
+          onChange={(e) => { setReportFilter(e.target.value); resetListPage() }}
         >
           <option value="all">신고수: 전체</option>
           <option value="5+">5회 이상</option>
@@ -298,7 +334,7 @@ export function AdminMatchupsPage() {
         <select
           className={cn(FILTER_SELECT_BASE, FILTER_SELECT_STYLES.sort)}
           value={sortBy}
-          onChange={(e) => { setSortBy(e.target.value); setPage(1) }}
+          onChange={(e) => { setSortBy(e.target.value); resetListPage() }}
         >
           <option value="default">정렬: 최신순</option>
           <option value="reports_desc">신고 많은 순</option>
@@ -310,7 +346,7 @@ export function AdminMatchupsPage() {
           <input
             type="date"
             value={dateFrom}
-            onChange={(e) => { setDateFrom(e.target.value); setPage(1) }}
+            onChange={(e) => { setDateFrom(e.target.value); resetListPage() }}
             className="w-[138px] rounded-lg border border-indigo-200/80 bg-white/90 px-2 py-1.5 text-xs font-semibold text-slate-800 shadow-inner focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
             aria-label="시작일"
           />
@@ -318,7 +354,7 @@ export function AdminMatchupsPage() {
           <input
             type="date"
             value={dateTo}
-            onChange={(e) => { setDateTo(e.target.value); setPage(1) }}
+            onChange={(e) => { setDateTo(e.target.value); resetListPage() }}
             className="w-[138px] rounded-lg border border-indigo-200/80 bg-white/90 px-2 py-1.5 text-xs font-semibold text-slate-800 shadow-inner focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
             aria-label="종료일"
           />
@@ -328,7 +364,7 @@ export function AdminMatchupsPage() {
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => { setSearchQuery(e.target.value); setPage(1) }}
+            onChange={(e) => { setSearchQuery(e.target.value); resetListPage() }}
             placeholder="검색어 입력…"
             className="w-full rounded-xl border-2 border-emerald-300/80 bg-gradient-to-r from-emerald-50/90 via-white to-teal-50/70 py-2.5 pl-10 pr-4 text-sm font-semibold text-[#22282E] shadow-sm placeholder:text-emerald-800/35 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-400/35"
           />
@@ -393,6 +429,7 @@ export function AdminMatchupsPage() {
                   <td className="px-4 py-3 font-medium max-w-[7rem]">
                     <Link
                       to={`/admin/matchups/${m.id}`}
+                      state={{ adminMatchupsReturnTo: listReturnTo }}
                       className="hover:underline text-emerald-600 font-mono text-xs block truncate"
                       title={String(m.id)}
                     >
@@ -403,6 +440,7 @@ export function AdminMatchupsPage() {
                   <td className="px-4 py-3 w-48 max-w-48">
                     <Link
                       to={`/admin/matchups/${m.id}`}
+                      state={{ adminMatchupsReturnTo: listReturnTo }}
                       className={`block truncate hover:underline cursor-pointer ${m.reports >= 5 ? 'font-bold text-amber-800' : ''}`}
                       title={m.title}
                     >
@@ -520,7 +558,7 @@ export function AdminMatchupsPage() {
       {/* 페이지네이션 */}
       <div className="flex justify-center gap-1">
         <button
-          onClick={() => setPage((p) => Math.max(1, p - 1))}
+          onClick={() => goListPage(page - 1)}
           disabled={page <= 1}
           className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
         >
@@ -532,7 +570,7 @@ export function AdminMatchupsPage() {
           return (
             <button
               key={p}
-              onClick={() => setPage(p)}
+              onClick={() => goListPage(p)}
               className={`px-3 py-1.5 rounded-lg text-sm font-bold ${
                 p === page ? 'bg-emerald-600 text-white' : 'border border-gray-200 hover:bg-gray-50'
               }`}
@@ -542,7 +580,7 @@ export function AdminMatchupsPage() {
           )
         })}
         <button
-          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+          onClick={() => goListPage(page + 1)}
           disabled={page >= totalPages}
           className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
         >

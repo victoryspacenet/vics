@@ -95,6 +95,23 @@ export function getTendencyReportLandingUrl() {
   return resolvePublicShareUrl(`${window.location.origin}/report/tendency`)
 }
 
+/** 카카오·SNS 미리보기 캐시 워밍 — 링크 복사 직전 호출 */
+export async function warmTendencySharePreview({ shareUrl, report } = {}) {
+  const url = shareUrl || getTendencyReportLandingUrl()
+  const sid = extractTendencyShareId(url)
+  const middleLine = report ? buildTendencyShareMiddleLine(report) : ''
+  const imageUrl = getTendencyReportOgImageUrl({ shareId: sid, middleLine, shareUrl: url })
+
+  const tasks = []
+  if (/^https:\/\//i.test(url)) {
+    tasks.push(fetch(url, { mode: 'no-cors', cache: 'no-store' }).catch(() => {}))
+  }
+  if (imageUrl && /^https:\/\//i.test(imageUrl)) {
+    tasks.push(fetch(imageUrl, { mode: 'no-cors', cache: 'no-store' }).catch(() => {}))
+  }
+  await Promise.allSettled(tasks)
+}
+
 /**
  * @param {object} report
  * @returns {Promise<{ ok: boolean, shareId?: string, shareUrl?: string, error?: string }>}

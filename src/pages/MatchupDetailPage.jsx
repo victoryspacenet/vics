@@ -18,8 +18,8 @@ import { useUIStore } from '../store/uiStore'
 import { Avatar } from '../components/ui/Avatar'
 import { formatDate, formatNumber, calcPercent, cn } from '../lib/utils'
 import { formatMatchupRegisteredAt } from '../lib/matchupRegisteredAt'
-import { toPng } from 'html-to-image'
 import { sanitizeText, safeMediaUrl, reportSuspiciousInputIfNeeded } from '../lib/sanitize'
+import { captureShareCardJpegFile } from '../lib/shareCardCapture'
 import { getTier, tierAtLeast } from '../lib/tiers'
 import { VsBadge } from '../components/ui/VsBadge'
 import { UserProfileLink } from '../components/ui/UserProfileLink'
@@ -39,7 +39,10 @@ import {
   isMobileShareDevice,
   saveImageBlobToNativeGallery,
   saveImageBlobToMobileWebGallery,
+  warmMatchupShareBlob,
+  isMatchupShareBlobReady,
 } from '../lib/socialShare'
+import { buildMatchupShareCopy } from '../lib/matchupShareCopy'
 import { fandomTierHasGoldCommentAura, fandomTierFromClaps } from '../lib/fandomTiers'
 import { FANDOM_POINTS_PER_CLAP } from '../lib/fandomPoints'
 import { FandomBronzeStarBadge } from '../components/fandom/FandomBronzeStarBadge'
@@ -58,6 +61,7 @@ import { storedCategoryValuesForFilter } from '../lib/matchupCategoryAliases'
 import {
   VALID_MATCHUPS_FEED_FILTERS,
   readInitialMatchupsFeedCategory,
+  readInitialMatchupsFeedFilter,
   buildMatchupsListUrl,
   useMatchupsFeedCategories,
   MatchupsFeedLnbPageLayout,
@@ -329,62 +333,6 @@ function useCountdown(expiresAt) {
   return { h, m, s, expired: remaining === 0 }
 }
 
-/** 투표 결과 스토리 카드 → JPEG 공유 파일 */
-async function waitForStoryCardImages(cardEl, timeoutMs = 5000) {
-  const imgs = [...cardEl.querySelectorAll('img')]
-  if (!imgs.length) return
-  await Promise.race([
-    Promise.all(
-      imgs.map(
-        (img) =>
-          new Promise((resolve) => {
-            if (img.complete && img.naturalWidth > 0) {
-              resolve()
-              return
-            }
-            img.addEventListener('load', () => resolve(), { once: true })
-            img.addEventListener('error', () => resolve(), { once: true })
-          }),
-      ),
-    ),
-    new Promise((resolve) => setTimeout(resolve, timeoutMs)),
-  ])
-}
-
-async function captureStoryCardShareFile(cardEl, matchupId) {
-  await waitForStoryCardImages(cardEl)
-  const dataUrl = await toPng(cardEl, {
-    pixelRatio: 2,
-    cacheBust: true,
-    skipFonts: true,
-    useCORS: true,
-    imagePlaceholder:
-      'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
-  })
-  const jpegBlob = await new Promise((resolve, reject) => {
-    const img = new Image()
-    img.onload = () => {
-      const canvas = document.createElement('canvas')
-      canvas.width = img.naturalWidth
-      canvas.height = img.naturalHeight
-      canvas.getContext('2d').drawImage(img, 0, 0)
-      canvas.toBlob(
-        (blob) => (blob ? resolve(blob) : reject(new Error('jpeg encode failed'))),
-        'image/jpeg',
-        0.92,
-      )
-    }
-    img.onerror = () => reject(new Error('image load failed'))
-    img.src = dataUrl
-  })
-  const fileName = `VICS-matchup-${matchupId || 'share'}.jpg`
-  return {
-    file: new File([jpegBlob], fileName, { type: 'image/jpeg' }),
-    dataUrl,
-    fileName,
-  }
-}
-
 // ── SNS 공유 설정 ─────────────────────────────────────────────────
 const SNS_LIST = [
   {
@@ -440,7 +388,7 @@ export function MatchupDetailPage() {
   const [lnbOpen, setLnbOpen] = useState(false)
   const feedCategories = useMatchupsFeedCategories()
   const filterParam = searchParams.get('filter')
-  const filter = VALID_MATCHUPS_FEED_FILTERS.includes(filterParam) ? filterParam : 'active'
+  const filter = VALID_MATCHUPS_FEED_FILTERS.includes(filterParam) ? filterParam : readInitialMatchupsFeedFilter()
 
   const [matchup, setMatchup] = useState(null)
   /** loading | ready | not_found — matchup null이어도 로딩 스켈레톤과 구분 */
@@ -467,6 +415,7 @@ export function MatchupDetailPage() {
   const [resultVotedSide, setResultVotedSide] = useState(null)
   const [showSharePromptModal, setShowSharePromptModal] = useState(false)
   const [showRecruitShareModal, setShowRecruitShareModal] = useState(false)
+  const [recruitShareImageReady, setRecruitShareImageReady] = useState(false)
   const [hasConfirmedShare, setHasConfirmedShare] = useState(false)
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false)
   const [hasClickedFinalize, setHasClickedFinalize] = useState(false)
@@ -495,6 +444,17 @@ export function MatchupDetailPage() {
   const handleSnsShare = useCallback(
     async (platformId) => {
       if (!matchup) return
+      if (platformId === 'instagram') {
+        try {
+          await warmMatchupShareBlob({
+            matchup,
+            safeMediaUrlFn: safeMediaUrl,
+            imageUrl: getMatchupShareImageUrl(matchup, safeMediaUrl),
+          })
+        } catch (e) {
+          console.warn('[MatchupDetail] instagram share preload failed', e)
+        }
+      }
       await shareMatchupToSns(platformId, {
         title: matchup.title,
         description: matchup.description || '',
@@ -507,6 +467,43 @@ export function MatchupDetailPage() {
     },
     [matchup, showToast]
   )
+
+  /** 도전자 모집 공유 — 인스타 클릭 전 VS 합성 이미지 미리 생성 (iOS user gesture 유지) */
+  useEffect(() => {
+    if (!matchup?.id) {
+      setRecruitShareImageReady(false)
+      return undefined
+    }
+    const shouldWarm = showRecruitShareModal || matchup.right_type == null
+    if (!shouldWarm) {
+      setRecruitShareImageReady(false)
+      return undefined
+    }
+
+    if (isMatchupShareBlobReady(matchup.id)) {
+      setRecruitShareImageReady(true)
+    }
+
+    let cancelled = false
+    if (showRecruitShareModal && !isMatchupShareBlobReady(matchup.id)) {
+      setRecruitShareImageReady(false)
+    }
+    void warmMatchupShareBlob({
+      matchup,
+      safeMediaUrlFn: safeMediaUrl,
+      imageUrl: getMatchupShareImageUrl(matchup, safeMediaUrl),
+    })
+      .then(() => {
+        if (!cancelled) setRecruitShareImageReady(true)
+      })
+      .catch(() => {
+        if (!cancelled) setRecruitShareImageReady(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [matchup?.id, matchup?.right_type, showRecruitShareModal])
 
   // 투표 수 갱신: Realtime 대신 45초 폴링 (탭 visible일 때만)
   useEffect(() => {
@@ -969,7 +966,6 @@ export function MatchupDetailPage() {
     const ok = await copyMatchupShareLink({
       matchupId: matchup?.id || id,
       matchup,
-      title: ogTitle,
       showToast,
     })
     if (ok) {
@@ -1083,8 +1079,7 @@ export function MatchupDetailPage() {
 
   const leftLabel = matchup.left_label || 'A'
   const rightLabel = matchup.right_label || 'B'
-  const ogTitle = `${leftLabel} vs ${rightLabel} 경쟁 중!`
-  const ogDesc = `누가 누구와 경쟁 중! ${leftLabel}와 ${rightLabel}, VICS에서 투표해보세요`
+  const { ogTitle, ogDescription: ogDesc } = buildMatchupShareCopy(matchup)
   const ogImage = getMatchupShareImageUrl(matchup, safeMediaUrl)
   const ogUrl = matchup?.id ? getMatchupSharePageUrl(matchup.id) : ''
 
@@ -1242,17 +1237,21 @@ export function MatchupDetailPage() {
             </div>
             <p className="text-xs font-bold text-emerald-800/80 mb-4 truncate px-1">{matchup.title}</p>
             <div className="grid grid-cols-2 gap-2.5">
-              {SNS_LIST.map((sns) => (
-                <button
-                  key={sns.id}
-                  type="button"
-                  onClick={() => handleSnsShare(sns.id)}
-                  className={`flex items-center justify-center gap-2 px-3 py-3 rounded-xl text-xs font-bold transition-all hover:scale-[1.02] active:scale-[0.98] ${sns.color}`}
-                >
-                  {sns.icon}
-                  {sns.label}
-                </button>
-              ))}
+              {SNS_LIST.map((sns) => {
+                const instagramWaiting = sns.id === 'instagram' && !recruitShareImageReady
+                return (
+                  <button
+                    key={sns.id}
+                    type="button"
+                    disabled={instagramWaiting}
+                    onClick={() => handleSnsShare(sns.id)}
+                    className={`flex items-center justify-center gap-2 px-3 py-3 rounded-xl text-xs font-bold transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 disabled:pointer-events-none disabled:hover:scale-100 ${sns.color}`}
+                  >
+                    {sns.icon}
+                    {instagramWaiting ? '이미지 준비 중…' : sns.label}
+                  </button>
+                )
+              })}
             </div>
             <button
               type="button"
@@ -2509,7 +2508,10 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
     if (shareExportPromiseRef.current) return shareExportPromiseRef.current
     if (!cardRef.current) throw new Error('story card not ready')
 
-    shareExportPromiseRef.current = captureStoryCardShareFile(cardRef.current, matchup.id)
+    shareExportPromiseRef.current = captureShareCardJpegFile(cardRef.current, {
+      filename: `VICS-matchup-${matchup.id || 'share'}.jpg`,
+      backgroundColor: '#1e1b4b',
+    })
       .then((result) => {
         shareFileRef.current = result
         return result

@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import { ChevronLeft, CheckCircle, AlertTriangle, XCircle, UserX, EyeOff, RotateCcw } from 'lucide-react'
 import { useUIStore } from '../../store/uiStore'
 import { cn } from '../../lib/utils'
+import { readListReturnToFromState, useNavigateBack } from '../../lib/listPageNav'
 import {
   getMatchupDetail,
   getMatchupStatusLabel,
@@ -101,7 +102,9 @@ const ADMIN_ACTION_MODAL = {
 
 export function AdminMatchupDetailPage() {
   const { id } = useParams()
-  const navigate = useNavigate()
+  const location = useLocation()
+  const listReturnTo = readListReturnToFromState(location.state) || '/admin/matchups'
+  const navigateBack = useNavigateBack(listReturnTo)
   const { showToast } = useUIStore()
   const [matchup, setMatchup] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -133,9 +136,13 @@ export function AdminMatchupDetailPage() {
     return (
       <div className="max-w-3xl w-full px-3 sm:px-0">
         <p className="text-gray-500">매치업을 찾을 수 없어요.</p>
-        <Link to="/admin/matchups" className="mt-4 inline-block text-emerald-600 font-bold hover:underline">
+        <button
+          type="button"
+          onClick={() => navigateBack()}
+          className="mt-4 inline-block text-emerald-600 font-bold hover:underline"
+        >
           목록으로
-        </Link>
+        </button>
       </div>
     )
   }
@@ -151,7 +158,7 @@ export function AdminMatchupDetailPage() {
       case 'approve':
         await updateMatchupStatus(matchup.id, 'active')
         showToast('매치업이 유지/승인됐어요.', 'success')
-        navigate('/admin/matchups')
+        navigateBack()
         break
       case 'warn': {
         const recipients = getReportedParticipantUserIdsForWarning(matchup)
@@ -185,7 +192,7 @@ export function AdminMatchupDetailPage() {
       case 'end':
         await updateMatchupStatus(matchup.id, 'ended')
         showToast('매치업이 강제 종료됐어요.', 'success')
-        navigate('/admin/matchups')
+        navigateBack()
         break
       case 'suspend': {
         const recipients = getReportedParticipantUserIdsForWarning(matchup)
@@ -214,12 +221,12 @@ export function AdminMatchupDetailPage() {
       case 'block':
         await updateMatchupStatus(matchup.id, 'blocked')
         showToast('매치업이 블라인드·차단 처리됐어요.', 'success')
-        navigate('/admin/matchups')
+        navigateBack()
         break
       case 'restore':
         await updateMatchupStatus(matchup.id, 'active')
         showToast('매치업 차단을 해제·복구했어요.', 'success')
-        navigate('/admin/matchups')
+        navigateBack()
         break
       default:
         break
@@ -237,13 +244,14 @@ export function AdminMatchupDetailPage() {
       {/* 헤더 - 모바일: 세로 스택, 데스크톱: 가로 */}
       <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-          <Link
-            to="/admin/matchups"
+          <button
+            type="button"
+            onClick={() => navigateBack()}
             className="p-2 sm:p-1.5 rounded-lg hover:bg-gray-100 text-gray-600 shrink-0 touch-manipulation"
             aria-label="목록으로"
           >
             <ChevronLeft size={24} className="sm:w-[22px] sm:h-[22px]" />
-          </Link>
+          </button>
           <h1 className="text-base sm:text-xl font-black text-[#22282E] truncate">
             매치업 상세 (ID: #{matchup.id})
           </h1>
@@ -394,12 +402,13 @@ export function AdminMatchupDetailPage() {
 
       {/* 확인 (목록으로) — 모바일: 컴팩트+터치 여유, sm+: 원래 크기 */}
       <div className="flex justify-center pb-6 sm:pb-0">
-        <Link
-          to="/admin/matchups"
+        <button
+          type="button"
+          onClick={() => navigateBack()}
           className="inline-flex w-1/2 max-w-[10rem] items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 text-center text-xs font-bold text-white transition-all hover:bg-emerald-700 active:scale-[0.98] touch-manipulation sm:w-auto sm:min-w-[13rem] sm:max-w-none sm:rounded-xl sm:px-12 sm:py-3 sm:text-sm"
         >
           확인
-        </Link>
+        </button>
       </div>
 
       <Modal

@@ -33,12 +33,12 @@ import {
 import {
   fetchSharedTendencyReport,
   getTendencyReportSharePageUrl,
-  getTendencyReportLandingUrl,
   publishTendencyReportShare,
   readTendencyShareToken,
   buildTendencyShareMiddleLine,
   extractTendencyShareId,
   getTendencyReportOgImageUrl,
+  warmTendencySharePreview,
 } from '../lib/tendencyReportShare'
 import { TendencyReportShareSheet } from '../components/tendency/TendencyReportShareSheet'
 
@@ -278,6 +278,7 @@ export function TendencyReportPage() {
         setSharePreviewUrl(publicUrl)
       })
 
+      void warmTendencySharePreview({ shareUrl: publicUrl, report })
       setShareSheetOpen(true)
     } catch {
       showToast('공유에 실패했어요', 'error')
@@ -545,7 +546,7 @@ export function TendencyReportPage() {
         open={shareSheetOpen}
         onClose={() => setShareSheetOpen(false)}
         report={report}
-        shareUrl={shareUrl || sharePreviewUrl || getTendencyReportLandingUrl()}
+        shareUrl={shareUrl || sharePreviewUrl}
         showToast={showToast}
       />
     </div>

@@ -1,7 +1,7 @@
 import { ExternalLink, Link2, X } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import { cn } from '../../lib/utils'
-import { buildTendencyShareMiddleLine } from '../../lib/tendencyReportShare'
+import { buildTendencyShareMiddleLine, warmTendencySharePreview } from '../../lib/tendencyReportShare'
 import { copyToClipboard } from '../../lib/utils'
 import { Logo } from '../ui/Logo'
 
@@ -20,7 +20,12 @@ export function TendencyReportShareSheet({
   const middleLine = buildTendencyShareMiddleLine(report)
 
   const handleCopyLink = async () => {
+    if (!shareUrl || !shareUrl.includes('/report/tendency/s/')) {
+      showToast?.('공유 링크를 아직 만들지 못했어요. 잠시 후 다시 시도해 주세요', 'error')
+      return
+    }
     try {
+      await warmTendencySharePreview({ shareUrl, report })
       await copyToClipboard(shareUrl)
       showToast?.(
         '링크를 복사했어요. 카카오톡에 붙이면 로고·성향 문구·링크 미리보기가 뜹니다 📋',

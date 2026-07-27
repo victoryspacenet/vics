@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import {
   ChevronLeft,
   MessageCircle,
@@ -30,6 +30,7 @@ import {
 } from '../../lib/userAdminStorage'
 import { getWarningHistory } from '../../lib/warnSanctionStorage'
 import { resolveAdminUsersDetailReturnTo, rememberAdminUsersDetailEntry } from '../../lib/adminUsersListNav'
+import { useNavigateBack } from '../../lib/listPageNav'
 
 const STATUS_LABEL = {
   active: '활성',
@@ -128,8 +129,8 @@ function ActivityStatBadges({ labels, badgeClassName }) {
 export function AdminUserDetailPage() {
   const { id } = useParams()
   const location = useLocation()
-  const navigate = useNavigate()
   const listReturnTo = resolveAdminUsersDetailReturnTo(id, location.state?.adminUsersReturnTo)
+  const navigateBack = useNavigateBack(listReturnTo)
 
   useEffect(() => {
     if (id && listReturnTo) rememberAdminUsersDetailEntry(id, listReturnTo)
@@ -207,7 +208,7 @@ export function AdminUserDetailPage() {
         <p className="mt-1 text-xs text-gray-500">목록에서 다시 선택해 주세요.</p>
         <button
           type="button"
-          onClick={() => navigate(listReturnTo, { replace: true })}
+          onClick={() => navigateBack()}
           className="mt-6 inline-flex items-center justify-center rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-emerald-700"
         >
           유저 목록으로
@@ -309,7 +310,7 @@ export function AdminUserDetailPage() {
           <div className="mb-4 flex items-center gap-2">
             <button
               type="button"
-              onClick={() => navigate(listReturnTo, { replace: true })}
+              onClick={() => navigateBack()}
               className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200/80 bg-white/80 px-2.5 py-1.5 text-xs font-bold text-emerald-800 shadow-sm backdrop-blur-sm hover:bg-white"
               aria-label="목록으로"
             >
@@ -811,7 +812,7 @@ export function AdminUserDetailPage() {
       <div className="flex justify-center pb-2">
         <button
           type="button"
-          onClick={() => navigate(listReturnTo, { replace: true })}
+          onClick={() => navigateBack()}
           className="inline-flex min-w-[12rem] items-center justify-center rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 px-8 py-3 text-sm font-black text-white shadow-md shadow-emerald-600/20 hover:from-emerald-700 hover:to-teal-700"
         >
           목록으로 돌아가기

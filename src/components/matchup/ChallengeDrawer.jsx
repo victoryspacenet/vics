@@ -522,7 +522,19 @@ export function ChallengeDrawer() {
         window.dispatchEvent(new CustomEvent('vics:matchup:updated', { detail: { matchupId } }))
       }
       navigate(`/matchup/${matchupId}`, { replace: true })
-      openChallengeCompleteShare({ matchupId, matchupTitle })
+      openChallengeCompleteShare({
+        matchupId,
+        matchupTitle,
+        matchup: {
+          ...challengeMatchup,
+          title: matchupTitle,
+          right_type: rightContent.type,
+          right_label: profile?.nickname || 'B',
+          is_complete: true,
+          status: 'active',
+          total_votes: 0,
+        },
+      })
     } catch (err) {
       console.error('[ChallengeDrawer]', err)
       showToast(err.message || '도전 중 오류가 발생했어요. 다시 시도해주세요.', 'error')

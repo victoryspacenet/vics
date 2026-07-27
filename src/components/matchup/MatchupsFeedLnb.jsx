@@ -10,6 +10,7 @@ export const MATCHUPS_FEED_FILTERS = [
 ]
 
 export const MATCHUPS_CAT_STORAGE_KEY = 'vics_matchups_feed_category'
+export const MATCHUPS_FILTER_STORAGE_KEY = 'vics_matchups_feed_filter'
 export const MATCHUPS_CAT_URL_PARAM = 'cat'
 export const MATCHUPS_TAG_URL_PARAM = 'tag'
 export const VALID_MATCHUPS_FEED_FILTERS = ['active', 'completed', 'mine']
@@ -41,6 +42,20 @@ export function readInitialMatchupsFeedCategory() {
     void 0
   }
   return 'all'
+}
+
+export function readInitialMatchupsFeedFilter() {
+  if (typeof window === 'undefined') return 'active'
+  try {
+    const params = new URLSearchParams(window.location.search)
+    const urlFilter = params.get('filter')
+    if (VALID_MATCHUPS_FEED_FILTERS.includes(urlFilter)) return urlFilter
+    const stored = sessionStorage.getItem(MATCHUPS_FILTER_STORAGE_KEY) || ''
+    if (VALID_MATCHUPS_FEED_FILTERS.includes(stored)) return stored
+  } catch {
+    void 0
+  }
+  return 'active'
 }
 
 export function buildMatchupsListUrl({ filter = 'active', category = 'all', tag = null } = {}) {

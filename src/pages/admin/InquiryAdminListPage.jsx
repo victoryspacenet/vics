@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, ChevronDown, Flame, FolderOpen, Search, Clock } from 'lucide-react'
+import { parseListPageParam, patchSearchParamsPage, buildListReturnTo } from '../../lib/listPageNav'
 import {
   ADMIN_STATUS,
   INQUIRY_CATEGORIES,
@@ -86,7 +87,15 @@ function formatDate(iso) {
 const PAGE_SIZE = 10
 
 export function InquiryAdminListPage() {
-  const [page, setPage] = useState(1)
+  const location = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const pageFromUrl = parseListPageParam(searchParams.get('page'))
+  const listReturnTo = useMemo(
+    () => buildListReturnTo(location.pathname, location.search),
+    [location.pathname, location.search],
+  )
+  const resetListPage = () => patchSearchParamsPage(setSearchParams, null, {}, { replace: true })
+  const goListPage = (p) => patchSearchParamsPage(setSearchParams, p, {}, { replace: false })
   const [statusFilter, setStatusFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -138,7 +147,7 @@ export function InquiryAdminListPage() {
   const loadPage = useCallback(async () => {
     setLoading(true)
     try {
-      const from = (page - 1) * PAGE_SIZE
+      const from = (pageFromUrl - 1) * PAGE_SIZE
       const to = from + PAGE_SIZE - 1
       const q = buildInquiryListQuery({
         statusFilter,
@@ -180,7 +189,7 @@ export function InquiryAdminListPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, statusFilter, categoryFilter, searchTrim, autoInquiryIds])
+  }, [pageFromUrl, statusFilter, categoryFilter, searchTrim, autoInquiryIds])
 
   useEffect(() => {
     let cancelled = false
@@ -219,11 +228,17 @@ export function InquiryAdminListPage() {
   )
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+  const page = loading && totalCount === 0
+    ? pageFromUrl
+    : Math.min(pageFromUrl, totalPages)
   const slaBreachedCount = slaBreachedDb
 
   useEffect(() => {
-    setPage(1)
-  }, [statusFilter, categoryFilter, searchTrim])
+    if (loading || !metaReady) return
+    if (pageFromUrl > totalPages) {
+      patchSearchParamsPage(setSearchParams, totalPages <= 1 ? null : totalPages, {}, { replace: true })
+    }
+  }, [pageFromUrl, totalPages, loading, metaReady, setSearchParams])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -290,9 +305,9 @@ export function InquiryAdminListPage() {
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setStatusOpen(false)} />
                 <div className="absolute top-full left-0 mt-1 py-1 bg-white rounded-lg border shadow-lg z-20 min-w-[120px]">
-                  <button onClick={() => { setStatusFilter(''); setStatusOpen(false) }} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50">전체</button>
+                  <button onClick={() => { setStatusFilter(''); resetListPage(); setStatusOpen(false) }} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50">전체</button>
                   {Object.entries(STATUS_LABELS).map(([k, v]) => (
-                    <button key={k} onClick={() => { setStatusFilter(k); setStatusOpen(false) }} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50">{v}</button>
+                    <button key={k} onClick={() => { setStatusFilter(k); resetListPage(); setStatusOpen(false) }} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50">{v}</button>
                   ))}
                 </div>
               </>
@@ -310,9 +325,9 @@ export function InquiryAdminListPage() {
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setCategoryOpen(false)} />
                 <div className="absolute top-full left-0 mt-1 py-1 bg-white rounded-lg border shadow-lg z-20 min-w-[140px] max-h-60 overflow-y-auto">
-                  <button onClick={() => { setCategoryFilter(''); setCategoryOpen(false) }} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50">전체</button>
+                  <button onClick={() => { setCategoryFilter(''); resetListPage(); setCategoryOpen(false) }} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50">전체</button>
                   {INQUIRY_CATEGORIES.map((c) => (
-                    <button key={c.id} onClick={() => { setCategoryFilter(c.id); setCategoryOpen(false) }} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50">{c.label}</button>
+                    <button key={c.id} onClick={() => { setCategoryFilter(c.id); resetListPage(); setCategoryOpen(false) }} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50">{c.label}</button>
                   ))}
                 </div>
               </>
@@ -324,7 +339,7 @@ export function InquiryAdminListPage() {
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => { setSearchQuery(e.target.value); resetListPage() }}
                 placeholder="닉네임/제목 검색..."
                 className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
               />
@@ -386,6 +401,7 @@ export function InquiryAdminListPage() {
                       <td className="px-4 py-3 text-center">
                         <Link
                           to={`/admin/inquiry/${row.id}`}
+                          state={{ adminInquiryReturnTo: listReturnTo }}
                           className="text-emerald-600 font-bold hover:underline"
                         >
                           {row.status === ADMIN_STATUS.completed ? '보기' : '답변'}
@@ -403,7 +419,7 @@ export function InquiryAdminListPage() {
         {totalPages > 1 && (
           <div className="flex items-center justify-center gap-2 mt-6">
             <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              onClick={() => goListPage(page - 1)}
               disabled={page === 1}
               className="w-9 h-9 rounded-lg border flex items-center justify-center disabled:opacity-40"
             >
@@ -415,7 +431,7 @@ export function InquiryAdminListPage() {
               return (
                 <button
                   key={p}
-                  onClick={() => setPage(p)}
+                  onClick={() => goListPage(p)}
                   className={`w-9 h-9 rounded-lg text-sm font-bold ${page === p ? 'bg-[#22282E] text-white' : 'border hover:bg-gray-50'}`}
                 >
                   {p}
@@ -423,7 +439,7 @@ export function InquiryAdminListPage() {
               )
             })}
             <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() => goListPage(page + 1)}
               disabled={page === totalPages}
               className="w-9 h-9 rounded-lg border flex items-center justify-center disabled:opacity-40"
             >

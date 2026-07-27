@@ -23,7 +23,7 @@ export function readAdminUsersListState(searchParams) {
  * @param {{ replace?: boolean }} [opts]
  */
 export function patchAdminUsersSearchParams(setSearchParams, patch, opts = {}) {
-  const replace = opts.replace !== false
+  const replace = 'replace' in opts ? opts.replace : !Object.prototype.hasOwnProperty.call(patch, 'page')
   setSearchParams(
     (prev) => {
       const next = new URLSearchParams(prev)

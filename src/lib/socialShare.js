@@ -7,9 +7,13 @@
  * - Capacitor 앱: @capacitor/share (SDK 금지)
  * - 카카오 콘솔: JavaScript SDK 도메인에 http://localhost:5173 등록 필요
  */
+import { buildMatchupShareCopy } from './matchupShareCopy'
 import { copyToClipboard } from './utils'
 import { getSiteOrigin } from './siteApiBase'
 import { fetchMatchupShareBlob } from './matchupShareCompositeBrowser'
+
+/** matchupId → { promise, blob } — 인스타 공유 시 클릭 직후 blob 확보( iOS user gesture ) */
+const matchupShareBlobCache = new Map()
 
 function recordShareSuccess(kind = 'matchup') {
   void import('./userShareEvent').then(({ logUserShareEvent }) => logUserShareEvent(kind))
@@ -313,8 +317,15 @@ export async function warmMatchupSharePreview({ matchupId, matchup } = {}) {
   await Promise.allSettled(tasks)
 }
 
-/** @param {{ matchupId: string, matchup?: object, title?: string, showToast?: (msg: string, type?: string) => void }} opts */
-export async function copyMatchupShareLink({ matchupId, matchup, title, showToast }) {
+/** 링크 복사·카카오 텍스트 공유용 — 제목 + 설명 + URL */
+export function buildMatchupShareClipText({ matchup, url } = {}) {
+  if (!url || !matchup) return url || ''
+  const { clipHeadline, clipDesc } = buildMatchupShareCopy(matchup)
+  return `${clipHeadline}\n${clipDesc}\n${url}`
+}
+
+/** @param {{ matchupId: string, matchup?: object, showToast?: (msg: string, type?: string) => void }} opts */
+export async function copyMatchupShareLink({ matchupId, matchup, showToast }) {
   const url = getMatchupSharePageUrl(matchupId)
   if (!url) {
     showToast?.('공유 링크를 만들 수 없어요', 'error')
@@ -322,9 +333,9 @@ export async function copyMatchupShareLink({ matchupId, matchup, title, showToas
   }
   try {
     await warmMatchupSharePreview({ matchupId, matchup })
-    const clipText = title ? `${String(title).trim()}\n${url}` : url
+    const clipText = buildMatchupShareClipText({ matchup, url })
     await copyToClipboard(clipText)
-    showToast?.('링크를 복사했어요. 카카오톡에 붙여넣으면 VS 썸네일 미리보기가 뜹니다', 'success')
+    showToast?.('링크를 복사했어요. 카카오톡에 붙이면 제목·설명·VS 썸네일 미리보기가 뜹니다', 'success')
     return true
   } catch {
     showToast?.('복사에 실패했어요. 주소창의 링크를 직접 복사해 주세요', 'error')
@@ -382,6 +393,49 @@ async function resolveShareBlob({ imageUrl, matchup, safeMediaUrlFn }) {
     safeMediaUrlFn,
     baseOrigin: getPublicShareOrigin(),
   })
+}
+
+/**
+ * VS 합성 JPEG 미리 생성 — 도전자 모집·인스타 공유 모달 열릴 때 호출
+ * @returns {Promise<Blob|null>}
+ */
+export function warmMatchupShareBlob({ matchup, safeMediaUrlFn, imageUrl } = {}) {
+  if (!matchup?.id) return Promise.resolve(null)
+  const key = String(matchup.id)
+  const existing = matchupShareBlobCache.get(key)
+  if (existing?.promise) return existing.promise
+
+  const resolvedImageUrl = imageUrl ?? getMatchupShareImageUrl(matchup, safeMediaUrlFn)
+  const ctx = { imageUrl: resolvedImageUrl, matchup, safeMediaUrlFn }
+
+  const promise = resolveShareBlob(ctx)
+    .then((blob) => {
+      if (!blob || blob.size < 500) throw new Error('invalid share blob')
+      matchupShareBlobCache.set(key, { promise: Promise.resolve(blob), blob })
+      return blob
+    })
+    .catch((err) => {
+      matchupShareBlobCache.delete(key)
+      throw err
+    })
+
+  matchupShareBlobCache.set(key, { promise, blob: null })
+  return promise
+}
+
+export function isMatchupShareBlobReady(matchupId) {
+  if (!matchupId) return false
+  return Boolean(matchupShareBlobCache.get(String(matchupId))?.blob)
+}
+
+async function resolveShareBlobCached(ctx) {
+  const id = ctx.matchup?.id
+  if (id) {
+    const entry = matchupShareBlobCache.get(String(id))
+    if (entry?.blob) return entry.blob
+    if (entry?.promise) return entry.promise
+  }
+  return warmMatchupShareBlob(ctx)
 }
 
 async function blobToShareFile(blob) {
@@ -478,7 +532,25 @@ export async function saveImageBlobToMobileWebGallery(blob, { fileName = 'vics-m
     link.click()
     document.body.removeChild(link)
     return { ok: true, method: 'download' }
+  } catch {
+    /* data URI download blocked — object URL fallback (Android 등) */
+  }
+
+  let objectUrl = ''
+  try {
+    objectUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = fileName.endsWith('.jpg') ? fileName : `${fileName}.jpg`
+    link.rel = 'noopener'
+    link.style.display = 'none'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 5000)
+    return { ok: true, method: 'object-url-download' }
   } catch (e) {
+    if (objectUrl) URL.revokeObjectURL(objectUrl)
     return { ok: false, reason: e?.message || 'download-failed' }
   }
 }
@@ -498,25 +570,26 @@ async function shareViaInstagramGalleryFlow({
   copyLink,
   preferStory = true,
 }) {
+  let blob
+  try {
+    blob = await resolveShareBlobCached(shareImageCtx)
+  } catch (e) {
+    console.warn('[socialShare] instagram image resolve failed', e)
+    try {
+      await copyToClipboard(url)
+      notify('링크는 복사됐어요. 이미지 생성에 실패했어요 — 다시 시도해 주세요 📋', 'info')
+    } catch {
+      await copyLink('이미지 생성에 실패했어요. 링크만 복사했습니다 📋')
+    }
+    return
+  }
+
   let linkCopied = false
   try {
     await copyToClipboard(url)
     linkCopied = true
   } catch {
     void 0
-  }
-
-  let blob
-  try {
-    blob = await resolveShareBlob(shareImageCtx)
-  } catch (e) {
-    console.warn('[socialShare] instagram image resolve failed', e)
-    if (linkCopied) {
-      notify('링크는 복사됐어요. 이미지 생성에 실패했어요 — 다시 시도해 주세요 📋', 'info')
-    } else {
-      await copyLink('이미지 생성에 실패했어요. 링크만 복사했습니다 📋')
-    }
-    return
   }
 
   const fileName = 'vics-matchup-vs'
@@ -564,7 +637,8 @@ async function shareViaInstagramGalleryFlow({
     }
 
     if (isMobileShareDevice()) {
-      await new Promise((resolve) => setTimeout(resolve, 700))
+      const postSaveDelayMs = isIosDevice() ? 1200 : 700
+      await new Promise((resolve) => setTimeout(resolve, postSaveDelayMs))
       void tryOpenInstagramApp({ preferStory })
     }
     recordShareSuccess('matchup')
@@ -822,14 +896,19 @@ export async function shareMatchupToSns(platform, opts) {
   const { title, url: rawUrl, imageUrl, matchup, safeMediaUrlFn, showToast } = opts
   const url = resolvePublicShareUrl(rawUrl)
   const enc = encodeURIComponent
-  const safeTitle = (title || 'VICS 매치업').trim()
+  const shareCopy = matchup ? buildMatchupShareCopy(matchup, { title }) : null
+  const safeTitle = (shareCopy?.ogTitle || title || 'VICS 매치업').trim()
+  const shareDescription = (shareCopy?.ogDescription || opts.description || '').trim()
   const notify = (msg, type = 'success') => showToast?.(msg, type)
   const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
   const shareImageCtx = { imageUrl, matchup, safeMediaUrlFn }
 
   const tryWebShare = async () => {
     if (!navigator.share) return false
-    const payload = { title: safeTitle, text: `${safeTitle}\n${url}`, url }
+    const text = shareCopy
+      ? buildMatchupShareClipText({ matchup, url })
+      : `${safeTitle}\n${url}`
+    const payload = { title: safeTitle, text, url }
     try {
       if (navigator.canShare && !navigator.canShare(payload)) return false
       await navigator.share(payload)
@@ -844,7 +923,8 @@ export async function shareMatchupToSns(platform, opts) {
 
   const copyLink = async (hint) => {
     try {
-      await copyToClipboard(url)
+      const clipText = matchup ? buildMatchupShareClipText({ matchup, url }) : url
+      await copyToClipboard(clipText)
       notify(hint || '링크를 복사했어요')
       recordShareSuccess('matchup')
     } catch {
@@ -866,6 +946,7 @@ export async function shareMatchupToSns(platform, opts) {
 
       const trySdk = () => runKakaoFeedSdkShare({
         safeTitle,
+        description: shareDescription,
         url,
         imageUrl,
         buttonTitle: '매치업 보기',

@@ -1,9 +1,25 @@
 /**
  * Vercel Edge Middleware - 동적 OG 태그
- * 링크 공유 시 카카오톡, 페이스북, 트위터 등에서 "누가 누구와 대결 중!" 문구와 썸네일 표시
+ * /matchup/:id · /matchup/share/:id — Netlify matchup-og와 동일한 상태별 문구·메타
  */
+import { buildMatchupShareCopy } from './src/lib/matchupShareCopy.js'
 
-const CRAWLER_REGEX = /bot|crawler|spider|crawling|facebookexternalhit|kakaotalk|kakaostory|twitterbot|linkedinbot|slurp|whatsapp|telegram|line|pinterest|duckduckbot|googlebot|bingbot|yandexbot/i
+const CRAWLER_REGEX = /bot|crawler|spider|crawling|facebookexternalhit|twitterbot|linkedinbot|slurp|whatsapp|telegram|pinterest|duckduckbot|googlebot|bingbot|yandexbot|slackbot|discordbot|kakaotalkbot|kakaostorybot|kakaotalk-scrap/i
+
+function isOgScraperUserAgent(ua) {
+  const s = String(ua || '')
+  if (!s) return false
+
+  if (/kakaotalk|kakaostory/i.test(s) && /(?:iPhone|iPad|iPod|Android|Mobile)/i.test(s)) {
+    if (!/(?:bot|scrap|crawler)/i.test(s)) return false
+  }
+
+  if (/\bLine\//i.test(s) && /(?:iPhone|iPad|iPod|Android|Mobile)/i.test(s)) {
+    if (!/(?:bot|scrap|crawler)/i.test(s)) return false
+  }
+
+  return CRAWLER_REGEX.test(s)
+}
 
 export const config = {
   matcher: ['/matchup/:id*'],
@@ -14,7 +30,7 @@ export default async function middleware(request) {
   const pathMatch = url.pathname.match(/^\/matchup\/(?:share\/)?([^/]+)$/)
   if (!pathMatch) return passThrough(request)
 
-  const isCrawler = CRAWLER_REGEX.test(request.headers.get('user-agent') || '')
+  const isCrawler = isOgScraperUserAgent(request.headers.get('user-agent') || '')
   if (!isCrawler) return passThrough(request)
 
   const id = pathMatch[1]
@@ -24,12 +40,16 @@ export default async function middleware(request) {
     const matchup = await fetchMatchup(id)
     if (!matchup) return passThrough(request)
 
-    const html = buildOGHtml(matchup, buildSharePageUrl(url.origin, id, url.pathname))
+    const baseUrl = url.origin.replace(/\/+$/, '')
+    const requestUrl = buildSharePageUrl(baseUrl, id, url.pathname)
+    const meta = getMatchupOgMeta(matchup, baseUrl, requestUrl)
+    const html = buildOgScraperHtml(meta)
+
     return new Response(html, {
       status: 200,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'public, max-age=300, s-maxage=300',
+        'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
       },
     })
   } catch {
@@ -45,10 +65,10 @@ function passThrough(request) {
   })
 }
 
-function isValidSupabaseUrl(url) {
-  if (!url) return false
+function isValidSupabaseUrl(supabaseUrl) {
+  if (!supabaseUrl) return false
   try {
-    const parsed = new URL(url)
+    const parsed = new URL(supabaseUrl)
     const isLocalhost = ['localhost', '127.0.0.1'].includes(parsed.hostname)
     return isLocalhost || parsed.protocol === 'https:'
   } catch {
@@ -61,15 +81,35 @@ async function fetchMatchup(id) {
   const anonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY
   if (!supabaseUrl || !anonKey || !isValidSupabaseUrl(supabaseUrl)) return null
 
+  const select = [
+    'id',
+    'title',
+    'status',
+    'left_label',
+    'right_label',
+    'left_type',
+    'right_type',
+    'left_url',
+    'right_url',
+    'left_thumbnail_url',
+    'right_thumbnail_url',
+    'left_text',
+    'right_text',
+    'is_complete',
+    'expires_at',
+    'total_votes',
+    'challenger_forfeit_at',
+  ].join(',')
+
   const res = await fetch(
-    `${supabaseUrl}/rest/v1/matchups?id=eq.${id}&select=id,title,left_label,right_label,left_thumbnail_url,right_thumbnail_url,left_url,right_url,left_type,right_type,left_text,right_text,is_complete`,
+    `${supabaseUrl}/rest/v1/matchups?id=eq.${encodeURIComponent(id)}&select=${select}`,
     {
       headers: {
         apikey: anonKey,
         Authorization: `Bearer ${anonKey}`,
-        'Accept': 'application/json',
+        Accept: 'application/json',
       },
-    }
+    },
   )
   if (!res.ok) return null
 
@@ -77,59 +117,64 @@ async function fetchMatchup(id) {
   return Array.isArray(data) && data.length > 0 ? data[0] : null
 }
 
-function buildOGHtml(matchup, canonicalUrl) {
-  const leftLabel = matchup.left_label || 'A'
-  const rightLabel = matchup.right_label || 'B'
-  const title = `${leftLabel} vs ${rightLabel} 대결 중!`
-  const description = `누가 누구와 대결 중! ${leftLabel}와 ${rightLabel}, VICS에서 투표해보세요`
+function escapeMetaText(value, maxLen = 200) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLen)
+}
 
-  const imageUrl = getOgImageUrl(matchup, canonicalUrl)
-  const escapedTitle = escapeHtml(title)
-  const escapedDesc = escapeHtml(description)
-  const escapedImage = escapeHtml(imageUrl)
-  const escapedUrl = escapeHtml(canonicalUrl)
+function getMatchupOgMeta(matchup, baseUrl, requestUrl) {
+  const copy = buildMatchupShareCopy(matchup)
+  const ogTitle = escapeMetaText(copy.ogTitle, 120)
+  const ogDescription = escapeMetaText(copy.ogDescription, 200)
+  const ogImage = matchup?.id
+    ? `${String(baseUrl).replace(/\/+$/, '')}/api/matchup-share-image?matchupId=${encodeURIComponent(matchup.id)}`
+    : `${String(baseUrl).replace(/\/+$/, '')}/api/site-og-image`
 
-  return `<!DOCTYPE html>
+  return {
+    title: `${ogTitle} - VICS`,
+    ogTitle,
+    ogDescription,
+    ogImage,
+    requestUrl,
+  }
+}
+
+function buildOgScraperHtml(meta) {
+  const pageTitle = escapeHtml(meta.title)
+  const ogTitle = escapeHtml(meta.ogTitle)
+  const d = escapeHtml(meta.ogDescription)
+  const img = escapeHtml(meta.ogImage)
+  const url = escapeHtml(meta.requestUrl)
+
+  return `<!doctype html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>${escapedTitle}</title>
-  <meta name="description" content="${escapedDesc}" />
-  <!-- Open Graph -->
+  <meta name="description" content="${d}" />
+  <title>${pageTitle}</title>
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="${escapedTitle}" />
-  <meta property="og:description" content="${escapedDesc}" />
-  <meta property="og:image" content="${escapedImage}" />
-  <meta property="og:image:secure_url" content="${escapedImage}" />
+  <meta property="og:url" content="${url}" />
+  <meta property="og:title" content="${ogTitle}" />
+  <meta property="og:description" content="${d}" />
+  <meta property="og:image" content="${img}" />
+  <meta property="og:image:secure_url" content="${img}" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
-  <meta property="og:url" content="${escapedUrl}" />
   <meta property="og:site_name" content="VICS" />
   <meta property="og:locale" content="ko_KR" />
-  <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="${escapedTitle}" />
-  <meta name="twitter:description" content="${escapedDesc}" />
-  <meta name="twitter:image" content="${escapedImage}" />
+  <meta name="twitter:title" content="${ogTitle}" />
+  <meta name="twitter:description" content="${d}" />
+  <meta name="twitter:image" content="${img}" />
 </head>
 <body>
-  <p>${escapedTitle}</p>
-  <p><a href="${escapedUrl}">VICS에서 투표하기</a></p>
+  <p>${ogTitle}</p>
+  <p><a href="${url}">VICS에서 보기</a></p>
 </body>
 </html>`
-}
-
-function getOgImageUrl(matchup, canonicalUrl) {
-  try {
-    const origin = new URL(canonicalUrl).origin
-    if (matchup?.id) {
-      return `${origin}/api/matchup-share-image?matchupId=${encodeURIComponent(matchup.id)}`
-    }
-    return `${origin}/api/site-og-image`
-  } catch {
-    return '/api/site-og-image'
-  }
 }
 
 function buildSharePageUrl(origin, id, pathname) {
@@ -141,7 +186,7 @@ function buildSharePageUrl(origin, id, pathname) {
 
 function escapeHtml(str) {
   if (!str) return ''
-  return str
+  return String(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')

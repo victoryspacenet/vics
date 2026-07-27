@@ -9,6 +9,7 @@ import {
   pickCameraPhotoViaInput,
   requestWebCameraStream,
   stopWebCameraStream,
+  waitForVideoFrameReady,
 } from '../../lib/webCameraCapture'
 
 function looksLikeUserDismissed(error) {
@@ -51,6 +52,7 @@ export function SmartphoneCameraCapture({
 
   const [previewUrl, setPreviewUrl] = useState(null)
   const [cameraLive, setCameraLive] = useState(false)
+  const [videoReady, setVideoReady] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
@@ -65,7 +67,27 @@ export function SmartphoneCameraCapture({
     stopWebCameraStream(streamRef.current)
     streamRef.current = null
     setCameraLive(false)
+    setVideoReady(false)
     if (videoRef.current) videoRef.current.srcObject = null
+  }, [])
+
+  const bindStreamToVideo = useCallback(async (stream) => {
+    const video = videoRef.current
+    if (!video || !stream) return false
+    video.srcObject = stream
+    try {
+      await video.play()
+    } catch {
+      // autoplay 정책 등 — loadedmetadata 이벤트로 재시도
+    }
+    try {
+      await waitForVideoFrameReady(video)
+      setVideoReady(true)
+      return true
+    } catch {
+      setVideoReady(false)
+      return false
+    }
   }, [])
 
   const clear = useCallback(() => {
@@ -90,15 +112,15 @@ export function SmartphoneCameraCapture({
     }
     setBusy(true)
     setError(null)
+    setVideoReady(false)
     try {
       const stream = await requestWebCameraStream('environment')
       streamRef.current = stream
-      const video = videoRef.current
-      if (video) {
-        video.srcObject = stream
-        await video.play()
-      }
       setCameraLive(true)
+      const bound = await bindStreamToVideo(stream)
+      if (!bound) {
+        throw new Error('카메라 화면을 불러오지 못했어요.')
+      }
       return true
     } catch (err) {
       const msg = err?.message ? String(err.message) : '카메라 권한이 필요해요.'
@@ -109,11 +131,11 @@ export function SmartphoneCameraCapture({
     } finally {
       setBusy(false)
     }
-  }, [onError, stopStream])
+  }, [bindStreamToVideo, onError, stopStream])
 
   const captureWebPhoto = useCallback(async () => {
     const video = videoRef.current
-    if (!video || !cameraLive) return
+    if (!video || !cameraLive || !videoReady) return
     setBusy(true)
     setError(null)
     try {
@@ -128,7 +150,7 @@ export function SmartphoneCameraCapture({
     } finally {
       setBusy(false)
     }
-  }, [cameraLive, emitCapture, onError, quality, stopStream])
+  }, [cameraLive, emitCapture, onError, quality, stopStream, videoReady])
 
   const openWebCameraFallback = useCallback(async () => {
     setBusy(true)
@@ -231,6 +253,7 @@ export function SmartphoneCameraCapture({
         return
       }
       setBusy(true)
+      setVideoReady(false)
       try {
         const stream = await requestWebCameraStream('environment')
         if (cancelled) {
@@ -238,12 +261,11 @@ export function SmartphoneCameraCapture({
           return
         }
         streamRef.current = stream
-        const video = videoRef.current
-        if (video) {
-          video.srcObject = stream
-          await video.play()
-        }
         setCameraLive(true)
+        const bound = await bindStreamToVideo(stream)
+        if (!bound && !cancelled) {
+          throw new Error('카메라 화면을 불러오지 못했어요.')
+        }
       } catch (err) {
         if (!cancelled) {
           const msg = err?.message ? String(err.message) : '카메라 권한이 필요해요.'
@@ -269,13 +291,15 @@ export function SmartphoneCameraCapture({
     : previewUrl
       ? (busy ? '준비 중…' : '다시 찍기')
       : cameraLive
-        ? (busy ? '촬영 중…' : '촬영')
+        ? (busy ? '촬영 중…' : videoReady ? '촬영' : '카메라 준비 중…')
         : (busy ? '카메라 준비 중…' : '카메라 열기')
+
+  const primaryDisabled = busy || (cameraLive && !videoReady && !previewUrl)
 
   return (
     <div className={cn('flex flex-col gap-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm max-lg:p-5', className)}>
       <div className="flex flex-wrap gap-3">
-        <Button type="button" variant="primary" size="md" disabled={busy} onClick={handlePrimaryAction}>
+        <Button type="button" variant="primary" size="md" disabled={primaryDisabled} onClick={handlePrimaryAction}>
           {primaryLabel}
         </Button>
         {!useNativeCamera && !previewUrl && !cameraLive ? (
@@ -308,8 +332,8 @@ export function SmartphoneCameraCapture({
             미리보기 · 업로드 전 화면에서 한 번 더 확인해 주세요
           </figcaption>
         </figure>
-      ) : !useNativeCamera && cameraLive ? (
-        <figure className="overflow-hidden rounded-xl border border-gray-100 bg-black">
+      ) : !useNativeCamera ? (
+        <figure className={cn('overflow-hidden rounded-xl border border-gray-100 bg-black', !cameraLive && 'sr-only')}>
           <video
             ref={videoRef}
             playsInline
@@ -317,9 +341,11 @@ export function SmartphoneCameraCapture({
             autoPlay
             className="mx-auto max-h-[min(70vh,520px)] w-full object-cover aspect-square"
           />
-          <figcaption className="border-t border-gray-100 bg-gray-50 px-3 py-2 text-center text-xs text-gray-500">
-            화면을 맞춘 뒤 「촬영」을 눌러 주세요
-          </figcaption>
+          {cameraLive ? (
+            <figcaption className="border-t border-gray-100 bg-gray-50 px-3 py-2 text-center text-xs text-gray-500">
+              {videoReady ? '화면을 맞춘 뒤 「촬영」을 눌러 주세요' : '카메라 화면을 불러오는 중…'}
+            </figcaption>
+          ) : null}
         </figure>
       ) : (
         <p className="rounded-xl bg-gray-50 px-3 py-6 text-center text-sm text-gray-500">

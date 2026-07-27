@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, ChevronDown, FileText, Send, Loader2 } from 'lucide-react'
+import { readListReturnToFromState, useNavigateBack } from '../../lib/listPageNav'
 import {
   getAdminInquiryById,
   updateAdminInquiry,
@@ -29,6 +30,9 @@ function formatFullDate(iso) {
 
 export function InquiryAdminDetailPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const listReturnTo = readListReturnToFromState(location.state) || '/admin/inquiry'
+  const navigateBack = useNavigateBack(listReturnTo)
   const { id } = useParams()
   const { showToast } = useUIStore()
 
@@ -223,9 +227,13 @@ export function InquiryAdminDetailPage() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <p className="text-gray-500 mb-4">문의를 찾을 수 없어요.</p>
-          <Link to="/admin/inquiry" className="text-emerald-600 font-bold hover:underline">
+          <button
+            type="button"
+            onClick={() => navigateBack()}
+            className="text-emerald-600 font-bold hover:underline"
+          >
             목록으로
-          </Link>
+          </button>
         </div>
       </div>
     )
@@ -236,13 +244,14 @@ export function InquiryAdminDetailPage() {
       <div className="max-w-3xl mx-auto px-4 py-6">
         {/* 헤더 */}
         <div className="flex items-center justify-between mb-6">
-          <Link
-            to="/admin/inquiry"
+          <button
+            type="button"
+            onClick={() => navigateBack()}
             className="flex items-center gap-2 text-sm text-gray-600 hover:text-[#22282E]"
           >
             <ArrowLeft size={18} />
             목록으로 돌아가기
-          </Link>
+          </button>
           <span className={`px-3 py-1.5 rounded-lg text-sm font-bold ${
             inquiry.status === ADMIN_STATUS.pending ? 'bg-blue-50 text-blue-600' : 'bg-emerald-50 text-emerald-600'
           }`}>
