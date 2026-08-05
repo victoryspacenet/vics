@@ -3,6 +3,7 @@
   "private": true,
   "description": "Netlify Functions 전용 의존성 (브라우저 번들과 분리)",
   "dependencies": {
+    "@fontsource/noto-sans-kr": "^5.2.5",
     "firebase-admin": "^13.0.2",
     "jimp": "^0.22.12",
     "sharp": "^0.34.5"

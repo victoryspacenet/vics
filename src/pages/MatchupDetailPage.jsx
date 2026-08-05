@@ -19,7 +19,7 @@ import { Avatar } from '../components/ui/Avatar'
 import { formatDate, formatNumber, calcPercent, cn } from '../lib/utils'
 import { formatMatchupRegisteredAt } from '../lib/matchupRegisteredAt'
 import { sanitizeText, safeMediaUrl, reportSuspiciousInputIfNeeded } from '../lib/sanitize'
-import { captureShareCardJpegFile } from '../lib/shareCardCapture'
+import { composeVoteResultStoryImage } from '../lib/voteResultStoryComposite'
 import { getTier, tierAtLeast } from '../lib/tiers'
 import { VsBadge } from '../components/ui/VsBadge'
 import { UserProfileLink } from '../components/ui/UserProfileLink'
@@ -40,9 +40,11 @@ import {
   saveImageBlobToNativeGallery,
   saveImageBlobToMobileWebGallery,
   warmMatchupShareBlob,
+  warmMatchupSharePreview,
   isMatchupShareBlobReady,
 } from '../lib/socialShare'
-import { buildMatchupShareCopy } from '../lib/matchupShareCopy'
+import { buildMatchupShareCopy, getMatchupShareTextPreview } from '../lib/matchupShareCopy'
+import { trackGoogleAdsMatchupPageView } from '../lib/googleAdsConversion'
 import { fandomTierHasGoldCommentAura, fandomTierFromClaps } from '../lib/fandomTiers'
 import { FANDOM_POINTS_PER_CLAP } from '../lib/fandomPoints'
 import { FandomBronzeStarBadge } from '../components/fandom/FandomBronzeStarBadge'
@@ -455,6 +457,9 @@ export function MatchupDetailPage() {
           console.warn('[MatchupDetail] instagram share preload failed', e)
         }
       }
+      if (matchup.right_type == null) {
+        await warmMatchupSharePreview({ matchupId: matchup.id, matchup })
+      }
       await shareMatchupToSns(platformId, {
         title: matchup.title,
         description: matchup.description || '',
@@ -680,6 +685,12 @@ export function MatchupDetailPage() {
     window.addEventListener('vics:matchup:updated', onMatchupUpdated)
     return () => window.removeEventListener('vics:matchup:updated', onMatchupUpdated)
   }, [id])
+
+  useEffect(() => {
+    if (!id) return
+    trackGoogleAdsMatchupPageView(id)
+  }, [id])
+
   const fetchUserVote = async () => {
     const { data } = await supabase.from('votes').select('side').eq('user_id', user.id).eq('matchup_id', id).maybeSingle()
     if (data) { setUserVote(data.side); setVoteLocked(true) }
@@ -1079,7 +1090,8 @@ export function MatchupDetailPage() {
 
   const leftLabel = matchup.left_label || 'A'
   const rightLabel = matchup.right_label || 'B'
-  const { ogTitle, ogDescription: ogDesc } = buildMatchupShareCopy(matchup)
+  const { ogTitle, ogDescription: ogDesc, clipHeadline, clipDesc } = buildMatchupShareCopy(matchup)
+  const recruitShareTextPreview = getMatchupShareTextPreview(matchup)
   const ogImage = getMatchupShareImageUrl(matchup, safeMediaUrl)
   const ogUrl = matchup?.id ? getMatchupSharePageUrl(matchup.id) : ''
 
@@ -1235,7 +1247,26 @@ export function MatchupDetailPage() {
                 <X size={18} />
               </button>
             </div>
-            <p className="text-xs font-bold text-emerald-800/80 mb-4 truncate px-1">{matchup.title}</p>
+            <p className="text-xs font-bold text-emerald-800/80 mb-3 truncate px-1">{matchup.title}</p>
+            <div className="mb-4 rounded-xl border border-emerald-200/60 bg-white/80 px-3 py-2.5 text-left">
+              <p className="text-[10px] font-black uppercase tracking-wide text-emerald-600/70 mb-1.5">
+                링크 복사 시 카톡에 붙는 내용
+              </p>
+              <p className="text-xs font-bold text-emerald-950 leading-snug">
+                {clipHeadline}
+              </p>
+              <p className="text-[11px] text-gray-600 mt-1 leading-relaxed">
+                {clipDesc}
+              </p>
+              {recruitShareTextPreview ? (
+                <p className="text-[11px] text-gray-700 mt-1.5 leading-relaxed whitespace-pre-wrap">
+                  {recruitShareTextPreview}
+                </p>
+              ) : null}
+            </div>
+            <p className="text-[11px] text-gray-500 mb-4 leading-relaxed px-0.5">
+              링크 복사 후 카카오톡에 붙이면 위 문구와 VS 썸네일 미리보기가 함께 표시됩니다.
+            </p>
             <div className="grid grid-cols-2 gap-2.5">
               {SNS_LIST.map((sns) => {
                 const instagramWaiting = sns.id === 'instagram' && !recruitShareImageReady
@@ -2503,14 +2534,20 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
   }
   const handleNextMatchup = () => { setVisible(false); setTimeout(() => navigate('/matchups'), 300) }
 
-  const ensureShareFile = useCallback(async () => {
-    if (shareFileRef.current) return shareFileRef.current
-    if (shareExportPromiseRef.current) return shareExportPromiseRef.current
-    if (!cardRef.current) throw new Error('story card not ready')
+  const ensureShareFile = useCallback(async ({ force = false } = {}) => {
+    if (!force && shareFileRef.current) return shareFileRef.current
+    if (!force && shareExportPromiseRef.current) return shareExportPromiseRef.current
 
-    shareExportPromiseRef.current = captureShareCardJpegFile(cardRef.current, {
+    shareExportPromiseRef.current = composeVoteResultStoryImage({
+      matchup,
+      votedSide,
+      leftPct,
+      rightPct,
+      aiComment,
+      hashTag,
+      winSide,
+      isDraw,
       filename: `VICS-matchup-${matchup.id || 'share'}.jpg`,
-      backgroundColor: '#1e1b4b',
     })
       .then((result) => {
         shareFileRef.current = result
@@ -2521,17 +2558,15 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
       })
 
     return shareExportPromiseRef.current
-  }, [matchup.id])
+  }, [matchup, votedSide, leftPct, rightPct, aiComment, hashTag, winSide, isDraw])
 
   const handleShareStory = async () => {
     setExporting(true)
     try {
-      if (!animated) {
-        setAnimated(true)
-        await new Promise((resolve) => setTimeout(resolve, 400))
-      }
+      shareFileRef.current = null
+      shareExportPromiseRef.current = null
 
-      const { file, dataUrl, fileName } = await ensureShareFile()
+      const { file, dataUrl, fileName } = await ensureShareFile({ force: true })
 
       if (await isNativeGallerySaveContext()) {
         const saved = await saveImageBlobToNativeGallery(file, { fileName: 'vics-vote-story', useAppAlbum: false })
@@ -2550,12 +2585,10 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
         if (saved.ok) {
           showToast(
             /iPhone|iPad|iPod/i.test(navigator.userAgent)
-              ? '「이미지 저장」을 선택한 뒤, 인스타 스토리·게시물에서 사진을 고르세요 📸'
-              : '스토리 카드 이미지를 저장했어요. 인스타 스토리·게시물에서 방금 저장한 사진을 선택해 올려 주세요 📸',
+              ? '「이미지 저장」을 선택한 뒤, 인스타 앱을 열어 스토리·게시물에 올려 주세요 📸'
+              : '공유 창에서 이미지를 저장한 뒤, 인스타 앱을 직접 열어 스토리·게시물에 올려 주세요 📸',
             'info',
           )
-          await new Promise((resolve) => setTimeout(resolve, 700))
-          void tryOpenInstagramApp({ preferStory: true })
           return
         }
       }
@@ -2567,14 +2600,10 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
 
       showToast(
         isMobileShareDevice()
-          ? '스토리 카드 이미지를 저장했어요. 인스타 앱 → 스토리 → 갤러리에서 선택해 올려 주세요.'
+          ? '스토리 카드 이미지를 저장했어요. 인스타 앱을 열어 스토리·게시물에 올려 주세요.'
           : '이미지를 다운로드했어요. 폰으로 옮긴 뒤 인스타 스토리에 올려 주세요.',
         'info',
       )
-      if (isMobileShareDevice()) {
-        await new Promise((resolve) => setTimeout(resolve, 700))
-        void tryOpenInstagramApp({ preferStory: true })
-      }
     } catch (err) {
       console.error('[VoteResultModal] story share:', err)
       showToast('공유 이미지를 만들지 못했어요. 위 카드를 스크린샷 후 스토리에 올려 주세요.', 'error')
@@ -2591,17 +2620,16 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
     })
   }, [])
 
-  /** 모달 표시 후 백그라운드에서 공유 이미지 미리 생성 (버튼 문구는 바꾸지 않음) */
+  /** 모달 표시 후 백그라운드에서 공유 이미지 미리 생성 */
   useEffect(() => {
-    if (!animated || !cardRef.current) return undefined
+    if (!matchup?.id) return undefined
     const t = window.setTimeout(() => {
-      shareFileRef.current = null
-      void ensureShareFile().catch((e) => {
+      void ensureShareFile({ force: true }).catch((e) => {
         console.warn('[VoteResultModal] share preload failed', e)
       })
-    }, 700)
+    }, 400)
     return () => window.clearTimeout(t)
-  }, [animated, ensureShareFile])
+  }, [matchup?.id, ensureShareFile])
 
   return (
     <div
@@ -2841,8 +2869,11 @@ function StoryCardSide({ type, url, text, label, pct, isDraw, isWin, isVoted, an
           </div>
         )}
 
-        {/* % 수치 */}
+        {/* % 수치 + 라벨 */}
         <div className="absolute bottom-0 left-0 right-0 px-3 pb-2.5">
+          <div className={`text-[10px] font-bold truncate mb-0.5 ${dimmed ? 'text-white/50' : 'text-white/90'}`}>
+            {label}
+          </div>
           <div className={`text-3xl font-black leading-none ${dimmed ? 'text-white/50' : 'text-white'}`}>
             {pct}%
           </div>

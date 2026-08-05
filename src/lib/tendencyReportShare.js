@@ -1,5 +1,7 @@
 import { supabase } from './supabase'
 import { resolvePublicShareUrl } from './socialShare'
+import { buildShareClipText, SHARE_CLIP_KAKAO_TOAST } from './shareClipText'
+import { copyToClipboard } from './utils'
 import { TENDENCY_TYPES } from './tendencyReportAnalysis'
 
 function parseRpcJson(raw) {
@@ -23,12 +25,28 @@ export function buildTendencyShareMiddleLine(report) {
 }
 
 export function buildTendencyShareText(report, shareUrl) {
-  return [
-    '나의 Vics 성향 리포트 📊',
-    buildTendencyShareMiddleLine(report),
-    '',
-    shareUrl,
-  ].join('\n')
+  return buildShareClipText({
+    headline: '나의 Vics 성향 리포트 📊',
+    description: buildTendencyShareMiddleLine(report),
+    url: shareUrl,
+  })
+}
+
+/** 성향 리포트 — 링크 복사 (매치업 상세와 동일 클립 형식) */
+export async function copyTendencyShareLink({ report, shareUrl, showToast }) {
+  if (!shareUrl || !shareUrl.includes('/report/tendency/s/')) {
+    showToast?.('공유 링크를 아직 만들지 못했어요. 잠시 후 다시 시도해 주세요', 'error')
+    return false
+  }
+  try {
+    await warmTendencySharePreview({ shareUrl, report })
+    await copyToClipboard(buildTendencyShareText(report, shareUrl))
+    showToast?.(SHARE_CLIP_KAKAO_TOAST, 'success')
+    return true
+  } catch {
+    showToast?.('복사에 실패했어요. 아래 링크를 길게 눌러 복사해 주세요', 'error')
+    return false
+  }
 }
 
 /** 공유 URL에서 shareId 추출 */

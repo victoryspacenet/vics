@@ -4,6 +4,7 @@ import { ArrowLeft, Bell, ChevronLeft, ChevronUp, ChevronDown, List, Pencil, Sha
 import { useUIStore } from '../store/uiStore'
 import { useAuthStore } from '../store/authStore'
 import { copyToClipboard, cn } from '../lib/utils'
+import { buildShareClipText, SHARE_CLIP_KAKAO_TOAST } from '../lib/shareClipText'
 import { getNoticeById, getAdminNoticesPaged, deleteNotice } from '../lib/noticeStorage'
 import { canAccessAdmin } from '../lib/adminAuth'
 import { canViewNotice, getTierById } from '../lib/tiers'
@@ -232,9 +233,13 @@ export function NoticeDetailPage() {
                 type="button"
                 onClick={async () => {
                   const url = window.location.href
-                  const text = `${notice.title}\n${url}`
-                  await copyToClipboard(text)
-                  showToast('친구에게 공유할 링크가 복사됐어요! 💬', 'success')
+                  const clipText = buildShareClipText({
+                    headline: notice.title,
+                    description: 'VICS 공지 · 지금 확인해 보세요',
+                    url,
+                  })
+                  await copyToClipboard(clipText)
+                  showToast(SHARE_CLIP_KAKAO_TOAST, 'success')
                 }}
                 className="p-2 rounded-xl border border-amber-200/70 bg-amber-50/90 text-amber-700 hover:bg-amber-100 transition-colors shadow-sm"
                 aria-label="공유"

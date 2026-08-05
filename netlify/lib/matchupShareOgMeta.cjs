@@ -1,7 +1,7 @@
 /**
  * 매치업 공유 OG — 메타·문구 (Netlify Functions)
  */
-const { buildMatchupShareCopy } = require('./matchupShareCopy.cjs')
+const { buildMatchupShareCopy, buildMatchupShareOgDescription } = require('./matchupShareCopy.cjs')
 
 function escapeMetaText(value, maxLen = 200) {
   return String(value || '')
@@ -13,7 +13,7 @@ function escapeMetaText(value, maxLen = 200) {
 function getMatchupOgMeta(matchup, baseUrl, requestUrl) {
   const copy = buildMatchupShareCopy(matchup)
   const ogTitle = escapeMetaText(copy.ogTitle, 120)
-  const ogDescription = escapeMetaText(copy.ogDescription, 200)
+  const ogDescription = escapeMetaText(buildMatchupShareOgDescription(matchup, copy.ogDescription), 200)
 
   const ogImage = matchup?.id
     ? `${String(baseUrl).replace(/\/+$/, '')}/api/matchup-share-image?matchupId=${encodeURIComponent(matchup.id)}`

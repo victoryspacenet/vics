@@ -57,6 +57,7 @@ export function HomePage({ refreshRef }) {
   const pageFromUrl = parseListPageParam(searchParams.get('page'))
   const feedCategories = useMatchupsFeedCategories()
   const fetchSeqRef = useRef(0)
+  const prevCategoryRef = useRef(undefined)
   const { openCreateDrawer, openLoginModal } = useUIStore()
   const { user } = useAuthStore()
 
@@ -111,12 +112,15 @@ export function HomePage({ refreshRef }) {
     } catch {
       void 0
     }
+    const categoryChanged =
+      prevCategoryRef.current !== undefined && prevCategoryRef.current !== category
+    prevCategoryRef.current = category
     setSearchParams(
       (prev) => {
         const n = new URLSearchParams(prev)
         if (category === 'all') n.delete(MATCHUPS_CAT_URL_PARAM)
         else n.set(MATCHUPS_CAT_URL_PARAM, category)
-        n.delete('page')
+        if (categoryChanged) n.delete('page')
         return n
       },
       { replace: true }
@@ -159,42 +163,55 @@ export function HomePage({ refreshRef }) {
         featuredRoleById = fed.roleById
       }
 
-      let q = supabase
-        .from('matchups')
-        .select(HOME_FEED_MATCHUP_SELECT, { count: 'exact' })
-        .not('right_type', 'is', null)
+      const applyFeedFilters = (q) => {
+        let next = q.not('right_type', 'is', null)
+        if (category !== 'all') {
+          const catVals = storedCategoryValuesForFilter(category)
+          if (catVals.length) next = next.in('category', catVals)
+        }
+        if (tagFilter) {
+          next = next.contains('tags', [tagFilter])
+        }
+        if (queryFilter === 'mine' && user?.id) {
+          next = next.or(`user_id.eq.${user.id},right_user_id.eq.${user.id}`).eq('status', 'active')
+        } else if (queryFilter === 'active') {
+          next = next.eq('status', 'active')
+          const now = new Date().toISOString()
+          next = next.or(`expires_at.is.null,expires_at.gt.${now}`)
+        } else if (queryFilter === 'completed') {
+          next = next.not('expires_at', 'is', null).lt('expires_at', new Date().toISOString())
+        }
+        return next
+      }
 
-      if (category !== 'all') {
-        const catVals = storedCategoryValuesForFilter(category)
-        if (catVals.length) q = q.in('category', catVals)
-      }
-      if (tagFilter) {
-        q = q.contains('tags', [tagFilter])
-      }
-      if (queryFilter === 'mine' && user?.id) {
-        q = q.or(`user_id.eq.${user.id},right_user_id.eq.${user.id}`).eq('status', 'active')
-      } else if (queryFilter === 'active') {
-        q = q.eq('status', 'active')
-        const now = new Date().toISOString()
-        q = q.or(`expires_at.is.null,expires_at.gt.${now}`)
-      } else if (queryFilter === 'completed') {
-        q = q.not('expires_at', 'is', null).lt('expires_at', new Date().toISOString())
-      }
+      let dataQuery = applyFeedFilters(
+        supabase.from('matchups').select(HOME_FEED_MATCHUP_SELECT),
+      )
+      const countQuery = applyFeedFilters(
+        supabase.from('matchups').select('id', { count: 'exact', head: true }),
+      )
 
       if (sortBy === 'popular') {
-        q = q
+        dataQuery = dataQuery
           .order('total_votes', { ascending: false, nullsFirst: false })
           .order('created_at', { ascending: false })
       } else {
-        q = q.order('created_at', { ascending: false })
+        dataQuery = dataQuery.order('created_at', { ascending: false })
       }
 
       const from = (pageFromUrl - 1) * PAGE_SIZE
       const to = from + PAGE_SIZE - 1
-      const { data: base, error, count } = await q.range(from, to)
+      const [{ count }, { data: base, error }] = await Promise.all([
+        countQuery,
+        dataQuery.range(from, to),
+      ])
       if (seq !== fetchSeqRef.current) return
       if (error) throw error
-      setTotalCount(typeof count === 'number' ? count : 0)
+      const resolvedCount =
+        typeof count === 'number'
+          ? count
+          : (base?.length === PAGE_SIZE ? from + base.length + 1 : (base?.length ?? 0) + from)
+      setTotalCount(resolvedCount)
       rows = base || []
       const roleHint = (_id) => {
         if (queryFilter !== 'active') return undefined
@@ -370,7 +387,7 @@ export function HomePage({ refreshRef }) {
 
         {/* ── 피드 (모바일: 스냅·한 장면 / 웹: 컴팩트 목록 스크롤) ── */}
         <MatchupEngagementProvider matchupIds={feedMatchupIds}>
-          <div className="overflow-y-auto overscroll-contain max-h-[calc(100vh-16rem)] sm:max-h-[calc(100vh-14rem)] snap-y snap-mandatory lg:overflow-visible lg:max-h-none lg:snap-none">
+          <div className="overflow-y-auto overscroll-contain max-h-[calc(100vh-16rem)] sm:max-h-[calc(100vh-14rem)] snap-y snap-mandatory lg:overflow-visible lg:max-h-none lg:snap-none pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] lg:pb-0">
             {loading
               ? Array.from({ length: 6 }).map((_, i) => (
                   <div key={i} className="snap-center snap-always py-3 lg:snap-align-none lg:py-2">
@@ -405,13 +422,26 @@ export function HomePage({ refreshRef }) {
           </div>
         </MatchupEngagementProvider>
 
-        {/* ── 3-5. 하단 페이지네이션 ── */}
-        {!loading && data.length > 0 && (
-          <div className="mt-8 pb-24 sm:pb-8 flex justify-center">
-            <div className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl border border-fuchsia-100/70 bg-gradient-to-br from-white to-fuchsia-50/40 shadow-[0_2px_12px_-4px_rgba(168,85,247,0.15)]">
-              <Pagination current={page} total={totalPages} onPage={goPage} />
+        {/* ── 페이지네이션: 모바일은 하단 네비 위 고정 / 데스크톱은 목록 하단 ── */}
+        {!loading && data.length > 0 && totalPages > 1 && (
+          <>
+            <div
+              className={cn(
+                'lg:hidden fixed inset-x-0 z-40 flex justify-center px-3',
+                'bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))]',
+              )}
+              aria-label="매치업 목록 페이지"
+            >
+              <div className="inline-flex max-w-full items-center gap-1.5 overflow-x-auto rounded-2xl border border-fuchsia-100/80 bg-white/95 px-3 py-2.5 shadow-[0_4px_24px_-4px_rgba(168,85,247,0.35)] backdrop-blur-md">
+                <Pagination current={page} total={totalPages} onPage={goPage} compact />
+              </div>
             </div>
-          </div>
+            <div className="hidden lg:flex mt-8 pb-8 justify-center">
+              <div className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl border border-fuchsia-100/70 bg-gradient-to-br from-white to-fuchsia-50/40 shadow-[0_2px_12px_-4px_rgba(168,85,247,0.15)]">
+                <Pagination current={page} total={totalPages} onPage={goPage} />
+              </div>
+            </div>
+          </>
         )}
       </div>
 
@@ -442,57 +472,69 @@ function EmptyFeed({ onCreateClick }) {
 }
 
 // ── 3-5. 페이지네이션 (힙한 원형 디자인) ──────────────────────────────
-function Pagination({ current, total, onPage }) {
-  const WINDOW = 5
+function Pagination({ current, total, onPage, compact = false }) {
+  const WINDOW = compact ? 3 : 5
   const half   = Math.floor(WINDOW / 2)
   let start    = Math.max(1, current - half)
   let end      = Math.min(total, start + WINDOW - 1)
   if (end - start + 1 < WINDOW) start = Math.max(1, end - WINDOW + 1)
   const pages  = Array.from({ length: end - start + 1 }, (_, i) => start + i)
+  const btnSize = compact ? 'w-9 h-9 text-xs' : 'w-10 h-10 text-sm'
+  const gap = compact ? 'gap-1' : 'gap-2'
 
   return (
-    <div className="flex items-center justify-center gap-2">
+    <div className={cn('flex items-center justify-center', gap)}>
       <button
         onClick={() => onPage(current - 1)}
         disabled={current === 1}
-        className="w-10 h-10 flex items-center justify-center rounded-full border-2 border-fuchsia-100 text-fuchsia-600/70 hover:border-fuchsia-400 hover:text-fuchsia-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+        className={cn(
+          btnSize,
+          'flex items-center justify-center rounded-full border-2 border-fuchsia-100 text-fuchsia-600/70 hover:border-fuchsia-400 hover:text-fuchsia-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all shrink-0',
+        )}
       >
-        <ChevronLeft size={18} />
+        <ChevronLeft size={compact ? 16 : 18} />
       </button>
       {start > 1 && (
         <>
-          <PaginationBtn page={1} current={current} onClick={onPage} />
-          {start > 2 && <span className="text-gray-300 text-sm px-1">…</span>}
+          <PaginationBtn page={1} current={current} onClick={onPage} compact={compact} />
+          {start > 2 && <span className="text-gray-300 text-xs px-0.5">…</span>}
         </>
       )}
-      {pages.map((p) => <PaginationBtn key={p} page={p} current={current} onClick={onPage} />)}
+      {pages.map((p) => (
+        <PaginationBtn key={p} page={p} current={current} onClick={onPage} compact={compact} />
+      ))}
       {end < total && (
         <>
-          {end < total - 1 && <span className="text-gray-300 text-sm px-1">…</span>}
-          <PaginationBtn page={total} current={current} onClick={onPage} />
+          {end < total - 1 && <span className="text-gray-300 text-xs px-0.5">…</span>}
+          <PaginationBtn page={total} current={current} onClick={onPage} compact={compact} />
         </>
       )}
       <button
         onClick={() => onPage(current + 1)}
         disabled={current === total}
-        className="w-10 h-10 flex items-center justify-center rounded-full border-2 border-fuchsia-100 text-fuchsia-600/70 hover:border-fuchsia-400 hover:text-fuchsia-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+        className={cn(
+          btnSize,
+          'flex items-center justify-center rounded-full border-2 border-fuchsia-100 text-fuchsia-600/70 hover:border-fuchsia-400 hover:text-fuchsia-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all shrink-0',
+        )}
       >
-        <ChevronRight size={18} />
+        <ChevronRight size={compact ? 16 : 18} />
       </button>
     </div>
   )
 }
 
-function PaginationBtn({ page, current, onClick }) {
+function PaginationBtn({ page, current, onClick, compact = false }) {
   const active = page === current
   return (
     <button
       onClick={() => onClick(page)}
-      className={`w-10 h-10 flex items-center justify-center rounded-full text-sm font-black transition-all ${
+      className={cn(
+        'flex items-center justify-center rounded-full font-black transition-all shrink-0',
+        compact ? 'w-9 h-9 text-xs' : 'w-10 h-10 text-sm',
         active
           ? 'bg-gradient-to-br from-fuchsia-600 to-violet-600 text-white shadow-[0_4px_14px_-2px_rgba(168,85,247,0.5)] scale-110'
-          : 'border-2 border-fuchsia-100 text-fuchsia-700/70 hover:border-fuchsia-400 hover:text-fuchsia-700'
-      }`}
+          : 'border-2 border-fuchsia-100 text-fuchsia-700/70 hover:border-fuchsia-400 hover:text-fuchsia-700',
+      )}
     >
       {page}
     </button>

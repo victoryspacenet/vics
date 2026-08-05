@@ -50,7 +50,36 @@ function buildMatchupShareCopy(matchup, options = {}) {
   return { phase, ogTitle, ogDescription }
 }
 
+/** 카톡·OG용 — 텍스트형 매치업 본문 미리보기 */
+function getMatchupShareTextPreview(matchup, { maxLen = 100 } = {}) {
+  if (!matchup) return ''
+  const parts = []
+  const trim = (s) => String(s || '').replace(/\s+/g, ' ').trim()
+  const clip = (s) => {
+    const t = trim(s)
+    if (!t) return ''
+    return t.length > maxLen ? `${t.slice(0, maxLen)}…` : t
+  }
+  if (matchup.left_type === 'text') {
+    const body = clip(matchup.left_text)
+    if (body) parts.push(`${trim(matchup.left_label) || 'A'}: ${body}`)
+  }
+  if (matchup.right_type === 'text') {
+    const body = clip(matchup.right_text)
+    if (body) parts.push(`${trim(matchup.right_label) || 'B'}: ${body}`)
+  }
+  return parts.join(' · ')
+}
+
+function buildMatchupShareOgDescription(matchup, baseDescription) {
+  const preview = getMatchupShareTextPreview(matchup, { maxLen: 80 })
+  if (!preview) return baseDescription
+  return `${baseDescription} · ${preview}`
+}
+
 module.exports = {
   getMatchupSharePhase,
   buildMatchupShareCopy,
+  getMatchupShareTextPreview,
+  buildMatchupShareOgDescription,
 }

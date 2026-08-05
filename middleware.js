@@ -2,9 +2,10 @@
  * Vercel Edge Middleware - 동적 OG 태그
  * /matchup/:id · /matchup/share/:id — Netlify matchup-og와 동일한 상태별 문구·메타
  */
-import { buildMatchupShareCopy } from './src/lib/matchupShareCopy.js'
+import { buildMatchupShareCopy, buildMatchupShareOgDescription } from './src/lib/matchupShareCopy.js'
 
-const CRAWLER_REGEX = /bot|crawler|spider|crawling|facebookexternalhit|twitterbot|linkedinbot|slurp|whatsapp|telegram|pinterest|duckduckbot|googlebot|bingbot|yandexbot|slackbot|discordbot|kakaotalkbot|kakaostorybot|kakaotalk-scrap/i
+const CRAWLER_REGEX =
+  /bot|crawler|spider|crawling|facebookexternalhit|twitterbot|linkedinbot|slurp|whatsapp|telegram|pinterest|duckduckbot|googlebot|bingbot|yandexbot|slackbot|discordbot|kakaotalkbot|kakaostorybot|kakaotalk[-_]?scrap|kakaostory[-_]?scrap|kakaotalkscrap|kakaostoryscrap|yeti|naverbot/i
 
 function isOgScraperUserAgent(ua) {
   const s = String(ua || '')
@@ -127,7 +128,7 @@ function escapeMetaText(value, maxLen = 200) {
 function getMatchupOgMeta(matchup, baseUrl, requestUrl) {
   const copy = buildMatchupShareCopy(matchup)
   const ogTitle = escapeMetaText(copy.ogTitle, 120)
-  const ogDescription = escapeMetaText(copy.ogDescription, 200)
+  const ogDescription = escapeMetaText(buildMatchupShareOgDescription(matchup, copy.ogDescription), 200)
   const ogImage = matchup?.id
     ? `${String(baseUrl).replace(/\/+$/, '')}/api/matchup-share-image?matchupId=${encodeURIComponent(matchup.id)}`
     : `${String(baseUrl).replace(/\/+$/, '')}/api/site-og-image`

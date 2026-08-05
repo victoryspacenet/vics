@@ -40,6 +40,22 @@ function resolveShareId(event) {
   return ''
 }
 
+async function fetchShareSnapshotFallback(shareId) {
+  if (!shareId || !supabaseUrl || !supabaseAnonKey) return null
+  try {
+    const supabase = createClient(supabaseUrl, supabaseAnonKey)
+    const { data, error } = await supabase
+      .from('tendency_report_shares')
+      .select('report_snapshot')
+      .eq('id', shareId)
+      .maybeSingle()
+    if (error || !data?.report_snapshot) return null
+    return data.report_snapshot
+  } catch {
+    return null
+  }
+}
+
 async function fetchShareSnapshot(shareId) {
   if (!shareId || !supabaseUrl || !supabaseAnonKey) return null
   try {
@@ -47,12 +63,12 @@ async function fetchShareSnapshot(shareId) {
     const { data, error } = await supabase.rpc('get_tendency_report_share', {
       p_share_id: shareId,
     })
-    if (error) return null
+    if (error) return fetchShareSnapshotFallback(shareId)
     const row = typeof data === 'string' ? JSON.parse(data) : data
-    if (!row?.ok || !row.report_snapshot) return null
+    if (!row?.ok || !row.report_snapshot) return fetchShareSnapshotFallback(shareId)
     return row.report_snapshot
   } catch {
-    return null
+    return fetchShareSnapshotFallback(shareId)
   }
 }
 
@@ -79,14 +95,25 @@ const ogHandler = async (event) => {
   const ua = event.headers['user-agent'] || event.headers['User-Agent'] || ''
   const isScraper = isOgScraperUserAgent(ua)
 
+  // 카카오·SNS 링크 미리보기 봇은 SPA inject 대신 OG 전용 HTML (중복 meta·메인 OG 노출 방지)
   let html
   if (isScraper) {
     html = buildOgScraperHtml(meta)
   } else {
     const indexHtml = await fetchSpaIndexHtml(baseUrl)
-    html = indexHtml
-      ? injectOgIntoHtml(indexHtml, meta)
-      : buildOgScraperHtml(meta)
+    if (!indexHtml) {
+      html = buildOgScraperHtml(meta)
+    } else {
+      html = injectOgIntoHtml(indexHtml, meta)
+      // inject 실패 시 index.html 기본 OG가 남을 수 있음 → 메인 OG 재노출 방지
+      if (
+        html.includes('VICS — 1대1 경쟁 플랫폼') &&
+        meta.ogTitle &&
+        !meta.ogTitle.includes('1대1 경쟁')
+      ) {
+        html = buildOgScraperHtml(meta)
+      }
+    }
   }
 
   return {

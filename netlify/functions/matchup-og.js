@@ -73,9 +73,18 @@ const ogHandler = async (event) => {
       html = buildOgScraperHtml(meta)
     } else {
       const indexHtml = await fetchSpaIndexHtml(baseUrl)
-      html = indexHtml
-        ? injectOgIntoHtml(indexHtml, meta)
-        : buildOgScraperHtml(meta)
+      if (!indexHtml) {
+        html = buildOgScraperHtml(meta)
+      } else {
+        html = injectOgIntoHtml(indexHtml, meta)
+        if (
+          html.includes('VICS — 1대1 경쟁 플랫폼') &&
+          meta.ogTitle &&
+          !meta.ogTitle.includes('1대1 경쟁')
+        ) {
+          html = buildOgScraperHtml(meta)
+        }
+      }
     }
 
     return {

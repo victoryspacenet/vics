@@ -1,3 +1,5 @@
+import { getMatchupSharePhase } from './matchupShareCopy'
+
 /**
  * 브라우저 Canvas — A|VS|B 공유 썸네일 (서버 API 미배포·실패 시 폴백)
  */
@@ -84,16 +86,6 @@ function drawTextSidePanel(ctx, x, panelW, panelH, text) {
   })
 }
 
-function hasRightContent(matchup) {
-  return Boolean(
-    matchup.right_type
-    || matchup.right_url
-    || matchup.right_thumbnail_url
-    || matchup.right_text
-    || matchup.is_complete,
-  )
-}
-
 /** 도전자(B) 미참여 — 공유·OG 합성 썸네일 B 패널 */
 function drawChallengeRecruitPanel(ctx, x, panelW, panelH) {
   ctx.fillStyle = '#022c22'
@@ -111,14 +103,8 @@ function drawChallengeRecruitPanel(ctx, x, panelW, panelH) {
   ctx.fillStyle = '#6ee7b7'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.font = '900 30px system-ui, "Pretendard Variable", "Noto Sans KR", sans-serif'
-
-  const lines = ['도전자', '모집 중']
-  const lineHeight = 38
-  const textTop = cy - ((lines.length - 1) * lineHeight) / 2
-  lines.forEach((line, index) => {
-    ctx.fillText(line, cx, textTop + index * lineHeight)
-  })
+  ctx.font = '900 28px system-ui, "Pretendard Variable", "Noto Sans KR", sans-serif'
+  ctx.fillText('도전자 모집 중', cx, cy - 6)
 
   ctx.font = '34px system-ui, sans-serif'
   ctx.fillText('⚔️', cx, cy + 62)
@@ -266,10 +252,11 @@ export async function composeMatchupShareBlob(matchup, safeMediaUrlFn, baseOrigi
 
   const left = resolveSide(matchup, 'left', baseOrigin, safeMediaUrlFn)
   let right = resolveSide(matchup, 'right', baseOrigin, safeMediaUrlFn)
-  if (!hasRightContent(matchup) && !right.imageUrl) {
+  const isRecruiting = getMatchupSharePhase(matchup) === 'recruiting'
+  if (isRecruiting) {
     right = {
       imageUrl: null,
-      label: right.label,
+      label: String(matchup.right_label || 'B').slice(0, 12),
       bg: '#022c22',
       labelBg: '#10b981',
       type: 'challenge',
@@ -295,8 +282,8 @@ function matchupHasTextSide(matchup) {
 
 /** 서버 합성 API → 실패 시 브라우저 Canvas 폴백 */
 export async function fetchMatchupShareBlob({ imageUrl, matchup, safeMediaUrlFn, baseOrigin }) {
-  /** 도전자 대기·텍스트형 — 브라우저 Canvas가 한글·본문을 정확히 그림 */
-  if (matchup && safeMediaUrlFn && (!hasRightContent(matchup) || matchupHasTextSide(matchup))) {
+  /** 도전자 모집·텍스트형 — 브라우저 Canvas가 한글·본문을 정확히 그림 */
+  if (matchup && safeMediaUrlFn && (getMatchupSharePhase(matchup) === 'recruiting' || matchupHasTextSide(matchup))) {
     try {
       return await composeMatchupShareBlob(matchup, safeMediaUrlFn, baseOrigin)
     } catch {

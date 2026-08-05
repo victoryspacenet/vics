@@ -68,6 +68,49 @@ async function inlineCloneImages(sourceEl, cloneEl) {
 }
 
 /** transform/overflow 조상 밖에서 캡처 — html-to-image가 깨지는 경우 방지 */
+function finalizeCloneForCapture(sourceEl, clone) {
+  const rect = sourceEl.getBoundingClientRect()
+  const height = Math.max(sourceEl.scrollHeight, rect.height, 1)
+
+  clone.style.width = `${Math.max(rect.width, 1)}px`
+  clone.style.maxWidth = `${Math.max(rect.width, 1)}px`
+  clone.style.height = `${height}px`
+  clone.style.minHeight = `${height}px`
+  clone.style.overflow = 'visible'
+  clone.style.fontFamily =
+    'Pretendard Variable, Pretendard, "Plus Jakarta Sans", system-ui, -apple-system, sans-serif'
+
+  clone.querySelectorAll('*').forEach((node) => {
+    node.style.animation = 'none'
+    node.style.transition = 'none'
+    node.style.transform = 'none'
+    node.style.opacity = '1'
+    node.style.willChange = 'auto'
+  })
+
+  clone.querySelectorAll('[class*="animate-"]').forEach((node) => {
+    ;[...node.classList].forEach((cls) => {
+      if (cls.startsWith('animate-')) node.classList.remove(cls)
+    })
+  })
+
+  clone.querySelectorAll('img').forEach((img) => {
+    img.style.filter = 'none'
+    img.classList.remove('brightness-50', 'saturate-50', 'invert')
+  })
+
+  const sourceWidthNodes = sourceEl.querySelectorAll('[style*="width"]')
+  const cloneWidthNodes = clone.querySelectorAll('[style*="width"]')
+  sourceWidthNodes.forEach((src, index) => {
+    const dst = cloneWidthNodes[index]
+    if (!dst) return
+    const inlineWidth = src.style.width
+    dst.style.width = inlineWidth && inlineWidth !== '0%' ? inlineWidth : src.style.width
+    dst.style.transition = 'none'
+    dst.style.transform = 'none'
+  })
+}
+
 async function mountCaptureClone(sourceEl) {
   const rect = sourceEl.getBoundingClientRect()
   const clone = sourceEl.cloneNode(true)
@@ -77,27 +120,12 @@ async function mountCaptureClone(sourceEl) {
   clone.style.top = '0'
   clone.style.zIndex = '-9999'
   clone.style.pointerEvents = 'none'
-  clone.style.width = `${Math.max(rect.width, 1)}px`
-  clone.style.maxWidth = `${Math.max(rect.width, 1)}px`
   clone.style.transform = 'none'
   clone.style.opacity = '1'
   clone.style.visibility = 'visible'
   clone.style.margin = '0'
 
-  clone.querySelectorAll('[class*="animate-"]').forEach((node) => {
-    ;[...node.classList].forEach((cls) => {
-      if (cls.startsWith('animate-')) node.classList.remove(cls)
-    })
-  })
-
-  const sourceWidthNodes = sourceEl.querySelectorAll('[style*="width"]')
-  const cloneWidthNodes = clone.querySelectorAll('[style*="width"]')
-  sourceWidthNodes.forEach((src, index) => {
-    const dst = cloneWidthNodes[index]
-    if (!dst) return
-    dst.style.width = src.style.width
-    dst.style.transition = 'none'
-  })
+  finalizeCloneForCapture(sourceEl, clone)
 
   document.body.appendChild(clone)
   await inlineCloneImages(sourceEl, clone)
@@ -105,6 +133,17 @@ async function mountCaptureClone(sourceEl) {
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
 
   return clone
+}
+
+async function validateCaptureDataUrl(dataUrl, { minWidth = 240, minHeight = 180 } = {}) {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      resolve(img.naturalWidth >= minWidth && img.naturalHeight >= minHeight)
+    }
+    img.onerror = () => resolve(false)
+    img.src = dataUrl
+  })
 }
 
 async function pngDataUrlToJpegBlob(dataUrl, quality = 0.92) {
@@ -158,7 +197,7 @@ async function captureElementToPng(el, { pixelRatio, backgroundColor }) {
   return toPng(el, {
     pixelRatio,
     cacheBust: true,
-    skipFonts: true,
+    skipFonts: false,
     useCORS: true,
     backgroundColor,
     imagePlaceholder: BLANK_PLACEHOLDER,
@@ -218,6 +257,9 @@ export async function captureShareCardJpegFile(
   const clone = await mountCaptureClone(el)
   try {
     const dataUrl = await captureElementToPng(clone, { pixelRatio, backgroundColor })
+    if (!(await validateCaptureDataUrl(dataUrl))) {
+      throw new Error('공유 카드 이미지 크기가 너무 작아요')
+    }
     const jpegBlob = await pngDataUrlToJpegBlob(dataUrl, jpegQuality)
     if (!jpegBlob || jpegBlob.size < 800) {
       throw new Error('공유 카드 이미지가 비어 있어요')

@@ -17,7 +17,7 @@ import { isFeedBannerHighlightActive } from '../../lib/bannerHighlightBoost'
 import { isMatchupCreatorVipTierGlow, VIP_MATCHUP_SURFACE_CLASS } from '../../lib/matchupCreatorVipGlow'
 import { formatDate, formatNumber, calcPercent, cn } from '../../lib/utils'
 import { formatMatchupRegisteredAt } from '../../lib/matchupRegisteredAt'
-import { copyMatchupShareLink, getMatchupSharePageUrl } from '../../lib/socialShare'
+import { copyMatchupShareLink, getMatchupSharePageUrl, getMatchupShareImageUrl, shareMatchupToSns, warmMatchupSharePreview } from '../../lib/socialShare'
 import { voteViaApi } from '../../lib/voteApi'
 import { fandomTierHasDiamondListNicknameAura } from '../../lib/fandomTiers'
 import { FandomBronzeStarBadge } from '../fandom/FandomBronzeStarBadge'
@@ -151,13 +151,16 @@ export function MatchupCard({ matchup: initialMatchup, compact, onVoteUpdate }) 
     }
   }
 
-  const handleShare = () => {
-    const url = getMatchupSharePageUrl(matchup.id)
-    if (navigator.share) {
-      navigator.share({ title: matchup.title, url })
-    } else {
-      handleCopyLink()
-    }
+  const handleShare = async () => {
+    await warmMatchupSharePreview({ matchupId: matchup.id, matchup })
+    await shareMatchupToSns('kakao', {
+      title: matchup.title,
+      url: getMatchupSharePageUrl(matchup.id),
+      imageUrl: getMatchupShareImageUrl(matchup, safeMediaUrl),
+      matchup,
+      safeMediaUrlFn: safeMediaUrl,
+      showToast,
+    })
   }
 
   const { left, right } = calcPercent(matchup.left_votes, matchup.right_votes)
@@ -321,7 +324,7 @@ export function MatchupCard({ matchup: initialMatchup, compact, onVoteUpdate }) 
         </button>
 
         <button
-          onClick={handleShare}
+          onClick={() => { void handleShare() }}
           className="p-1.5 rounded-lg text-gray-400 hover:text-[#22282E] hover:bg-gray-50 transition-colors"
         >
           <Share2 size={14} />

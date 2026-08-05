@@ -1,5 +1,7 @@
 /** @typedef {'recruiting' | 'voting' | 'completed'} MatchupSharePhase */
 
+import { buildShareClipText } from './shareClipText'
+
 function isVotePeriodExpired(expiresAt) {
   if (!expiresAt) return false
   const t = new Date(expiresAt).getTime()
@@ -70,4 +72,45 @@ export function buildMatchupShareCopy(matchup, options = {}) {
     clipHeadline: ogTitle,
     clipDesc: `${leftLabel} vs ${rightLabel} · 지금 투표 진행 중 · VICS`,
   }
+}
+
+/** 카톡·클립보드용 — 텍스트형 매치업 본문 미리보기 */
+export function getMatchupShareTextPreview(matchup, { maxLen = 100 } = {}) {
+  if (!matchup) return ''
+  const parts = []
+  const trim = (s) => String(s || '').replace(/\s+/g, ' ').trim()
+  const clip = (s) => {
+    const t = trim(s)
+    if (!t) return ''
+    return t.length > maxLen ? `${t.slice(0, maxLen)}…` : t
+  }
+  if (matchup.left_type === 'text') {
+    const body = clip(matchup.left_text)
+    if (body) parts.push(`📝 ${trim(matchup.left_label) || 'A'}: ${body}`)
+  }
+  if (matchup.right_type === 'text') {
+    const body = clip(matchup.right_text)
+    if (body) parts.push(`📝 ${trim(matchup.right_label) || 'B'}: ${body}`)
+  }
+  return parts.join('\n')
+}
+
+/** OG description — 텍스트형 본문을 한 줄로 이어 붙임 */
+export function buildMatchupShareOgDescription(matchup, baseDescription) {
+  const preview = getMatchupShareTextPreview(matchup, { maxLen: 80 })
+  if (!preview) return baseDescription
+  return `${baseDescription} · ${preview.replace(/\n/g, ' · ')}`
+}
+
+/** 링크 복사·카톡 붙여넣기용 — 제목 + 설명 + (텍스트형 본문) + 빈 줄 + URL */
+export function buildMatchupShareClipText({ matchup, url } = {}) {
+  if (!url) return ''
+  if (!matchup) return url
+  const { clipHeadline, clipDesc } = buildMatchupShareCopy(matchup)
+  return buildShareClipText({
+    headline: clipHeadline,
+    description: clipDesc,
+    body: getMatchupShareTextPreview(matchup),
+    url,
+  })
 }

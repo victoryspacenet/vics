@@ -7,7 +7,12 @@
  * - Capacitor 앱: @capacitor/share (SDK 금지)
  * - 카카오 콘솔: JavaScript SDK 도메인에 http://localhost:5173 등록 필요
  */
-import { buildMatchupShareCopy } from './matchupShareCopy'
+import { buildMatchupShareCopy, buildMatchupShareClipText } from './matchupShareCopy'
+import {
+  buildShareClipText,
+  SHARE_CLIP_KAKAO_MATCHUP_TOAST,
+  SHARE_CLIP_KAKAO_TOAST,
+} from './shareClipText'
 import { copyToClipboard } from './utils'
 import { getSiteOrigin } from './siteApiBase'
 import { fetchMatchupShareBlob } from './matchupShareCompositeBrowser'
@@ -182,14 +187,19 @@ export function buildRankingGalleryShareSubline(rank, tierName) {
   return [rank != null ? `#${rank}` : '', tierName || ''].filter(Boolean).join(' · ')
 }
 
+/** @param {{ rank?: number, nickname?: string, tierName?: string, cardId?: string }} opts */
+export function buildRankingGalleryShareClipText({ nickname, rank, tierName, cardId } = {}) {
+  const url = getRankingGallerySharePageUrl({ nickname, rank, tierName, cardId })
+  return buildShareClipText({
+    headline: buildRankingGalleryShareHeadline(nickname),
+    description: buildRankingGalleryShareDescription({ rank, tierName }),
+    url,
+  })
+}
+
 /** @param {{ rank?: number, nickname?: string, tierName?: string }} opts */
-export function buildRankingGalleryShareText({ rank, nickname, tierName } = {}) {
-  const url = getRankingGallerySharePageUrl({ rank, nickname, tierName })
-  const lines = [buildRankingGalleryShareHeadline(nickname)]
-  const sub = buildRankingGalleryShareSubline(rank, tierName)
-  if (sub) lines.push(sub)
-  lines.push('', 'VictorySpace에서 나도 도전해 보세요 👇', url)
-  return lines.join('\n')
+export function buildRankingGalleryShareText({ rank, nickname, tierName, cardId } = {}) {
+  return buildRankingGalleryShareClipText({ rank, nickname, tierName, cardId })
 }
 
 function buildRankingShareQueryString({ nickname, rank, tierName, cardId } = {}) {
@@ -317,11 +327,28 @@ export async function warmMatchupSharePreview({ matchupId, matchup } = {}) {
   await Promise.allSettled(tasks)
 }
 
-/** 링크 복사·카카오 텍스트 공유용 — 제목 + 설명 + URL */
-export function buildMatchupShareClipText({ matchup, url } = {}) {
-  if (!url || !matchup) return url || ''
-  const { clipHeadline, clipDesc } = buildMatchupShareCopy(matchup)
-  return `${clipHeadline}\n${clipDesc}\n${url}`
+const MATCHUP_SHARE_SELECT =
+  'id, title, status, left_label, right_label, left_type, right_type, left_text, right_text, is_complete, expires_at, total_votes, challenger_forfeit_at'
+
+async function resolveMatchupForShare(matchupId, matchup) {
+  const hasShareFields =
+    matchup &&
+    (matchup.left_type != null ||
+      matchup.title ||
+      matchup.left_text ||
+      matchup.right_type != null)
+  if (hasShareFields) return matchup
+  try {
+    const { supabase } = await import('./supabase')
+    const { data } = await supabase
+      .from('matchups')
+      .select(MATCHUP_SHARE_SELECT)
+      .eq('id', matchupId)
+      .maybeSingle()
+    return data || matchup || null
+  } catch {
+    return matchup || null
+  }
 }
 
 /** @param {{ matchupId: string, matchup?: object, showToast?: (msg: string, type?: string) => void }} opts */
@@ -332,10 +359,11 @@ export async function copyMatchupShareLink({ matchupId, matchup, showToast }) {
     return false
   }
   try {
-    await warmMatchupSharePreview({ matchupId, matchup })
-    const clipText = buildMatchupShareClipText({ matchup, url })
+    const resolved = await resolveMatchupForShare(matchupId, matchup)
+    await warmMatchupSharePreview({ matchupId, matchup: resolved })
+    const clipText = buildMatchupShareClipText({ matchup: resolved, url })
     await copyToClipboard(clipText)
-    showToast?.('링크를 복사했어요. 카카오톡에 붙이면 제목·설명·VS 썸네일 미리보기가 뜹니다', 'success')
+    showToast?.(SHARE_CLIP_KAKAO_MATCHUP_TOAST, 'success')
     return true
   } catch {
     showToast?.('복사에 실패했어요. 주소창의 링크를 직접 복사해 주세요', 'error')
@@ -505,16 +533,16 @@ export function isMobileShareDevice() {
   return isIosDevice() || isAndroidDevice()
 }
 
-/** 모바일 브라우저 — data URL 다운로드(Android) 또는 공유 시트「이미지 저장」(iOS) */
+/** 모바일 브라우저 — Web Share(이미지 저장) 또는 download fallback */
 export async function saveImageBlobToMobileWebGallery(blob, { fileName = 'vics-matchup-vs.jpg' } = {}) {
   const file = await blobToShareFile(blob)
   const payload = { files: [file] }
 
-  if (isIosDevice() && navigator.share) {
+  if (typeof navigator !== 'undefined' && navigator.share) {
     try {
       if (!navigator.canShare || navigator.canShare(payload)) {
         await navigator.share(payload)
-        return { ok: true, method: 'ios-share-save' }
+        return { ok: true, method: 'mobile-web-share' }
       }
     } catch (e) {
       if (e?.name === 'AbortError') return { ok: false, reason: 'cancelled' }
@@ -576,26 +604,36 @@ async function shareViaInstagramGalleryFlow({
   } catch (e) {
     console.warn('[socialShare] instagram image resolve failed', e)
     try {
-      await copyToClipboard(url)
-      notify('링크는 복사됐어요. 이미지 생성에 실패했어요 — 다시 시도해 주세요 📋', 'info')
+      if (copyLink) {
+        await copyLink('링크는 복사됐어요. 이미지 생성에 실패했어요 — 다시 시도해 주세요 📋')
+      } else {
+        await copyToClipboard(url)
+        notify('링크는 복사됐어요. 이미지 생성에 실패했어요 — 다시 시도해 주세요 📋', 'info')
+      }
     } catch {
-      await copyLink('이미지 생성에 실패했어요. 링크만 복사했습니다 📋')
+      await copyLink?.('이미지 생성에 실패했어요. 링크만 복사했습니다 📋')
     }
     return
   }
 
   let linkCopied = false
   try {
-    await copyToClipboard(url)
-    linkCopied = true
+    if (copyLink) {
+      await copyLink(SHARE_CLIP_KAKAO_MATCHUP_TOAST)
+      linkCopied = true
+    } else {
+      await copyToClipboard(url)
+      linkCopied = true
+    }
   } catch {
     void 0
   }
 
   const fileName = 'vics-matchup-vs'
   let imageSaved = false
+  const isNative = await isNativeGallerySaveContext()
 
-  if (await isNativeGallerySaveContext()) {
+  if (isNative) {
     const saved = await saveImageBlobToNativeGallery(blob, { fileName, useAppAlbum: false })
     imageSaved = saved.ok
     if (!saved.ok) {
@@ -618,13 +656,13 @@ async function shareViaInstagramGalleryFlow({
   }
 
   if (imageSaved) {
-    if (await isNativeGallerySaveContext()) {
+    if (isNative) {
       notify('VS 합성 이미지를 사진첩에 저장했어요! 인스타에서 방금 저장한 사진을 선택해 올려 주세요 📸', 'success')
     } else if (isMobileShareDevice()) {
       notify(
         isIosDevice()
-          ? '「이미지 저장」을 선택한 뒤, 인스타 스토리·게시물에서 사진을 고르세요 📸 (링크도 복사됨)'
-          : 'VS 합성 이미지를 저장했어요! 인스타 스토리·게시물에서 방금 저장한 사진을 선택해 올려 주세요 📸 (링크도 복사됨)',
+          ? '「이미지 저장」을 선택한 뒤, 인스타 앱을 열어 스토리·게시물에 올려 주세요 📸 (링크도 복사됨)'
+          : '공유 창에서 이미지를 저장한 뒤, 인스타 앱을 직접 열어 스토리·게시물에 올려 주세요 📸 (링크도 복사됨)',
         linkCopied ? 'success' : 'info',
       )
     } else {
@@ -636,7 +674,8 @@ async function shareViaInstagramGalleryFlow({
       )
     }
 
-    if (isMobileShareDevice()) {
+    // Capacitor 앱만 저장 직후 인스타 딥링크 — 모바일 Chrome 등은 저장 UI 전환을 막음
+    if (isNative) {
       const postSaveDelayMs = isIosDevice() ? 1200 : 700
       await new Promise((resolve) => setTimeout(resolve, postSaveDelayMs))
       void tryOpenInstagramApp({ preferStory })
@@ -888,6 +927,118 @@ async function runKakaoFeedSdkShare({
   }
 }
 
+export async function warmRankingSharePreview({ sharePageUrl, imageUrl } = {}) {
+  const tasks = []
+  if (sharePageUrl && /^https:\/\//i.test(sharePageUrl)) {
+    tasks.push(fetch(sharePageUrl, { mode: 'no-cors', cache: 'no-store' }).catch(() => {}))
+  }
+  if (imageUrl && /^https:\/\//i.test(imageUrl)) {
+    tasks.push(fetch(imageUrl, { mode: 'no-cors', cache: 'no-store' }).catch(() => {}))
+  }
+  await Promise.allSettled(tasks)
+}
+
+/**
+ * 매치업 상세 카카오 공유와 동일 — SDK → Web Share → 클립(제목·설명·URL) 폴백
+ */
+async function shareKakaoWithClipFallback({
+  safeTitle,
+  description = '',
+  url,
+  imageUrl,
+  buttonTitle = '보러 가기',
+  clipText,
+  showToast,
+  recordKind = 'matchup',
+  copyToast = SHARE_CLIP_KAKAO_TOAST,
+}) {
+  const notify = (msg, type = 'success') => showToast?.(msg, type)
+  const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+  const resolvedClip =
+    clipText || buildShareClipText({ headline: safeTitle, description, url })
+
+  const copyLink = async (hint) => {
+    try {
+      await copyToClipboard(resolvedClip)
+      notify(hint || copyToast)
+      recordShareSuccess(recordKind)
+    } catch {
+      notify('복사에 실패했어요. 주소창의 링크를 직접 복사해 주세요', 'error')
+    }
+  }
+
+  const tryWebShare = async () => {
+    if (!navigator.share) return false
+    const payload = { title: safeTitle, text: resolvedClip, url }
+    try {
+      if (navigator.canShare && !navigator.canShare(payload)) return false
+      await navigator.share(payload)
+      notify('공유했어요')
+      recordShareSuccess(recordKind)
+      return true
+    } catch (e) {
+      if (e?.name === 'AbortError') return true
+      return false
+    }
+  }
+
+  const trySdk = () =>
+    runKakaoFeedSdkShare({
+      safeTitle,
+      description,
+      url,
+      imageUrl,
+      buttonTitle,
+      notify,
+    })
+
+  const handleSdkFallback = async (sdk, copyHint) => {
+    if (sdk.ok) {
+      recordShareSuccess(recordKind)
+      return true
+    }
+    if (sdk.reason === '4011') {
+      await copyLink(copyHint || '운영 링크를 복사했어요. JavaScript 키를 확인한 뒤 dev 서버를 재시작해 주세요 📋')
+      return true
+    }
+    if (['no-key', 'no-https-origin', 'http-share-url', 'http-image-url', 'app-shell'].includes(sdk.reason)) {
+      notify?.(kakaoSdkSkipMessage(sdk.reason), 'info')
+      await copyLink(copyHint)
+      return true
+    }
+    return false
+  }
+
+  const isNative = isNativeOrAppShell() || (await isNativeCapacitorApp())
+  logKakaoShareDiagnostics('kakao-share-start', { isNative, isMobile })
+
+  if (isNative) {
+    if (await tryCapacitorShare({ url, notify })) {
+      recordShareSuccess(recordKind)
+      return
+    }
+    if (isMobile && (await tryWebShare())) return
+    await copyLink('링크를 복사했어요. 카카오톡에 붙여넣어 주세요 📋')
+    return
+  }
+
+  if (!isMobile) {
+    const sdk = await trySdk()
+    if (await handleSdkFallback(sdk, '운영 링크를 복사했어요. 키 수정 후 dev 서버를 재시작해 주세요 📋')) return
+  }
+
+  if (isMobile && (await tryWebShare())) return
+
+  const sdk = await trySdk()
+  if (await handleSdkFallback(sdk, copyToast)) return
+
+  await copyLink(
+    isLocalDevBrowser()
+      ? '공유창을 열지 못했어요. 운영 링크를 복사했습니다 — JavaScript 키·http://localhost:5173 등록을 확인해 주세요 📋'
+      : copyToast,
+  )
+}
+
 /**
  * @param {'kakao'|'facebook'|'twitter'|'instagram'} platform
  * @param {{ title: string, url: string, imageUrl?: string | null, matchup?: object, safeMediaUrlFn?: (url: string) => string, showToast?: (msg: string, type?: string) => void }} opts
@@ -903,29 +1054,14 @@ export async function shareMatchupToSns(platform, opts) {
   const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
   const shareImageCtx = { imageUrl, matchup, safeMediaUrlFn }
 
-  const tryWebShare = async () => {
-    if (!navigator.share) return false
-    const text = shareCopy
-      ? buildMatchupShareClipText({ matchup, url })
-      : `${safeTitle}\n${url}`
-    const payload = { title: safeTitle, text, url }
-    try {
-      if (navigator.canShare && !navigator.canShare(payload)) return false
-      await navigator.share(payload)
-      notify('공유했어요')
-      recordShareSuccess('matchup')
-      return true
-    } catch (e) {
-      if (e?.name === 'AbortError') return true
-      return false
-    }
-  }
-
   const copyLink = async (hint) => {
     try {
-      const clipText = matchup ? buildMatchupShareClipText({ matchup, url }) : url
+      const clipText =
+        matchup
+          ? buildMatchupShareClipText({ matchup, url })
+          : buildShareClipText({ headline: safeTitle, description: shareDescription, url })
       await copyToClipboard(clipText)
-      notify(hint || '링크를 복사했어요')
+      notify(hint || SHARE_CLIP_KAKAO_MATCHUP_TOAST)
       recordShareSuccess('matchup')
     } catch {
       notify('복사에 실패했어요. 주소창의 링크를 직접 복사해 주세요', 'error')
@@ -934,54 +1070,19 @@ export async function shareMatchupToSns(platform, opts) {
 
   switch (platform) {
     case 'kakao': {
-      const isNative = isNativeOrAppShell() || await isNativeCapacitorApp()
-      logKakaoShareDiagnostics('kakao-share-start', { isNative, isMobile })
-
-      if (isNative) {
-        if (await tryCapacitorShare({ url, notify })) return
-        if (isMobile && await tryWebShare()) return
-        await copyLink('링크를 복사했어요. 카카오톡에 붙여넣어 주세요 📋')
-        return
-      }
-
-      const trySdk = () => runKakaoFeedSdkShare({
+      await shareKakaoWithClipFallback({
         safeTitle,
         description: shareDescription,
         url,
         imageUrl,
         buttonTitle: '매치업 보기',
-        notify,
+        clipText: matchup
+          ? buildMatchupShareClipText({ matchup, url })
+          : buildShareClipText({ headline: safeTitle, description: shareDescription, url }),
+        showToast,
+        recordKind: 'matchup',
+        copyToast: SHARE_CLIP_KAKAO_MATCHUP_TOAST,
       })
-
-      const handleSdkFallback = async (sdk, copyHint) => {
-        if (sdk.ok) return true
-        if (sdk.reason === '4011') {
-          await copyLink('운영 링크를 복사했어요. JavaScript 키를 확인한 뒤 dev 서버를 재시작해 주세요 📋')
-          return true
-        }
-        if (['no-key', 'no-https-origin', 'http-share-url', 'http-image-url', 'app-shell'].includes(sdk.reason)) {
-          notify?.(kakaoSdkSkipMessage(sdk.reason), 'info')
-          await copyLink(copyHint || '링크를 복사했어요. 카카오톡에 붙여넣으면 VS 썸네일 미리보기가 뜹니다 📋')
-          return true
-        }
-        return false
-      }
-
-      // 웹 브라우저 (localhost dev · 운영): PC는 SDK 공유창 우선
-      if (!isMobile) {
-        const sdk = await trySdk()
-        if (await handleSdkFallback(sdk, '운영 링크를 복사했어요. 키 수정 후 dev 서버를 재시작해 주세요 📋')) return
-      }
-      if (isMobile && await tryWebShare()) return
-      {
-        const sdk = await trySdk()
-        if (await handleSdkFallback(sdk, '운영 링크를 복사했어요. JavaScript 키를 확인해 주세요 📋')) return
-      }
-      await copyLink(
-        isLocalDevBrowser()
-          ? '공유창을 열지 못했어요. 운영 링크를 복사했습니다 — JavaScript 키·http://localhost:5173 등록을 확인해 주세요 📋'
-          : '링크를 복사했어요. 카카오톡에 붙여넣어 주세요 📋',
-      )
       return
     }
     case 'facebook': {
@@ -1026,44 +1127,25 @@ export async function shareMatchupToSns(platform, opts) {
  * @param {{ nickname?: string, rank?: number, tierName?: string, thumbnailUrl?: string, showToast?: (msg: string, type?: string) => void }} opts
  */
 export async function shareRankingGallery({ nickname, rank, tierName, cardId, showToast }) {
-  const title = buildRankingGalleryShareHeadline(nickname)
+  const safeTitle = buildRankingGalleryShareHeadline(nickname)
   const description = buildRankingGalleryShareDescription({ rank, tierName })
   const sharePageUrl = getRankingGallerySharePageUrl({ nickname, rank, tierName, cardId })
-  const notify = (msg, type = 'success') => showToast?.(msg, type)
+  const imageUrl = getRankingShareImageUrl({ nickname, rank, tierName })
+  const clipText = buildRankingGalleryShareClipText({ nickname, rank, tierName, cardId })
 
-  const copyLink = async (hint) => {
-    try {
-      await copyToClipboard(sharePageUrl)
-      notify(hint || '랭킹 공유 링크를 복사했어요. 카카오톡에 붙여넣으면 랭킹 카드 미리보기가 뜹니다')
-      recordShareSuccess('ranking')
-    } catch {
-      notify('복사에 실패했어요. 주소창의 링크를 직접 복사해 주세요', 'error')
-    }
-  }
+  await warmRankingSharePreview({ sharePageUrl, imageUrl })
 
-  const tryWebShare = async () => {
-    if (typeof navigator === 'undefined' || !navigator.share) return false
-    const payload = { title, text: description, url: sharePageUrl }
-    try {
-      if (navigator.canShare && !navigator.canShare(payload)) return false
-      await navigator.share(payload)
-      notify('공유했어요')
-      recordShareSuccess('ranking')
-      return true
-    } catch (e) {
-      if (e?.name === 'AbortError') return true
-      return false
-    }
-  }
-
-  const isNative = isNativeOrAppShell() || await isNativeCapacitorApp()
-  if (isNative) {
-    if (await tryCapacitorShare({ url: sharePageUrl, notify })) return
-  }
-
-  if (await tryWebShare()) return
-
-  await copyLink()
+  await shareKakaoWithClipFallback({
+    safeTitle,
+    description,
+    url: sharePageUrl,
+    imageUrl,
+    buttonTitle: '랭킹 보기',
+    clipText,
+    showToast,
+    recordKind: 'ranking',
+    copyToast: SHARE_CLIP_KAKAO_TOAST,
+  })
 }
 
 /**
@@ -1096,94 +1178,33 @@ export async function shareClickableLinkCard({
   const ogImage = imageUrl
     ? resolvePublicShareUrl(imageUrl)
     : resolvePublicShareUrl(`${getPublicShareOrigin()}${DEFAULT_OG_IMAGE_PATH}`)
+  const clipText = buildShareClipText({ headline: safeTitle, description, url })
 
-  const shareText = [safeTitle, description, url].filter(Boolean).join('\n')
-
-  const copyLink = async (hint) => {
+  if (shareFile && isMobile && typeof navigator !== 'undefined' && navigator.share) {
+    const payload = { title: safeTitle, text: clipText, url, files: [shareFile] }
     try {
-      await copyToClipboard(url)
-      notify(hint || '공유 링크를 복사했어요. 카카오톡에 붙여넣으면 탭해서 열 수 있어요 📋')
-      recordShareSuccess(recordKind)
-    } catch {
-      notify('복사에 실패했어요. 아래 링크를 길게 눌러 복사해 주세요', 'error')
-    }
-  }
-
-  const tryWebShare = async () => {
-    if (typeof navigator === 'undefined' || !navigator.share) return false
-    const payload = shareFile
-      ? { title: safeTitle, text: shareText, url, files: [shareFile] }
-      : { title: safeTitle, text: shareText, url }
-    try {
-      if (navigator.canShare && !navigator.canShare(payload)) {
-        if (!shareFile) return false
-        const linkOnly = { title: safeTitle, text: shareText, url }
-        if (navigator.canShare && !navigator.canShare(linkOnly)) return false
-        await navigator.share(linkOnly)
-        notify('링크가 공유됐어요. 받는 분이 URL을 탭하면 리포트를 볼 수 있어요')
+      if (!navigator.canShare || navigator.canShare(payload)) {
+        await navigator.share(payload)
+        notify('이미지와 링크가 공유됐어요!')
         recordShareSuccess(recordKind)
-        return true
+        return
       }
-      await navigator.share(payload)
-      notify(shareFile ? '이미지와 링크가 공유됐어요!' : '링크가 공유됐어요. URL을 탭하면 리포트를 볼 수 있어요')
-      recordShareSuccess(recordKind)
-      return true
     } catch (e) {
-      if (e?.name === 'AbortError') return true
-      return false
+      if (e?.name === 'AbortError') return
     }
   }
 
-  const tryKakaoSdk = () =>
-    runKakaoFeedSdkShare({
-      safeTitle,
-      description,
-      url,
-      imageUrl: ogImage,
-      buttonTitle,
-      notify,
-    })
-
-  const handleKakaoFallback = async (sdk) => {
-    if (sdk.ok) {
-      notify('카카오톡 공유창이 열렸어요. 「보러 가기」를 누르면 리포트로 이동해요')
-      recordShareSuccess(recordKind)
-      return true
-    }
-    if (sdk.reason === '4011') {
-      await copyLink('운영 링크를 복사했어요. 카카오톡 채팅에 붙여넣으면 탭해서 열 수 있어요 📋')
-      return true
-    }
-    if (['no-key', 'no-https-origin', 'http-share-url', 'http-image-url', 'app-shell'].includes(sdk.reason)) {
-      notify?.(kakaoSdkSkipMessage(sdk.reason), 'info')
-      await copyLink()
-      return true
-    }
-    return false
-  }
-
-  const isNative = isNativeOrAppShell() || (await isNativeCapacitorApp())
-  if (isNative) {
-    if (await tryCapacitorShare({ url, notify })) {
-      recordShareSuccess(recordKind)
-      return
-    }
-    if (isMobile && (await tryWebShare())) return
-    await copyLink()
-    return
-  }
-
-  if (!isMobile) {
-    const sdk = await tryKakaoSdk()
-    if (await handleKakaoFallback(sdk)) return
-  }
-
-  if (isMobile && (await tryWebShare())) return
-
-  const sdk = await tryKakaoSdk()
-  if (await handleKakaoFallback(sdk)) return
-
-  await copyLink()
+  await shareKakaoWithClipFallback({
+    safeTitle,
+    description,
+    url,
+    imageUrl: ogImage,
+    buttonTitle,
+    clipText,
+    showToast,
+    recordKind,
+    copyToast: SHARE_CLIP_KAKAO_TOAST,
+  })
 }
 
 /** @param {File} file @param {string} [filename] */

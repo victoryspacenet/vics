@@ -2,6 +2,8 @@
  * 매치업 A vs B 공유·OG용 합성 썸네일 (1200×630)
  */
 const Jimp = require('jimp')
+const { getMatchupSharePhase } = require('./matchupShareCopy.cjs')
+const { renderKoreanSvgToJimp } = require('./koreanSvgRender.cjs')
 
 const OUT_W = 1200
 const OUT_H = 630
@@ -114,9 +116,7 @@ function wrapTextLines(text, maxCharsPerLine = 16, maxLines = 4) {
 }
 
 async function renderSvgPanelToJimp(svg) {
-  const sharp = require('sharp')
-  const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer()
-  return Jimp.read(pngBuffer)
+  return renderKoreanSvgToJimp(svg)
 }
 
 async function renderTextSidePanel(side) {
@@ -200,43 +200,20 @@ function resolveSide(matchup, side, baseUrl) {
   }
 }
 
-function hasRightContent(matchup) {
-  return Boolean(
-    matchup.right_type
-    || matchup.right_url
-    || matchup.right_thumbnail_url
-    || matchup.right_text
-    || matchup.is_complete,
-  )
-}
-
 async function renderChallengeRecruitPanel() {
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" width="${HALF_W}" height="${OUT_H}" viewBox="0 0 ${HALF_W} ${OUT_H}">
   <rect width="${HALF_W}" height="${OUT_H}" fill="#022c22"/>
   <circle cx="${HALF_W / 2}" cy="${OUT_H / 2 - 8}" r="78" fill="none" stroke="rgba(52,211,153,0.35)" stroke-width="2"/>
-  <text x="${HALF_W / 2}" y="${OUT_H / 2 - 24}" text-anchor="middle" fill="#6ee7b7" font-size="30" font-weight="700" font-family="sans-serif">도전자</text>
-  <text x="${HALF_W / 2}" y="${OUT_H / 2 + 14}" text-anchor="middle" fill="#6ee7b7" font-size="30" font-weight="700" font-family="sans-serif">모집 중</text>
+  <text x="${HALF_W / 2}" y="${OUT_H / 2 - 6}" text-anchor="middle" dominant-baseline="middle" fill="#6ee7b7" font-size="28" font-weight="700" font-family="sans-serif">도전자 모집 중</text>
   <text x="${HALF_W / 2}" y="${OUT_H / 2 + 72}" text-anchor="middle" font-size="34">⚔️</text>
 </svg>`
 
   try {
-    const sharp = require('sharp')
-    const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer()
-    return Jimp.read(pngBuffer)
+    return await renderKoreanSvgToJimp(svg)
   } catch (e) {
     console.warn('[matchupShareComposite] challenge panel svg render failed', e?.message || e)
-    const panel = new Jimp(HALF_W, OUT_H, COLORS.challengeBg)
-    const fonts = await getFonts()
-    panel.print(fonts.small, 0, Math.floor(OUT_H / 2) - 24, {
-      text: 'Challenger',
-      alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
-    }, HALF_W, 40)
-    panel.print(fonts.small, 0, Math.floor(OUT_H / 2) + 4, {
-      text: 'Recruit',
-      alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
-    }, HALF_W, 40)
-    return panel
+    return new Jimp(HALF_W, OUT_H, COLORS.challengeBg)
   }
 }
 
@@ -334,12 +311,15 @@ async function composeMatchupShareImage(matchup, baseUrl) {
 
   const left = resolveSide(matchup, 'left', baseUrl)
   let right = resolveSide(matchup, 'right', baseUrl)
-  if (!hasRightContent(matchup) && !right.imageUrl) {
+  const isRecruiting = getMatchupSharePhase(matchup) === 'recruiting'
+  if (isRecruiting) {
     right = {
       imageUrl: null,
-      label: right.label,
+      label: String(matchup.right_label || 'B').slice(0, 12),
       bg: COLORS.challengeBg,
       labelBg: COLORS.rightLabel,
+      bgHex: '#022c22',
+      labelBgHex: '#10b981',
       type: 'challenge',
     }
   }

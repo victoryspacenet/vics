@@ -13,6 +13,22 @@ const {
 const supabaseUrl = process.env.VITE_SUPABASE_URL || ''
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || ''
 
+async function fetchShareSnapshotFallback(shareId) {
+  if (!shareId || !supabaseUrl || !supabaseAnonKey) return null
+  try {
+    const supabase = createClient(supabaseUrl, supabaseAnonKey)
+    const { data, error } = await supabase
+      .from('tendency_report_shares')
+      .select('report_snapshot')
+      .eq('id', shareId)
+      .maybeSingle()
+    if (error || !data?.report_snapshot) return null
+    return data.report_snapshot
+  } catch {
+    return null
+  }
+}
+
 async function fetchShareSnapshot(shareId) {
   if (!shareId || !supabaseUrl || !supabaseAnonKey) return null
   try {
@@ -20,12 +36,12 @@ async function fetchShareSnapshot(shareId) {
     const { data, error } = await supabase.rpc('get_tendency_report_share', {
       p_share_id: shareId,
     })
-    if (error) return null
+    if (error) return fetchShareSnapshotFallback(shareId)
     const row = typeof data === 'string' ? JSON.parse(data) : data
-    if (!row?.ok || !row.report_snapshot) return null
+    if (!row?.ok || !row.report_snapshot) return fetchShareSnapshotFallback(shareId)
     return row.report_snapshot
   } catch {
-    return null
+    return fetchShareSnapshotFallback(shareId)
   }
 }
 

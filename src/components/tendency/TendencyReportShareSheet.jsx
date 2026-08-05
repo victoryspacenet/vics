@@ -1,8 +1,10 @@
 import { ExternalLink, Link2, X } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import { cn } from '../../lib/utils'
-import { buildTendencyShareMiddleLine, warmTendencySharePreview } from '../../lib/tendencyReportShare'
-import { copyToClipboard } from '../../lib/utils'
+import {
+  buildTendencyShareMiddleLine,
+  copyTendencyShareLink,
+} from '../../lib/tendencyReportShare'
 import { Logo } from '../ui/Logo'
 
 /**
@@ -20,21 +22,8 @@ export function TendencyReportShareSheet({
   const middleLine = buildTendencyShareMiddleLine(report)
 
   const handleCopyLink = async () => {
-    if (!shareUrl || !shareUrl.includes('/report/tendency/s/')) {
-      showToast?.('공유 링크를 아직 만들지 못했어요. 잠시 후 다시 시도해 주세요', 'error')
-      return
-    }
-    try {
-      await warmTendencySharePreview({ shareUrl, report })
-      await copyToClipboard(shareUrl)
-      showToast?.(
-        '링크를 복사했어요. 카카오톡에 붙이면 로고·성향 문구·링크 미리보기가 뜹니다 📋',
-        'success',
-      )
-      onClose?.()
-    } catch {
-      showToast?.('복사에 실패했어요. 아래 링크를 길게 눌러 복사해 주세요', 'error')
-    }
+    const ok = await copyTendencyShareLink({ report, shareUrl, showToast })
+    if (ok) onClose?.()
   }
 
   return (
@@ -62,7 +51,7 @@ export function TendencyReportShareSheet({
       </div>
 
       <p className="text-[11px] leading-relaxed text-violet-200/55 text-center px-1">
-        링크만 복사해 카톡에 붙여 넣으면, 메인 OG와 겹치지 않고 위 구성의 미리보기 카드가 표시됩니다.
+        링크 복사 후 카카오톡에 붙이면 위 문구와 미리보기 카드가 함께 표시됩니다.
       </p>
 
       <a
