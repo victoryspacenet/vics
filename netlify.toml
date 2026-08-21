@@ -8,6 +8,21 @@
   publish = "dist"
   functions = "netlify/functions"
 
+# sharp는 네이티브 바이너리라 번들링하면 깨진다. node_modules에서 그대로 복사시킨다.
+[functions]
+  external_node_modules = ["sharp"]
+
+# OG 썸네일 합성용 폰트는 런타임에 fs로 읽어 번들 추적이 안 된다. 빠지면 한글이 '???'로 찍히거나
+# 이미지 생성이 통째로 실패한다. 폰트를 쓰는 세 함수에만 싣는다(site-og-image는 텍스트가 없어 무관).
+[functions."matchup-share-image"]
+  included_files = ["netlify/fonts/**", "netlify/node_modules/jimp/fonts/**"]
+
+[functions."tendency-og-image"]
+  included_files = ["netlify/fonts/**"]
+
+[functions."ranking-share-image"]
+  included_files = ["netlify/fonts/**"]
+
 # 로컬 `npm run dev:netlify` — 브라우저는 http://localhost:8888
 # (Vite만 쓸 때는 `npm run dev` → http://localhost:5173)
 # targetPort: Netlify가 붙을 Vite 포트. Vite를 따로 띄우지 말고 netlify dev 한 번만 실행하는 것을 권장.

@@ -120,6 +120,23 @@ export function Header() {
             'lg:justify-end lg:overflow-visible',
           )}
         >
+        {/* 빅스사용법 — 바이올렛·인디고 MZ */}
+        <Link
+          to="/landing"
+          className={cn(
+            'flex flex-shrink-0 touch-manipulation items-center gap-1.5 rounded-2xl border px-3 py-2.5 text-xs font-black transition-all duration-300 sm:py-2 sm:text-sm whitespace-nowrap',
+            shellLd
+              ? location.pathname === '/landing'
+                ? 'border-violet-400/50 bg-gradient-to-br from-violet-500 via-indigo-600 to-slate-900 text-violet-50 shadow-[0_4px_18px_-4px_rgba(139,92,246,0.35)] ring-1 ring-violet-200/25'
+                : 'border-slate-600/80 bg-slate-900/70 text-violet-100/90 hover:border-violet-500/40 hover:bg-slate-800/80 hover:shadow-md hover:shadow-violet-900/30 active:scale-[0.98]'
+              : location.pathname === '/landing'
+                ? 'border-violet-400/50 bg-gradient-to-br from-violet-400 via-indigo-500 to-purple-600 text-white shadow-[0_4px_18px_-4px_rgba(139,92,246,0.45)] ring-1 ring-white/60'
+                : 'border-violet-200/70 bg-gradient-to-br from-violet-50/90 to-indigo-50/40 text-violet-800 hover:border-violet-300 hover:from-violet-50 hover:to-indigo-50 hover:shadow-md hover:shadow-violet-200/30 active:scale-[0.98]',
+          )}
+        >
+          <Sparkles size={14} strokeWidth={2.4} className="shrink-0" />
+          빅스사용법
+        </Link>
         {/* 매치업목록 — 민트·라임 MZ */}
         <Link
           to="/matchups"
@@ -415,14 +432,6 @@ export function Header() {
                         <FileText size={15} className="shrink-0 text-fuchsia-400" />
                         내 문의 내역 보기
                       </Link>
-                      <Link
-                        to="/landing"
-                        onClick={() => setProfileMenuOpen(false)}
-                        className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-violet-700 transition-colors hover:bg-violet-50"
-                      >
-                        <Sparkles size={15} className="shrink-0 text-violet-500" />
-                        서비스 소개
-                      </Link>
                       {showAdminNav && (
                         <Link
                           to="/admin/dashboard"
@@ -487,14 +496,6 @@ export function Header() {
               )}
             >
               <Compass size={18} strokeWidth={2.25} />
-            </Link>
-            {/* 모바일 전용: 서비스 소개 아이콘 버튼 */}
-            <Link
-              to="/landing"
-              className="md:hidden flex h-11 w-11 touch-manipulation items-center justify-center rounded-xl p-2 text-violet-400 transition-colors hover:bg-violet-50 hover:text-violet-600"
-              title="서비스 소개"
-            >
-              <Sparkles size={18} />
             </Link>
             <button
               type="button"

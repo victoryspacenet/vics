@@ -68,23 +68,14 @@ const ogHandler = async (event) => {
     const ua = event.headers['user-agent'] || event.headers['User-Agent'] || ''
     const isScraper = isOgScraperUserAgent(ua)
 
+    // 스크래퍼가 아니면 반드시 SPA를 내려야 한다. 스텁을 내려주면 링크를 탄 실사용자에게
+    // 앱이 뜨지 않고 텍스트 한 줄만 보인다. SPA를 아예 못 가져온 경우에만 스텁으로 대체.
     let html
     if (isScraper) {
       html = buildOgScraperHtml(meta)
     } else {
       const indexHtml = await fetchSpaIndexHtml(baseUrl)
-      if (!indexHtml) {
-        html = buildOgScraperHtml(meta)
-      } else {
-        html = injectOgIntoHtml(indexHtml, meta)
-        if (
-          html.includes('VICS — 1대1 경쟁 플랫폼') &&
-          meta.ogTitle &&
-          !meta.ogTitle.includes('1대1 경쟁')
-        ) {
-          html = buildOgScraperHtml(meta)
-        }
-      }
+      html = indexHtml ? injectOgIntoHtml(indexHtml, meta) : buildOgScraperHtml(meta)
     }
 
     return {

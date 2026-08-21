@@ -697,7 +697,7 @@ async function tryNativeShareWithImage({ safeTitle, url, imageUrl, matchup, safe
   try {
     const blob = await resolveShareBlob({ imageUrl, matchup, safeMediaUrlFn })
     const file = await blobToShareFile(blob)
-    const payload = { title: safeTitle, text: safeTitle, url, files: [file] }
+    const payload = { text: `${safeTitle}\n${url}`, files: [file] }
     if (navigator.canShare && !navigator.canShare(payload)) return false
     await navigator.share(payload)
     notify('공유했어요')
@@ -969,7 +969,9 @@ async function shareKakaoWithClipFallback({
 
   const tryWebShare = async () => {
     if (!navigator.share) return false
-    const payload = { title: safeTitle, text: resolvedClip, url }
+    // clip 안에 이미 제목과 URL이 들어 있다. title·url을 함께 넘기면 카톡이 앞뒤로 덧붙여
+    // "제목 - 제목 … URL URL" 처럼 중복되므로 text 하나만 넘긴다.
+    const payload = { text: resolvedClip }
     try {
       if (navigator.canShare && !navigator.canShare(payload)) return false
       await navigator.share(payload)
@@ -1181,7 +1183,8 @@ export async function shareClickableLinkCard({
   const clipText = buildShareClipText({ headline: safeTitle, description, url })
 
   if (shareFile && isMobile && typeof navigator !== 'undefined' && navigator.share) {
-    const payload = { title: safeTitle, text: clipText, url, files: [shareFile] }
+    // clipText가 제목·URL을 이미 포함 → title·url 중복 전달 금지
+    const payload = { text: clipText, files: [shareFile] }
     try {
       if (!navigator.canShare || navigator.canShare(payload)) {
         await navigator.share(payload)

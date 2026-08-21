@@ -71,10 +71,11 @@ function getMatchupShareTextPreview(matchup, { maxLen = 100 } = {}) {
   return parts.join(' · ')
 }
 
+/** 카카오는 설명을 두 줄만 보여준다. 본문을 뒤에 붙이면 잘려서 안 보이므로 앞에 둔다. */
 function buildMatchupShareOgDescription(matchup, baseDescription) {
   const preview = getMatchupShareTextPreview(matchup, { maxLen: 80 })
   if (!preview) return baseDescription
-  return `${baseDescription} · ${preview}`
+  return `${preview} · ${baseDescription}`
 }
 
 module.exports = {

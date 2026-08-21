@@ -6,7 +6,9 @@ const path = require('path')
 const Jimp = require('jimp')
 
 const KOREAN_FONT_FAMILY = 'NotoSansKR'
+// 저장소에 넣어둔 사본이 1순위. node_modules는 Netlify 번들에 안 실릴 수 있어 폴백으로만 둔다.
 const FONT_CANDIDATES = [
+  '../fonts/noto-sans-kr-korean-700-normal.woff2',
   '../node_modules/@fontsource/noto-sans-kr/files/noto-sans-kr-korean-700-normal.woff2',
   '../node_modules/@fontsource/noto-sans-kr/files/noto-sans-kr-korean-700-normal.woff',
 ]

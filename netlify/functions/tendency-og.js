@@ -95,25 +95,14 @@ const ogHandler = async (event) => {
   const ua = event.headers['user-agent'] || event.headers['User-Agent'] || ''
   const isScraper = isOgScraperUserAgent(ua)
 
-  // 카카오·SNS 링크 미리보기 봇은 SPA inject 대신 OG 전용 HTML (중복 meta·메인 OG 노출 방지)
+  // 카카오·SNS 링크 미리보기 봇은 SPA inject 대신 OG 전용 HTML (중복 meta·메인 OG 노출 방지).
+  // 실사용자에게는 항상 SPA를 내려야 한다 — 스텁을 주면 링크를 탄 사람에게 앱이 뜨지 않는다.
   let html
   if (isScraper) {
     html = buildOgScraperHtml(meta)
   } else {
     const indexHtml = await fetchSpaIndexHtml(baseUrl)
-    if (!indexHtml) {
-      html = buildOgScraperHtml(meta)
-    } else {
-      html = injectOgIntoHtml(indexHtml, meta)
-      // inject 실패 시 index.html 기본 OG가 남을 수 있음 → 메인 OG 재노출 방지
-      if (
-        html.includes('VICS — 1대1 경쟁 플랫폼') &&
-        meta.ogTitle &&
-        !meta.ogTitle.includes('1대1 경쟁')
-      ) {
-        html = buildOgScraperHtml(meta)
-      }
-    }
+    html = indexHtml ? injectOgIntoHtml(indexHtml, meta) : buildOgScraperHtml(meta)
   }
 
   return {

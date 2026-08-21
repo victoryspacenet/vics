@@ -95,11 +95,11 @@ export function getMatchupShareTextPreview(matchup, { maxLen = 100 } = {}) {
   return parts.join('\n')
 }
 
-/** OG description — 텍스트형 본문을 한 줄로 이어 붙임 */
+/** OG description — 카카오는 두 줄만 보여주므로 본문을 앞에 둬야 잘리지 않는다 */
 export function buildMatchupShareOgDescription(matchup, baseDescription) {
   const preview = getMatchupShareTextPreview(matchup, { maxLen: 80 })
   if (!preview) return baseDescription
-  return `${baseDescription} · ${preview.replace(/\n/g, ' · ')}`
+  return `${preview.replace(/\n/g, ' · ')} · ${baseDescription}`
 }
 
 /** 링크 복사·카톡 붙여넣기용 — 제목 + 설명 + (텍스트형 본문) + 빈 줄 + URL */

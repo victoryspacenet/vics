@@ -91,20 +91,18 @@ function sanitizeCategoryLabel(label) {
   return cleaned || null
 }
 
-/** 카테고리 라벨별 세부 판정 기준 — 관리자가 만든 카테고리 이름과 정확히 일치할 때만 적용 */
+/** 카테고리 라벨별 참고 — 세부 소재가 어긋나도 같은 대분야면 통과하도록 안내 */
 function categoryHintKo(categoryLabel) {
   if (categoryLabel === '맛집') {
     return (
-      `⚠️ "맛집" 카테고리 세부 기준: 음식(요리) 자체가 아니라 "음식점이라는 공간"이 중심이어야 합니다.\n` +
-      `외관·간판·매장 인테리어·좌석·웨이팅 줄·분위기 등 장소를 보여주는 콘텐츠는 높은 점수.\n` +
-      `반대로 음식/요리 클로즈업이 화면의 주인공이고 매장 공간이 거의 안 보이면, 그건 "맛식"에 가까우니 낮은 점수(0~30)를 주세요.\n\n`
+      `참고: "맛집"은 매장·공간 중심이 이상적이지만, A·B 모두 음식·외식과 연관되면 같은 대분야로 보고 통과 수준의 점수를 주세요.\n` +
+      `B가 맛식에 가까운 음식 클로즈업이어도 음식·외식 주제면 거부 사유가 아닙니다.\n\n`
     )
   }
   if (categoryLabel === '맛식') {
     return (
-      `⚠️ "맛식" 카테고리 세부 기준: 음식점이라는 공간이 아니라 "음식(요리) 자체"가 중심이어야 합니다.\n` +
-      `플레이팅·요리 클로즈업·먹는 모습·재료 등 음식이 주인공인 콘텐츠는 높은 점수.\n` +
-      `반대로 매장 외관·인테리어 등 공간만 보이고 음식이 주인공이 아니면, 그건 "맛집"에 가까우니 낮은 점수(0~30)를 주세요.\n\n`
+      `참고: "맛식"은 음식·요리 중심이 이상적이지만, A·B 모두 음식·외식·매장과 연관되면 같은 대분야로 보고 통과 수준의 점수를 주세요.\n` +
+      `B가 맛집에 가까운 매장 사진이어도 음식·외식 주제면 거부 사유가 아닙니다.\n\n`
     )
   }
   return ''
@@ -112,7 +110,7 @@ function categoryHintKo(categoryLabel) {
 
 function buildUserContentParts({ title, description, categoryLabel, left, right }) {
   const categoryLine = categoryLabel
-    ? `카테고리(필수 맥락): ${categoryLabel}\n도전자(B)는 이 카테고리·A의 주제와 같은 분야여야 합니다. 다른 분야(예: 패션 vs 음식)는 0~25점.\n\n${categoryHintKo(categoryLabel)}`
+    ? `카테고리(맥락): ${categoryLabel}\nB는 이 카테고리·A와 **같은 대분야·주제 영역**이면 됩니다. 완전히 다른 분야(예: 패션 vs 음식)만 0~25점.\n\n${categoryHintKo(categoryLabel)}`
     : ''
 
   const parts = [
@@ -120,9 +118,16 @@ function buildUserContentParts({ title, description, categoryLabel, left, right 
       type: 'text',
       text:
         `아래는 한국어 매치업 앱 "VICS"의 경쟁입니다. A=매치업 메이커, B=도전자.\n` +
-        `B가 A와 같은 경쟁 주제·카테고리·시각적 맥락에 맞는지 0~100 정수로 엄격히 평가하세요.\n` +
-        `100=같은 주제·같은 카테고리·같은 맥락, 0=완전히 다른 주제·다른 카테고리·악의적 무관 콘텐츠.\n` +
-        `이미지/영상이 첨부되면 반드시 시각 내용을 우선해 판단하세요. 텍스트만으로 관대하게 점수를 주지 마세요.\n` +
+        `B가 A·선택 카테고리와 **같은 대분야·주제 영역**에 속하는지 0~100 정수로 평가하세요.\n` +
+        `100=같은 분야·같은 경쟁 맥락, 0=완전히 다른 분야·악의적 무관 콘텐츠.\n\n` +
+        `✅ 통과 기준 — 아래 중 하나만 해당하면 세부 차이와 관계없이 통과:\n` +
+        `- B가 A·카테고리와 같은 대분야·도메인\n` +
+        `- B가 같은 경쟁 주제(같은 카테고리 안의 대결)에 참여하는 콘텐츠\n\n` +
+        `❌ 감점하면 안 되는 것(같은 대분야면 점수 유지):\n` +
+        `- A와 B의 구체적 소재·장면·대상이 다름 (다른 매장, 다른 사진, 다른 문장)\n` +
+        `- 표현·톤·구도·각도·세부 장르 차이 (맛집 vs 맛식 등)\n` +
+        `- 텍스트 vs 이미지/영상 내용의 세부 차이\n\n` +
+        `이미지/영상이 있으면 시각 내용을 참고하되, 위 세부 차이만으로 낮은 점수를 주지 마세요.\n` +
         `반드시 JSON 한 객체만: {"similarity":정수0~100,"reason_ko":"한국어 한 문장"}\n\n` +
         categoryLine +
         `경쟁 제목: ${title || '(없음)'}\n` +
@@ -196,8 +201,9 @@ async function scoreWithOpenAI(payload) {
           {
             role: 'system',
             content:
-              'You compare challenger(B) vs maker(A) content for thematic fit in a Korean matchup app. ' +
-              'Be strict: different categories or unrelated visuals (e.g. fashion vs food) must score 0-25. ' +
+              'You compare challenger(B) vs maker(A) content for broad thematic fit in a Korean matchup app. ' +
+              'Pass when B is in the same general field/category as A, even if specific subject, scene, wording, tone, angle, or sub-genre differ. ' +
+              'Only score 0-25 when B is from a completely unrelated domain (e.g. A is food but B is pure fashion). ' +
               'Use attached images when present. Output JSON only.',
           },
           { role: 'user', content: parts },
@@ -312,7 +318,7 @@ exports.handler = withIpRateLimit(async (event) => {
     }
   }
 
-  const minSim = Math.max(0, Math.min(100, parseInt(process.env.MATCHUP_CHALLENGE_SIMILARITY_MIN || '55', 10)))
+  const minSim = Math.max(0, Math.min(100, parseInt(process.env.MATCHUP_CHALLENGE_SIMILARITY_MIN || '45', 10)))
   const failOpen = String(process.env.MATCHUP_SIMILARITY_FAIL_OPEN || '').trim() === '1'
   const requireAi = String(process.env.MATCHUP_SIMILARITY_REQUIRE_AI || '').trim() === '1'
 

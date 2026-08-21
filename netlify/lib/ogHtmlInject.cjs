@@ -10,20 +10,25 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;')
 }
 
+/** index.html은 `content="..." />` 처럼 닫기 전 공백을 쓰므로 `\s*`가 없으면 하나도 매칭되지 않는다 */
+function metaTagRegex(attr, name) {
+  return new RegExp(`<meta ${attr}="${name}" content="[^"]*"\\s*/?>\\s*`, 'gi')
+}
+
 function stripExistingShareMeta(html) {
   return String(html || '')
-    .replace(/<meta property="og:type" content="[^"]*"\/?>\s*/gi, '')
-    .replace(/<meta property="og:url" content="[^"]*"\/?>\s*/gi, '')
-    .replace(/<meta property="og:title" content="[^"]*"\/?>\s*/gi, '')
-    .replace(/<meta property="og:description" content="[^"]*"\/?>\s*/gi, '')
-    .replace(/<meta property="og:image(?::[^"]*)?" content="[^"]*"\/?>\s*/gi, '')
-    .replace(/<meta property="og:site_name" content="[^"]*"\/?>\s*/gi, '')
-    .replace(/<meta property="og:locale" content="[^"]*"\/?>\s*/gi, '')
-    .replace(/<meta name="twitter:card" content="[^"]*"\/?>\s*/gi, '')
-    .replace(/<meta name="twitter:url" content="[^"]*"\/?>\s*/gi, '')
-    .replace(/<meta name="twitter:title" content="[^"]*"\/?>\s*/gi, '')
-    .replace(/<meta name="twitter:description" content="[^"]*"\/?>\s*/gi, '')
-    .replace(/<meta name="twitter:image" content="[^"]*"\/?>\s*/gi, '')
+    .replace(metaTagRegex('property', 'og:type'), '')
+    .replace(metaTagRegex('property', 'og:url'), '')
+    .replace(metaTagRegex('property', 'og:title'), '')
+    .replace(metaTagRegex('property', 'og:description'), '')
+    .replace(/<meta property="og:image(?::[^"]*)?" content="[^"]*"\s*\/?>\s*/gi, '')
+    .replace(metaTagRegex('property', 'og:site_name'), '')
+    .replace(metaTagRegex('property', 'og:locale'), '')
+    .replace(metaTagRegex('name', 'twitter:card'), '')
+    .replace(metaTagRegex('name', 'twitter:url'), '')
+    .replace(metaTagRegex('name', 'twitter:title'), '')
+    .replace(metaTagRegex('name', 'twitter:description'), '')
+    .replace(metaTagRegex('name', 'twitter:image'), '')
 }
 
 function injectOgIntoHtml(html, meta) {
@@ -35,7 +40,7 @@ function injectOgIntoHtml(html, meta) {
 
   let out = stripExistingShareMeta(html)
     .replace(/<title>.*?<\/title>/s, `<title>${pageTitle}</title>`)
-    .replace(/<meta name="description" content="[^"]*"\/?>/, `<meta name="description" content="${d}" />`)
+    .replace(/<meta name="description" content="[^"]*"\s*\/?>/i, `<meta name="description" content="${d}" />`)
 
   const ogBlock = `
   <meta property="og:type" content="website" />

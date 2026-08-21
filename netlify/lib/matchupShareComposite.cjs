@@ -72,12 +72,26 @@ function blendPixelColor(baseColor, overlayColor, alpha) {
   )
 }
 
+/** Jimp 비트맵 폰트는 런타임에 fnt/png를 fs로 읽는다. 번들에 빠지면 throw → 폴백까지 죽는다. */
 async function getFonts() {
+  if (fontWhite16 === false) return null
   if (!fontWhite16) {
-    fontWhite16 = await Jimp.loadFont(Jimp.FONT_SANS_16_WHITE)
-    fontWhite32 = await Jimp.loadFont(Jimp.FONT_SANS_32_WHITE)
+    try {
+      fontWhite16 = await Jimp.loadFont(Jimp.FONT_SANS_16_WHITE)
+      fontWhite32 = await Jimp.loadFont(Jimp.FONT_SANS_32_WHITE)
+    } catch (e) {
+      console.warn('[matchupShareComposite] jimp bitmap font load failed', e?.message || e)
+      fontWhite16 = false
+      return null
+    }
   }
   return { small: fontWhite16, large: fontWhite32 }
+}
+
+/** Jimp 비트맵 폰트는 ASCII만 있어 한글을 '???'로 찍는다. 그럴 바엔 아무것도 안 찍는다. */
+function asciiOnly(value) {
+  const t = String(value || '').replace(/[^\x20-\x7E]/g, '').trim()
+  return t.length >= 2 ? t : ''
 }
 
 function absoluteMediaUrl(raw, baseUrl) {
@@ -144,10 +158,13 @@ async function renderTextSidePanel(side) {
     console.warn('[matchupShareComposite] text panel svg render failed', e?.message || e)
     const panel = new Jimp(HALF_W, OUT_H, side.bg)
     const fonts = await getFonts()
-    panel.print(fonts.large, 16, Math.floor(OUT_H / 2) - 24, {
-      text: String(side.text || '').slice(0, 40),
-      alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
-    }, HALF_W - 32, 120)
+    const text = asciiOnly(side.text).slice(0, 40)
+    if (fonts && text) {
+      panel.print(fonts.large, 16, Math.floor(OUT_H / 2) - 24, {
+        text,
+        alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
+      }, HALF_W - 32, 120)
+    }
     return panel
   }
 }
@@ -165,10 +182,13 @@ async function renderLabelBadge(side) {
   } catch {
     const badge = new Jimp(120, 26, side.labelBg)
     const fonts = await getFonts()
-    badge.print(fonts.small, 0, 4, {
-      text: String(side.label || '').slice(0, 12),
-      alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
-    }, 120, 26)
+    const label = asciiOnly(side.label).slice(0, 12)
+    if (fonts && label) {
+      badge.print(fonts.small, 0, 4, {
+        text: label,
+        alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
+      }, 120, 26)
+    }
     return badge
   }
 }
