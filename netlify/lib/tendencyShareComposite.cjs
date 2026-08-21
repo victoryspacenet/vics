@@ -2,7 +2,7 @@
  * 성향 리포트 공유 OG 썸네일 (1200×630) — 로고 · 성향 문구 · URL
  */
 const Jimp = require('jimp')
-const { wrapByChars, renderTextLayer } = require('./shareTextSvg.cjs')
+const { wrapToWidth, renderTextLayer } = require('./shareTextSvg.cjs')
 
 const OUT_W = 1200
 const OUT_H = 630
@@ -48,8 +48,8 @@ async function composeTendencyShareOgImage(opts = {}) {
     }
   }
 
-  const lines = wrapByChars(middleLine, 20, 3)
-  const lineHeight = 66
+  const lines = wrapToWidth(middleLine, 52, OUT_W - 200, 3)
+  const lineHeight = 72
   const blockTop = Math.max(contentTop + 40, Math.floor(OUT_H / 2) - ((lines.length - 1) * lineHeight) / 2)
 
   const nodes = lines.map((line, i) => ({
@@ -57,16 +57,8 @@ async function composeTendencyShareOgImage(opts = {}) {
     y: blockTop + i * lineHeight,
     text: line,
     size: 52,
-    weight: 700,
   }))
-  nodes.push({
-    x: OUT_W / 2,
-    y: OUT_H - 58,
-    text: urlLine,
-    size: 24,
-    weight: 400,
-    opacity: 0.75,
-  })
+  nodes.push({ x: OUT_W / 2, y: OUT_H - 58, text: urlLine, size: 24, opacity: 0.75 })
 
   const textLayer = await renderTextLayer({ width: OUT_W, height: OUT_H, nodes })
   if (textLayer) canvas.composite(textLayer, 0, 0)

@@ -2,7 +2,7 @@
  * 랭킹 갤러리 공유 OG 썸네일 (1200×630) — 로고 · 미니 카드 · 순위 · URL
  */
 const Jimp = require('jimp')
-const { wrapByChars, renderTextLayer } = require('./shareTextSvg.cjs')
+const { wrapToWidth, renderTextLayer } = require('./shareTextSvg.cjs')
 
 const OUT_W = 1200
 const OUT_H = 630
@@ -52,25 +52,25 @@ async function composeRankingShareOgImage(opts = {}) {
     }
   }
 
+  const textWidth = (OUT_W - textCenterX) * 2 - 80
   const nodes = []
   let y = Math.max(contentTop + 60, Math.floor(OUT_H / 2) - 70)
 
   if (nickname) {
-    for (const line of wrapByChars(`${nickname}님의 VICS 랭킹 카드`, 18, 2)) {
-      nodes.push({ x: textCenterX, y, text: line, size: 40, weight: 700 })
+    for (const line of wrapToWidth(`${nickname}님의 VICS 랭킹 카드`, 40, textWidth, 2)) {
+      nodes.push({ x: textCenterX, y, text: line, size: 40 })
       y += 54
     }
     y += 30
   }
 
-  nodes.push({ x: textCenterX, y, text: `#${rank} · ${tier}`, size: 68, weight: 700 })
-  y += 72
+  nodes.push({ x: textCenterX, y, text: `#${rank} · ${tier}`, size: 68 })
+  y += 74
   nodes.push({
     x: textCenterX,
     y,
     text: 'VictorySpace에서 나도 도전해 보세요',
     size: 30,
-    weight: 400,
     opacity: 0.82,
   })
   nodes.push({
@@ -78,7 +78,6 @@ async function composeRankingShareOgImage(opts = {}) {
     y: OUT_H - 58,
     text: 'www.victoryspace.net/ranking',
     size: 24,
-    weight: 400,
     opacity: 0.75,
   })
 

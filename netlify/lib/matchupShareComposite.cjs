@@ -4,6 +4,7 @@
 const Jimp = require('jimp')
 const { getMatchupSharePhase } = require('./matchupShareCopy.cjs')
 const { renderKoreanSvgToJimp } = require('./koreanSvgRender.cjs')
+const { textToSvgPath, wrapToWidth, measureText } = require('./koreanTextPath.cjs')
 
 const OUT_W = 1200
 const OUT_H = 630
@@ -102,31 +103,18 @@ function absoluteMediaUrl(raw, baseUrl) {
   return null
 }
 
-function escapeXml(value) {
-  return String(value || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
+const LABEL_SIZE = 15
+const LABEL_H = 28
 
-function wrapTextLines(text, maxCharsPerLine = 16, maxLines = 4) {
-  const raw = String(text || '').trim()
-  if (!raw) return []
-  const lines = []
-  let line = ''
-  for (const ch of raw) {
-    const next = line + ch
-    if (next.length > maxCharsPerLine && line) {
-      lines.push(line)
-      line = ch
-      if (lines.length >= maxLines) break
-    } else {
-      line = next
-    }
+/** 라벨 배지 — 글자 폭에 맞춰 알약 크기를 잡는다 */
+function labelBadgeSvgParts(label, labelBg, x, y) {
+  const w = Math.max(72, Math.round(measureText(label, LABEL_SIZE)) + 28)
+  return {
+    width: w,
+    markup:
+      `<rect x="${x}" y="${y}" rx="7" ry="7" width="${w}" height="${LABEL_H}" fill="${labelBg}"/>\n  ` +
+      textToSvgPath({ text: label, x: x + w / 2, y: y + LABEL_H / 2, size: LABEL_SIZE }),
   }
-  if (line && lines.length < maxLines) lines.push(line)
-  return lines.slice(0, maxLines)
 }
 
 async function renderSvgPanelToJimp(svg) {
@@ -136,19 +124,27 @@ async function renderSvgPanelToJimp(svg) {
 async function renderTextSidePanel(side) {
   const bgColor = side.bgHex || '#7c2d12'
   const labelBg = side.labelBgHex || '#f59e0b'
-  const lines = wrapTextLines(side.text, 16, 4)
-  const lineHeight = 36
+  const fontSize = 28
+  const lines = wrapToWidth(side.text, fontSize, HALF_W - 96, 4)
+  const lineHeight = 40
   const textStartY = Math.floor(OUT_H / 2 - ((Math.max(lines.length, 1) - 1) * lineHeight) / 2)
-  const textNodes = (lines.length ? lines : ['']).map((line, index) => (
-    `<text x="${HALF_W / 2}" y="${textStartY + index * lineHeight}" text-anchor="middle" dominant-baseline="middle" fill="#ffffff" font-size="28" font-weight="600" font-family="sans-serif">${escapeXml(line)}</text>`
-  )).join('\n')
+  const textNodes = lines
+    .map((line, index) =>
+      textToSvgPath({
+        text: line,
+        x: HALF_W / 2,
+        y: textStartY + index * lineHeight,
+        size: fontSize,
+      }),
+    )
+    .filter(Boolean)
+    .join('\n  ')
 
-  const label = escapeXml(side.label)
+  const badge = labelBadgeSvgParts(side.label, labelBg, 14, 14)
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" width="${HALF_W}" height="${OUT_H}" viewBox="0 0 ${HALF_W} ${OUT_H}">
   <rect width="${HALF_W}" height="${OUT_H}" fill="${bgColor}"/>
-  <rect x="14" y="14" rx="6" ry="6" width="88" height="26" fill="${labelBg}"/>
-  <text x="58" y="27" text-anchor="middle" dominant-baseline="middle" fill="#ffffff" font-size="14" font-weight="700" font-family="sans-serif">${label}</text>
+  ${badge.markup}
   ${textNodes}
 </svg>`
 
@@ -170,26 +166,25 @@ async function renderTextSidePanel(side) {
 }
 
 async function renderLabelBadge(side) {
-  const label = escapeXml(side.label)
   const labelBg = side.labelBgHex || '#f59e0b'
+  const badge = labelBadgeSvgParts(side.label, labelBg, 0, 0)
   const svg = `
-<svg xmlns="http://www.w3.org/2000/svg" width="120" height="26" viewBox="0 0 120 26">
-  <rect x="0" y="0" rx="6" ry="6" width="120" height="26" fill="${labelBg}"/>
-  <text x="60" y="13" text-anchor="middle" dominant-baseline="middle" fill="#ffffff" font-size="14" font-weight="700" font-family="sans-serif">${label}</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="${badge.width}" height="${LABEL_H}" viewBox="0 0 ${badge.width} ${LABEL_H}">
+  ${badge.markup}
 </svg>`
   try {
     return await renderSvgPanelToJimp(svg)
   } catch {
-    const badge = new Jimp(120, 26, side.labelBg)
+    const fallback = new Jimp(badge.width, LABEL_H, side.labelBg)
     const fonts = await getFonts()
     const label = asciiOnly(side.label).slice(0, 12)
     if (fonts && label) {
-      badge.print(fonts.small, 0, 4, {
+      fallback.print(fonts.small, 0, 5, {
         text: label,
         alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
-      }, 120, 26)
+      }, badge.width, LABEL_H)
     }
-    return badge
+    return fallback
   }
 }
 
@@ -225,8 +220,8 @@ async function renderChallengeRecruitPanel() {
 <svg xmlns="http://www.w3.org/2000/svg" width="${HALF_W}" height="${OUT_H}" viewBox="0 0 ${HALF_W} ${OUT_H}">
   <rect width="${HALF_W}" height="${OUT_H}" fill="#022c22"/>
   <circle cx="${HALF_W / 2}" cy="${OUT_H / 2 - 8}" r="78" fill="none" stroke="rgba(52,211,153,0.35)" stroke-width="2"/>
-  <text x="${HALF_W / 2}" y="${OUT_H / 2 - 6}" text-anchor="middle" dominant-baseline="middle" fill="#6ee7b7" font-size="28" font-weight="700" font-family="sans-serif">도전자 모집 중</text>
-  <text x="${HALF_W / 2}" y="${OUT_H / 2 + 72}" text-anchor="middle" font-size="34">⚔️</text>
+  ${textToSvgPath({ text: '도전자 모집 중', x: HALF_W / 2, y: OUT_H / 2 - 6, size: 30, fill: '#6ee7b7' })}
+  <path d="M${HALF_W / 2 - 22} ${OUT_H / 2 + 60} L${HALF_W / 2 + 22} ${OUT_H / 2 + 88} M${HALF_W / 2 + 22} ${OUT_H / 2 + 60} L${HALF_W / 2 - 22} ${OUT_H / 2 + 88}" stroke="rgba(110,231,183,0.6)" stroke-width="3" stroke-linecap="round" fill="none"/>
 </svg>`
 
   try {

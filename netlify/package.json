@@ -6,6 +6,10 @@
     "@fontsource/noto-sans-kr": "^5.2.5",
     "firebase-admin": "^13.0.2",
     "jimp": "^0.22.12",
+    "opentype.js": "^2.0.0",
     "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "wawoff2": "^2.0.1"
   }
 }
