@@ -9,7 +9,6 @@ import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
 import { supabase } from '../../lib/supabase'
 import { voteViaApi } from '../../lib/voteApi'
-import { fetchSpotlightDemoMatchups } from '../../lib/mainSpotlight'
 import { isSpotlightDemoMatchup } from '../../lib/spotlightDemo'
 import { SpotlightVoteEffects } from './SpotlightVoteEffects'
 import { displayVoteCounts, displayVoteTotal } from '../../lib/displayVoteCount'
@@ -612,50 +611,14 @@ function SpotlightSlide({ matchup: m, remainingSec }) {
 }
 
 /**
- * 메인 홈 상단 스포트라이트 — 가로 캐러셀
- * @param {object|null} primaryMatchup — Point Reward '메인 스포트라이트 6h' 등으로 예약된 매치업 (`fetchActiveMainSpotlightMatchup`). 없으면 데모만
+ * 메인 홈 상단 스포트라이트 — 실제 예약(Point Reward 6h)이 있을 때만 표시
+ * @param {object|null} primaryMatchup — `fetchActiveMainSpotlightMatchup` 결과
  */
 export function SpotlightSection({ primaryMatchup = null }) {
-  const user = useAuthStore((s) => s.user)
-  const [demoMatchups, setDemoMatchups] = useState([])
-
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      const rows = await fetchSpotlightDemoMatchups(user?.id ?? null)
-      if (!cancelled) setDemoMatchups(rows || [])
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [user?.id])
-
-  useEffect(() => {
-    const on = () => {
-      void (async () => {
-        const rows = await fetchSpotlightDemoMatchups(user?.id ?? null)
-        setDemoMatchups(rows || [])
-      })()
-    }
-    window.addEventListener('vics:spotlight-self-voted', on)
-    return () => window.removeEventListener('vics:spotlight-self-voted', on)
-  }, [user?.id])
-
-  const slides = useMemo(() => {
-    const seen = new Set()
-    const out = []
-    if (primaryMatchup?.id) {
-      out.push(primaryMatchup)
-      seen.add(primaryMatchup.id)
-    }
-    for (const row of demoMatchups) {
-      if (row?.id && !seen.has(row.id)) {
-        seen.add(row.id)
-        out.push(row)
-      }
-    }
-    return out.slice(0, 4)
-  }, [primaryMatchup, demoMatchups])
+  const slides = useMemo(
+    () => (primaryMatchup?.id ? [primaryMatchup] : []),
+    [primaryMatchup],
+  )
 
   const ids = useMemo(() => slides.map((s) => s.id), [slides])
   const endMapRef = useSpotlightEndTimes(ids)
@@ -699,14 +662,6 @@ export function SpotlightSection({ primaryMatchup = null }) {
         <p className="mx-auto mt-1 max-w-md text-xs font-semibold leading-relaxed text-slate-600 sm:text-sm">
           현재 가장 뜨겁게 주목받고 있는 1VS1 경쟁
         </p>
-        {!primaryMatchup?.id ? (
-          <p className="mx-auto mt-2 max-w-lg rounded-lg border border-amber-200/80 bg-amber-50/90 px-3 py-2 text-[11px] font-bold leading-snug text-amber-950/90">
-            활성 메인 스포트라이트 예약이 없을 때도{' '}
-            <span className="underline decoration-amber-600/80">아래 데모 매치업</span>으로 투표를 체험할 수
-            있어요. 데모는 DB에 저장되지만 포인트·랭킹·작성자 알림에는 반영되지 않아요. 예약된 슬롯(LIVE 맨
-            앞)만 포인트 정산이 적용돼요.
-          </p>
-        ) : null}
       </div>
 
       <div className="relative flex items-stretch gap-1 sm:gap-2">
