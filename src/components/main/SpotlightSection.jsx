@@ -12,6 +12,7 @@ import { voteViaApi } from '../../lib/voteApi'
 import { fetchSpotlightDemoMatchups } from '../../lib/mainSpotlight'
 import { isSpotlightDemoMatchup } from '../../lib/spotlightDemo'
 import { SpotlightVoteEffects } from './SpotlightVoteEffects'
+import { displayVoteCounts, displayVoteTotal } from '../../lib/displayVoteCount'
 
 /**
  * 좌·우 컬럼 상단 표시 이름
@@ -336,9 +337,14 @@ function SpotlightSlide({ matchup: m, remainingSec }) {
     setPhase('done')
   }, [m.id, m.viewer_vote_side, isDemo, isParticipant, user?.id])
 
-  const totalPair = counts.l + counts.r
-  const targetL = totalPair > 0 ? Math.round((100 * counts.l) / totalPair) : 50
-  const targetR = totalPair > 0 ? 100 - targetL : 50
+  const shownVotes = displayVoteCounts({
+    id: m.id,
+    left_votes: counts.l,
+    right_votes: counts.r,
+    total_votes: counts.t,
+  })
+  const targetL = shownVotes.leftPct
+  const targetR = shownVotes.rightPct
 
   useEffect(() => {
     if (phase === 'spectate') {
@@ -585,10 +591,10 @@ function SpotlightSlide({ matchup: m, remainingSec }) {
                   : submitting
                     ? '처리 중…'
                     : !user
-                      ? `로그인 후 투표 (${counts.t.toLocaleString('ko-KR')}명 참여 중)`
-                      : isDemo
-                        ? `데모 투표하기 (${counts.t.toLocaleString('ko-KR')}명 참여 중)`
-                        : `지금 바로 투표하기 (${counts.t.toLocaleString('ko-KR')}명 참여 중)`}
+                      ? `로그인 후 투표 (${displayVoteTotal(counts.t, m.id).toLocaleString('ko-KR')}명 참여 중)`
+                        : isDemo
+                        ? `데모 투표하기 (${displayVoteTotal(counts.t, m.id).toLocaleString('ko-KR')}명 참여 중)`
+                        : `지금 바로 투표하기 (${displayVoteTotal(counts.t, m.id).toLocaleString('ko-KR')}명 참여 중)`}
           </button>
 
           <div className="flex justify-center">

@@ -7,8 +7,10 @@ import {
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
+import { usePageEnterSound } from '../lib/uxSounds'
 import { useUIStore } from '../store/uiStore'
-import { formatNumber, calcPercent, cn, formatDate } from '../lib/utils'
+import { formatNumber, cn, formatDate } from '../lib/utils'
+import { displayVotePercents, displayVoteTotal } from '../lib/displayVoteCount'
 import { formatMatchupRegisteredAt } from '../lib/matchupRegisteredAt'
 import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../lib/layoutShellClasses'
 import { sanitizeText, safeMediaUrl } from '../lib/sanitize'
@@ -111,6 +113,7 @@ function analyzeVotedEntry(v) {
 }
 
 export function MyPage() {
+  usePageEnterSound('myPageEnter')
   const { user, profile, fetchProfile, loading: authLoading } = useAuthStore()
   const { openCreateDrawer, openLoginModal, showToast } = useUIStore()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -813,7 +816,7 @@ export function MyPage() {
                   <span>·</span>
                   <span>종료됨 {createdPhaseCounts.ended}개</span>
                   <span>·</span>
-                  <span>총 {formatNumber(myLedMatchups.reduce((s, m) => s + (m.total_votes || 0), 0))}표 획득</span>
+                  <span>총 {formatNumber(myLedMatchups.reduce((s, m) => s + displayVoteTotal(m.total_votes, m.id), 0))}표 획득</span>
                 </div>
               </div>
 
@@ -1112,7 +1115,7 @@ function CreatedMatchupFullCard({ matchup: m, myRole = 'creator' }) {
   const rightThumb = resolveMatchupSideMediaUrl(rightType, { url: m.right_url, thumbnail: m.right_thumbnail_url })
   const leftText = readMatchupSideText(leftType, m.left_text)
   const rightText = readMatchupSideText(rightType, m.right_text)
-  const { left, right } = calcPercent(m.left_votes, m.right_votes)
+  const { left, right } = displayVotePercents(m)
 
   const topBarClass = isLive
     ? 'bg-gradient-to-r from-emerald-400 via-teal-500 to-cyan-400'
@@ -1209,7 +1212,7 @@ function CreatedMatchupFullCard({ matchup: m, myRole = 'creator' }) {
         <div className="px-4 pb-2">
           <div className="flex justify-between text-[10px] font-black mb-1">
             <span className="text-amber-600">{m.left_label || 'A'} {left}%</span>
-            <span className="text-gray-400">{formatNumber(m.total_votes)}표</span>
+            <span className="text-gray-400">{formatNumber(displayVoteTotal(m.total_votes, m.id))}표</span>
             <span className="text-violet-500">{right}% {m.right_label || 'B'}</span>
           </div>
           <div className="h-2 bg-gray-100 rounded-full overflow-hidden flex">
@@ -1232,8 +1235,8 @@ function CreatedMatchupFullCard({ matchup: m, myRole = 'creator' }) {
         <div className="flex items-center gap-1.5 text-sm text-gray-500">
           <Users size={13} className="text-fuchsia-400" />
           {isLive
-            ? <span><span className="font-black text-fuchsia-700">{formatNumber(m.total_votes || 0)}명</span> 실시간 참여 중</span>
-            : <span>최종 <span className="font-black text-[#22282E]">{formatNumber(m.total_votes || 0)}명</span> 참여</span>
+            ? <span><span className="font-black text-fuchsia-700">{formatNumber(displayVoteTotal(m.total_votes, m.id))}명</span> 실시간 참여 중</span>
+            : <span>최종 <span className="font-black text-[#22282E]">{formatNumber(displayVoteTotal(m.total_votes, m.id))}명</span> 참여</span>
           }
         </div>
         <Link
@@ -1311,7 +1314,7 @@ function CreatedMatchupCard({ matchup: m }) {
   const isDraw     = (m.left_votes || 0) === (m.right_votes || 0)
   const winner     = isDraw ? 'draw' : (m.left_votes > m.right_votes ? 'left' : 'right')
   const thumb      = m.left_thumbnail_url || (m.left_type === 'image' ? m.left_url : null)
-  const { left, right } = calcPercent(m.left_votes, m.right_votes)
+  const { left, right } = displayVotePercents(m)
 
   return (
     <Link
@@ -1362,7 +1365,7 @@ function CreatedMatchupCard({ matchup: m }) {
             {/* 투표율 */}
             <div className="flex justify-between text-[10px] font-black mb-1">
               <span className="text-blue-500">{left}%</span>
-              <span className="text-gray-400">{formatNumber(m.total_votes)}표</span>
+              <span className="text-gray-400">{formatNumber(displayVoteTotal(m.total_votes, m.id))}표</span>
               <span className="text-red-400">{right}%</span>
             </div>
             <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden flex">
@@ -1388,7 +1391,7 @@ function VotedMatchupFullCard({ vote, matchup: m, pointsEarned }) {
 
   const leftThumb  = m.left_thumbnail_url  || (m.left_type  === 'image' ? m.left_url  : null)
   const rightThumb = m.right_thumbnail_url || (m.right_type === 'image' ? m.right_url : null)
-  const { left, right } = calcPercent(m.left_votes, m.right_votes)
+  const { left, right } = displayVotePercents(m)
 
   const timeLeft = (() => {
     if (!isLive || !m.expires_at) return null
@@ -1502,7 +1505,7 @@ function VotedMatchupFullCard({ vote, matchup: m, pointsEarned }) {
               <span className={isEnded && winner === 'left' ? 'text-green-500' : 'text-blue-400'}>
                 {m.left_label || 'A'} {left}%
               </span>
-              <span className="text-gray-400">{formatNumber(m.total_votes)}명 참여</span>
+              <span className="text-gray-400">{formatNumber(displayVoteTotal(m.total_votes, m.id))}명 참여</span>
               <span className={isEnded && winner === 'right' ? 'text-green-500' : 'text-red-400'}>
                 {right}% {m.right_label || 'B'}
               </span>
@@ -1550,8 +1553,8 @@ function VotedMatchupFullCard({ vote, matchup: m, pointsEarned }) {
             <Users size={11} className="text-gray-400" />
             <span className="text-[11px] text-gray-400">
               {isLive
-                ? <span>실시간 <span className="font-black text-[#22282E]">{formatNumber(m.total_votes || 0)}명</span> 참여 중</span>
-                : <span>최종 <span className="font-black text-[#22282E]">{formatNumber(m.total_votes || 0)}명</span> 참여</span>
+                ? <span>실시간 <span className="font-black text-[#22282E]">{formatNumber(displayVoteTotal(m.total_votes, m.id))}명</span> 참여 중</span>
+                : <span>최종 <span className="font-black text-[#22282E]">{formatNumber(displayVoteTotal(m.total_votes, m.id))}명</span> 참여</span>
               }
             </span>
           </div>

@@ -7,9 +7,47 @@
 -- 해결: expires_at(투표 마감) 이후 + 투표 1건 이상일 때 1회 정산.
 --       (도전자 몰수패·cron 백필 포함)
 --
+-- 승패: matchups.left_votes / right_votes (봇 표 포함, 화면과 동일).
+-- 포인트는 사람(비봇)에게만 지급.
+--
 -- 선행: supabase_point_expiration.sql (insert_point_transaction)
 --       supabase_champion_oracle_track_points.sql (champion_points 등)
 -- =============================================================================
+
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS is_bot boolean NOT NULL DEFAULT false;
+
+CREATE OR REPLACE FUNCTION public.matchup_human_vote_counts(p_matchup_id uuid)
+RETURNS TABLE(left_c integer, right_c integer, total_c integer)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT
+    COUNT(*) FILTER (
+      WHERE v.side = 'left' AND NOT COALESCE(p.is_bot, false)
+    )::integer,
+    COUNT(*) FILTER (
+      WHERE v.side = 'right' AND NOT COALESCE(p.is_bot, false)
+    )::integer,
+    COUNT(*) FILTER (
+      WHERE NOT COALESCE(p.is_bot, false)
+    )::integer
+  FROM public.votes v
+  LEFT JOIN public.profiles p ON p.id = v.user_id
+  WHERE v.matchup_id = p_matchup_id;
+$$;
+
+CREATE OR REPLACE FUNCTION public.matchup_human_vote_count(p_matchup_id uuid)
+RETURNS integer
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT COALESCE((SELECT total_c FROM public.matchup_human_vote_counts(p_matchup_id)), 0);
+$$;
 
 ALTER TABLE public.matchups
   ADD COLUMN IF NOT EXISTS result_points_settled_at timestamptz;
@@ -37,7 +75,10 @@ AS $$
     AND (
       m.challenger_forfeit_at IS NOT NULL
       OR (
-        COALESCE(m.total_votes, 0) > 0
+        GREATEST(
+          COALESCE(m.total_votes, 0),
+          COALESCE(m.left_votes, 0) + COALESCE(m.right_votes, 0)
+        ) > 0
         AND m.expires_at IS NOT NULL
         AND m.expires_at <= now()
       )
@@ -62,23 +103,30 @@ DECLARE
   v_has_season boolean;
   v_rec record;
   v_creator_rec record;
+  v_left integer;
+  v_right integer;
+  v_total integer;
 BEGIN
   SELECT * INTO m FROM public.matchups WHERE id = p_matchup_id FOR UPDATE;
   IF NOT FOUND OR NOT public.matchup_is_ready_for_result_settlement(m) THEN
     RETURN false;
   END IF;
 
+  v_left := COALESCE(m.left_votes, 0);
+  v_right := COALESCE(m.right_votes, 0);
+  v_total := GREATEST(COALESCE(m.total_votes, 0), v_left + v_right);
+
   IF m.challenger_forfeit_at IS NOT NULL THEN
     v_winner := 'left';
-  ELSIF m.left_votes = m.right_votes THEN
+  ELSIF v_left = v_right THEN
     v_winner := 'draw';
-  ELSIF m.left_votes > m.right_votes THEN
+  ELSIF v_left > v_right THEN
     v_winner := 'left';
   ELSE
     v_winner := 'right';
   END IF;
 
-  v_has_votes := COALESCE(m.total_votes, 0) > 0 OR m.challenger_forfeit_at IS NOT NULL;
+  v_has_votes := v_total > 0 OR m.challenger_forfeit_at IS NOT NULL;
 
   SELECT EXISTS (
     SELECT 1 FROM information_schema.columns
@@ -178,8 +226,8 @@ BEGIN
     END LOOP;
   END IF;
 
-  -- B. Voters — 모든 투표(본인 생성·참여 매치업 포함), 실제 투표가 있을 때만
-  IF COALESCE(m.total_votes, 0) > 0 THEN
+  -- B. Voters — 승자는 봇 포함 표, 포인트는 사람에게만
+  IF v_has_votes THEN
     FOR v_rec IN
       SELECT v.user_id, v.side,
         CASE
@@ -193,7 +241,9 @@ BEGIN
           ELSE 'voter_lose'
         END AS src
       FROM public.votes v
+      LEFT JOIN public.profiles bp ON bp.id = v.user_id
       WHERE v.matchup_id = m.id
+        AND NOT COALESCE(bp.is_bot, false)
     LOOP
       IF EXISTS (
         SELECT 1 FROM public.point_transactions pt
@@ -305,7 +355,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 COMMENT ON FUNCTION public.settle_matchup_result_points(uuid) IS
-  '매치업 1건 승/패/무 포인트 정산 — 투표 마감 후 1회, Champion 50/10/30 · Oracle 25/5/15';
+  '매치업 1건 승/패/무 포인트 정산 — 봇 포함 left/right_votes로 승자, 포인트는 사람에게만. Champion 50/10/30 · Oracle 25/5/15';
 COMMENT ON FUNCTION public.settle_all_due_matchup_results() IS
   '마감된 미정산 매치업 일괄 정산. pg_cron 또는 수동 실행.';
 
@@ -334,16 +384,21 @@ BEGIN
   FOR v_row IN
     SELECT
       m.id AS matchup_id,
+      m.challenger_forfeit_at,
       m.left_votes,
       m.right_votes,
-      m.challenger_forfeit_at,
       v.user_id AS voter_id,
       v.side
     FROM public.votes v
     INNER JOIN public.matchups m ON m.id = v.matchup_id
+    LEFT JOIN public.profiles bp ON bp.id = v.user_id
     WHERE m.right_type IS NOT NULL
       AND NOT COALESCE(m.is_demo, false)
-      AND COALESCE(m.total_votes, 0) > 0
+      AND NOT COALESCE(bp.is_bot, false)
+      AND GREATEST(
+        COALESCE(m.total_votes, 0),
+        COALESCE(m.left_votes, 0) + COALESCE(m.right_votes, 0)
+      ) > 0
       AND (
         m.result_points_settled_at IS NOT NULL
         OR EXISTS (
@@ -364,7 +419,7 @@ BEGIN
   LOOP
     IF v_row.challenger_forfeit_at IS NOT NULL THEN
       v_winner := 'left';
-    ELSIF v_row.left_votes = v_row.right_votes THEN
+    ELSIF COALESCE(v_row.left_votes, 0) = COALESCE(v_row.right_votes, 0) THEN
       v_winner := 'draw';
     ELSIF v_row.left_votes > v_row.right_votes THEN
       v_winner := 'left';

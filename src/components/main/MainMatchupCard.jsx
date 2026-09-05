@@ -5,7 +5,8 @@ import { MatchupMediaOpenButton, MatchupMediaViewer } from '../matchup/MatchupMe
 import { matchupSideToMedia } from '../../lib/matchupMediaView'
 import { isFeedDemoMatchupId } from '../../lib/matchupIds'
 import { useUIStore } from '../../store/uiStore'
-import { formatNumber, formatDate, calcPercent, cn } from '../../lib/utils'
+import { formatNumber, formatDate, cn } from '../../lib/utils'
+import { displayVotePercents, displayVoteTotal } from '../../lib/displayVoteCount'
 import { formatMatchupRegisteredAt } from '../../lib/matchupRegisteredAt'
 import { VsBadge } from '../ui/VsBadge'
 import { MatchupThumbFrame } from '../ui/MatchupThumbFrame'
@@ -137,7 +138,7 @@ export function MainMatchupCard({ matchup: m, variant, rank, eagerMedia = false 
   const { showToast } = useUIStore()
   const [viewerMedia, setViewerMedia] = useState(null)
   const isDemo = isFeedDemoMatchupId(m.id)
-  const { left, right } = calcPercent(m.left_votes, m.right_votes)
+  const { left, right } = displayVotePercents(m)
   const showNewRightPlaceholder = variant === 'new' && (m.right_type == null || m.right_type === undefined)
   const creator = m.profiles
   const bannerGlow = isFeedBannerHighlightActive(m)
@@ -294,12 +295,12 @@ export function MainMatchupCard({ matchup: m, variant, rank, eagerMedia = false 
               ) : variant === 'best' ? (
                 <div className="flex min-w-0 flex-wrap items-baseline gap-x-1 gap-y-0.5">
                   <span className="bg-gradient-to-r from-amber-500 to-orange-500 bg-clip-text text-2xl font-black tabular-nums leading-none text-transparent drop-shadow-sm">
-                    {formatNumber(m.total_votes || 0)}
+                    {formatNumber(displayVoteTotal(m.total_votes, m.id))}
                   </span>
                   <span className="text-[10px] font-bold text-amber-700/80">명 참여</span>
                 </div>
               ) : (
-                <span className="text-xs text-gray-500">{formatNumber(m.total_votes || 0)}명 참여 중</span>
+                <span className="text-xs text-gray-500">{formatNumber(displayVoteTotal(m.total_votes, m.id))}명 참여 중</span>
               )}
             </div>
           )}

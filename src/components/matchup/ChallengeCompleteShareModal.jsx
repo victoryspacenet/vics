@@ -1,7 +1,9 @@
+import { useEffect } from 'react'
 import { Link2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useUIStore } from '../../store/uiStore'
 import { copyMatchupShareLink } from '../../lib/socialShare'
+import { playUxSound } from '../../lib/uxSounds'
 
 /** 도전 완료 후 공유 안내 — ChallengeDrawer 언마운트 후에도 표시 */
 export function ChallengeCompleteShareModal() {
@@ -9,10 +11,16 @@ export function ChallengeCompleteShareModal() {
   const challengeCompleteShare = useUIStore((s) => s.challengeCompleteShare)
   const closeChallengeCompleteShare = useUIStore((s) => s.closeChallengeCompleteShare)
   const showToast = useUIStore((s) => s.showToast)
+  const matchupId = challengeCompleteShare?.matchupId
+
+  useEffect(() => {
+    if (!matchupId) return
+    playUxSound('challengeComplete')
+  }, [matchupId])
 
   if (!challengeCompleteShare) return null
 
-  const { matchupId, matchupTitle } = challengeCompleteShare
+  const matchupTitle = challengeCompleteShare.matchupTitle
 
   const goToMatchup = () => {
     closeChallengeCompleteShare()

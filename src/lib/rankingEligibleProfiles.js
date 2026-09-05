@@ -9,7 +9,7 @@
 import { supabase } from './supabase'
 
 /** 랭킹 쿼리/캐시 키 버전 배지 — 필터 규칙 변경 시 증가 */
-export const RANKING_ELIGIBLE_CACHE_TAG = 'e4'
+export const RANKING_ELIGIBLE_CACHE_TAG = 'e5'
 
 const TTL_MS = 2 * 60 * 1000
 let cacheIds = null

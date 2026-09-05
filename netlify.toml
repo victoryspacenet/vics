@@ -126,6 +126,10 @@
 [functions."sla-inquiry-reminders"]
 schedule = "@hourly"
 
+# 가상 투표 봇 — 10분마다 `run_virtual_vote_bots` (등록 10분 후부터 표·조회수 인플레)
+[functions."virtual-vote-bots"]
+schedule = "*/10 * * * *"
+
 [[redirects]]
   from = "/api/tendency-og-image"
   to = "/.netlify/functions/tendency-og-image"

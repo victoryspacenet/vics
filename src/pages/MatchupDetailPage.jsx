@@ -11,12 +11,14 @@ import {
   fetchMatchupCommentsWindow,
 } from '../lib/matchupComments'
 import { voteViaApi } from '../lib/voteApi'
+import { playUxSound } from '../lib/uxSounds'
 import { isMatchupVotingFinalized } from '../lib/matchupResultPoints'
 import { requestMatchupSettlement } from '../lib/matchupResultSettlement'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
 import { Avatar } from '../components/ui/Avatar'
-import { formatDate, formatNumber, calcPercent, cn } from '../lib/utils'
+import { formatDate, formatNumber, cn } from '../lib/utils'
+import { displayVoteCounts, displayVotePercents, displayVoteTotal } from '../lib/displayVoteCount'
 import { formatMatchupRegisteredAt } from '../lib/matchupRegisteredAt'
 import { sanitizeText, safeMediaUrl, reportSuspiciousInputIfNeeded } from '../lib/sanitize'
 import { composeVoteResultStoryImage } from '../lib/voteResultStoryComposite'
@@ -190,29 +192,30 @@ async function compressImage(file) {
   })
 }
 
-// ── AI 한줄평·인사이트 (실제 투표 수 기반) ───────────────────────
+// ── AI 한줄평·인사이트 (승패·초반 분기는 실제 표, 문구 숫자는 Display Offset) ─
 function getVoteResultStats(matchup, votedSide, leftPct, rightPct) {
-  const leftVotes = matchup.left_votes || 0
-  const rightVotes = matchup.right_votes || 0
-  const totalVotes = leftVotes + rightVotes
-  const userSideVotes = votedSide === 'left' ? leftVotes : rightVotes
-  const oppSideVotes = totalVotes - userSideVotes
+  const leftVotesRaw = matchup.left_votes || 0
+  const rightVotesRaw = matchup.right_votes || 0
+  const rawTotal = leftVotesRaw + rightVotesRaw
+  const shown = displayVoteCounts(matchup)
+  const userSideVotes = votedSide === 'left' ? shown.left : shown.right
+  const oppSideVotes = shown.total - userSideVotes
   const gap = Math.abs(leftPct - rightPct)
-  const isDraw = totalVotes > 0 && leftVotes === rightVotes
-  const winSide = isDraw ? null : (leftVotes > rightVotes ? 'left' : 'right')
+  const isDraw = rawTotal > 0 && leftVotesRaw === rightVotesRaw
+  const winSide = isDraw ? null : (leftVotesRaw > rightVotesRaw ? 'left' : 'right')
   const userWins = !isDraw && votedSide === winSide
   return {
-    leftVotes,
-    rightVotes,
-    totalVotes,
+    leftVotes: shown.left,
+    rightVotes: shown.right,
+    totalVotes: shown.total,
     userSideVotes,
     oppSideVotes,
     gap,
     isDraw,
     winSide,
     userWins,
-    isFirstVote: totalVotes <= 1,
-    isEarlyVote: totalVotes <= 5,
+    isFirstVote: rawTotal <= 1,
+    isEarlyVote: rawTotal <= 5,
   }
 }
 
@@ -1076,7 +1079,7 @@ export function MatchupDetailPage() {
     )
   }
 
-  const { left, right } = calcPercent(matchup.left_votes, matchup.right_votes)
+  const { left, right } = displayVotePercents(matchup)
   const isComplete  = matchup.right_type != null
   const challengerForfeit = Boolean(matchup.challenger_forfeit_at)
   const isExpired   = timer?.expired || challengerForfeit
@@ -1708,7 +1711,7 @@ export function MatchupDetailPage() {
                 <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-r from-violet-100/80 to-fuchsia-100/70 border border-violet-200/50">
                   <Users size={14} className="text-violet-500" />
                   <span className="text-sm font-black bg-gradient-to-r from-violet-800 to-fuchsia-700 bg-clip-text text-transparent">
-                    총 투표수: {formatNumber(matchup.total_votes || 0)}
+                    총 투표수: {formatNumber(displayVoteTotal(matchup.total_votes, matchup.id))}
                   </span>
                 </span>
               </div>
@@ -2620,6 +2623,10 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
     })
   }, [])
 
+  useEffect(() => {
+    playUxSound('voteConfirm')
+  }, [])
+
   /** 모달 표시 후 백그라운드에서 공유 이미지 미리 생성 */
   useEffect(() => {
     if (!matchup?.id) return undefined
@@ -2738,7 +2745,7 @@ function VoteResultModal({ matchup, votedSide, leftPct, rightPct, userNickname, 
                   "{aiComment}"
                 </p>
                 <p className="text-white/40 text-[10px] mt-2 text-right">
-                  {formatNumber(matchup.total_votes || 0)}명 참여 · vics.app
+                  {formatNumber(displayVoteTotal(matchup.total_votes, matchup.id))}명 참여 · vics.app
                 </p>
               </div>
             </div>

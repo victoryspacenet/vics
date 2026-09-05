@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase'
 import { safeMediaUrl } from '../lib/sanitize'
 import { getCachedRanking, setCachedRanking } from '../lib/rankingCache'
 import { useAuthStore } from '../store/authStore'
+import { usePageEnterSound } from '../lib/uxSounds'
 import { formatNumber, cn } from '../lib/utils'
 import { useUIStore } from '../store/uiStore'
 import { RankingCelebrationModal } from '../components/ranking/RankingCelebrationModal'
@@ -306,6 +307,7 @@ function RankRow({ entry, rank, isMe, typeTab, sortConfig }) {
 
 // ── 메인 컴포넌트 ────────────────────────────────────────────────────
 export function RankingPage() {
+  usePageEnterSound('rankingEnter')
   const { user, profile } = useAuthStore()
   const { openCreateDrawer, openLoginModal } = useUIStore()
 

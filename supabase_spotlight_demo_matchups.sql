@@ -26,6 +26,7 @@ DECLARE
   v_matchup_title text;
   v_voter_nick  text;
   v_is_demo boolean;
+  v_voter_bot boolean;
 BEGIN
   SELECT m.user_id, m.title, COALESCE(m.is_demo, false)
   INTO v_creator_id, v_matchup_title, v_is_demo
@@ -33,6 +34,13 @@ BEGIN
   WHERE m.id = NEW.matchup_id;
 
   IF v_is_demo THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT COALESCE(is_bot, false) INTO v_voter_bot
+  FROM public.profiles WHERE id = NEW.user_id;
+
+  IF COALESCE(v_voter_bot, false) THEN
     RETURN NEW;
   END IF;
 
@@ -67,6 +75,8 @@ AS $$
 DECLARE
   v_creator_id uuid;
   v_is_demo boolean;
+  v_voter_id uuid;
+  v_voter_bot boolean;
 BEGIN
   SELECT m.user_id, COALESCE(m.is_demo, false)
   INTO v_creator_id, v_is_demo
@@ -74,6 +84,14 @@ BEGIN
   WHERE m.id = COALESCE(NEW.matchup_id, OLD.matchup_id);
 
   IF v_creator_id IS NULL OR v_is_demo THEN
+    RETURN COALESCE(NEW, OLD);
+  END IF;
+
+  v_voter_id := COALESCE(NEW.user_id, OLD.user_id);
+  SELECT COALESCE(is_bot, false) INTO v_voter_bot
+  FROM public.profiles WHERE id = v_voter_id;
+
+  IF COALESCE(v_voter_bot, false) THEN
     RETURN COALESCE(NEW, OLD);
   END IF;
 

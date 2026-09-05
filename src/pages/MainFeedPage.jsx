@@ -8,6 +8,7 @@ import {
 } from '../lib/mainFeed'
 import { enrichMatchupsWithCreatorRankInfo } from '../lib/creatorRankSnapshot'
 import { runWhenIdle } from '../lib/runDeferred'
+import { usePageEnterSound } from '../lib/uxSounds'
 import { parseListPageParam, patchSearchParamsPage } from '../lib/listPageNav'
 import {
   MainMatchupCard,
@@ -21,6 +22,11 @@ const LegendFeedBanner = lazy(() =>
 )
 
 const PAGE_SIZE = 12
+const FEED_ENTER_SOUND = {
+  best: 'bestEnter',
+  hot: 'hotEnter',
+  new: 'newEnter',
+}
 
 export function MainFeedPage() {
   const { variant } = useParams()
@@ -37,6 +43,7 @@ export function MainFeedPage() {
   }, [rows])
 
   const validVariant = ['best', 'hot', 'new'].includes(variant) ? variant : null
+  usePageEnterSound(FEED_ENTER_SOUND[validVariant] || null)
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
   const page = Math.min(pageFromUrl, totalPages)
 
@@ -186,7 +193,7 @@ export function MainFeedPage() {
             ))
           ) : (
             <div className="animate-fade-in-feed py-16 text-center text-sm text-gray-400">
-              아직 매치업이 없어요
+              {validVariant === 'hot' ? '지금은 박빙 매치업이 없어요' : '아직 매치업이 없어요'}
             </div>
           )}
         </div>

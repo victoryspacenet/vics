@@ -7,7 +7,8 @@ import { VsBadge } from '../ui/VsBadge'
 import { MatchupThumbFrame } from '../ui/MatchupThumbFrame'
 import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
-import { formatDate, formatNumber, calcPercent, cn } from '../../lib/utils'
+import { formatDate, formatNumber, cn } from '../../lib/utils'
+import { displayVotePercents, displayVoteTotal } from '../../lib/displayVoteCount'
 import { formatMatchupRegisteredAt } from '../../lib/matchupRegisteredAt'
 import { safeMediaUrl } from '../../lib/sanitize'
 import { getTier, tierAtLeast } from '../../lib/tiers'
@@ -115,7 +116,7 @@ export function FeedCard({
   const [viewerMedia, setViewerMedia] = useState(null)
 
   const isComplete = !!matchup.right_type
-  const { left, right } = calcPercent(matchup.left_votes, matchup.right_votes)
+  const { left, right } = displayVotePercents(matchup)
   const profile = matchup.profiles
 
   const vs = VARIANT_STYLE[variant] || VARIANT_STYLE.default
@@ -375,7 +376,7 @@ export function FeedCard({
           {/* 참여자 */}
           <div className="flex items-center gap-1 text-xs text-gray-400">
             <Users className="w-[11px] h-[11px] shrink-0" />
-            <span>{formatNumber(matchup.total_votes || 0)}</span>
+            <span>{formatNumber(displayVoteTotal(matchup.total_votes, matchup.id))}</span>
           </div>
           {/* 좋아요 */}
           <button

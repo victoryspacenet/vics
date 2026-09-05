@@ -5,6 +5,7 @@ import { Upload, X, Image, Video, Type, Camera, AlertCircle, AlertTriangle, Chec
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
+import { playUxSound } from '../../lib/uxSounds'
 import { Drawer } from '../ui/Drawer'
 import { Modal } from '../ui/Modal'
 import { VsBadge } from '../ui/VsBadge'
@@ -635,6 +636,7 @@ export function CreateMatchupDrawer({ onCreated }) {
         throw new Error(error.message || '생성 중 오류가 발생했어요.')
       }
 
+      playUxSound('matchupCreated')
       showToast('매치업이 생성됐어요! 종료 후 승·패·무에 따라 포인트가 지급돼요', 'success')
       clearCreateMatchupDraft(user.id)
       reset()

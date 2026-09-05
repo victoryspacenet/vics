@@ -4,6 +4,7 @@ import {
   EMPTY_TIER_RANK_INFO,
   fetchCreatorRankMapForIds,
 } from './creatorRankSnapshot'
+import { displayVotePercents, displayVoteTotal } from './displayVoteCount'
 
 /** 메인 홈 캐러셀(베스트·추천·NEW) 섹션당 최대 노출 개수 */
 export const MAIN_FEED_BEST_LIMIT = 7
@@ -12,8 +13,9 @@ export const MAIN_FEED_NEW_LIMIT = 7
 
 /**
  * 베스트·추천 중복 노출 규칙
+ * - 베스트: 화면 득표 내림차순(실제 표+봇 표+Display Offset). 화면 득표가 같을 때만 랜덤
  * - 동일 매치업이 「표 1위」와 「박빙」 조건을 모두 만족하면 **베스트만** 노출
- * - 추천(박빙) 슬롯·목록 뱃지에서는 제외하고, 다음 박빙 후보로 채움
+ * - 추천은 박빙(양쪽 표 있고 표시 격차 ≤ 20%p, 40:60 이하)만. 부족하면 슬롯을 비움
  */
 
 const MAIN_FEED_MATCHUP_COLUMNS = [
@@ -84,15 +86,46 @@ function attachEmptyCreatorRank(matchups) {
   }))
 }
 
-/** 백빙(투표 격차 비율) 순 정렬 — 투표 1표 이상만 */
+/** 추천(박빙) — 화면에 보이는 좌/우 % 격차가 이 값 이하여야 함 (40:60) */
+export const HOT_CLOSE_MAX_GAP_PCT = 20
+
+/** 양쪽 모두 표가 있고, 표시 비율이 40:60 이하로 붙어 있는 매치업 */
+export function isCloseRecommendedMatchup(m) {
+  const leftRaw = Number(m?.left_votes) || 0
+  const rightRaw = Number(m?.right_votes) || 0
+  if (leftRaw <= 0 || rightRaw <= 0) return false
+  const { left, right } = displayVotePercents(m)
+  return Math.abs(left - right) <= HOT_CLOSE_MAX_GAP_PCT
+}
+
+function matchupRawVoteTotal(m) {
+  return Math.max(
+    Number(m?.total_votes) || 0,
+    (Number(m?.left_votes) || 0) + (Number(m?.right_votes) || 0),
+  )
+}
+
+function matchupShownVoteTotal(m) {
+  return displayVoteTotal(matchupRawVoteTotal(m), m?.id)
+}
+
+/** 베스트 — 화면에 찍히는 득표 많은 순, 동점만 랜덤 */
+function sortBestVotePool(pool) {
+  if (!pool?.length) return []
+  return [...pool]
+    .map((m) => ({ m, shown: matchupShownVoteTotal(m), tie: Math.random() }))
+    .sort((a, b) => (b.shown !== a.shown ? b.shown - a.shown : a.tie - b.tie))
+    .map(({ m }) => m)
+}
+
+/** 박빙만, 격차 작은 순 */
 function sortHotVotePool(pool) {
   if (!pool?.length) return []
   return [...pool]
-    .filter((m) => (m.total_votes || 0) > 0)
+    .filter((m) => isCloseRecommendedMatchup(m))
     .map((m) => {
-      const tv = Math.max(1, Number(m.total_votes) || 1)
-      const gap = Math.abs((m.left_votes || 0) - (m.right_votes || 0)) / tv
-      return { m, gap }
+      const { left, right } = displayVotePercents(m)
+      return { m, gap: Math.abs(left - right) }
     })
     .sort((a, b) => {
       if (a.gap !== b.gap) return a.gap - b.gap
@@ -120,8 +153,7 @@ async function fetchActiveHotVotePoolRows() {
       .from('matchups')
       .select(HOT_POOL_SELECT)
       .eq('status', 'active')
-      .not('right_type', 'is', null)
-      .gt('total_votes', 0),
+      .not('right_type', 'is', null),
   )
   if (error) throw error
   return data || []
@@ -142,18 +174,7 @@ function bestMatchupIdSet(rows) {
  * 완료/신규 풀 조회는 병렬로 수행합니다.
  */
 export async function fetchMainMatchupsQuick() {
-  const [{ data: bestRows }, { data: newPool }, hotSortedIds] = await Promise.all([
-    withVotingInProgressFilter(
-      supabase
-        .from('matchups')
-        .select(MATCHUP_EMBED)
-        .eq('status', 'active')
-        .not('right_type', 'is', null)
-        .gt('total_votes', 0)
-        .order('total_votes', { ascending: false, nullsFirst: false })
-        .order('created_at', { ascending: false })
-        .limit(MAIN_FEED_BEST_LIMIT + 1),
-    ),
+  const [{ data: newPool }, { bestIds: bestSortedIds, hotIds: hotSortedIds }] = await Promise.all([
     withNewWaitingMatchupFilter(
       supabase
         .from('matchups')
@@ -161,23 +182,24 @@ export async function fetchMainMatchupsQuick() {
         .order('created_at', { ascending: false })
         .limit(MAIN_FEED_NEW_LIMIT + 1),
     ),
-    fetchHotSortedMatchupIds(),
+    fetchBestAndHotSortedMatchupIds(),
   ])
 
-  const bestPicked = (bestRows || []).slice(0, MAIN_FEED_BEST_LIMIT)
-  const bestIds = bestMatchupIdSet(bestPicked)
+  const bestIds = (bestSortedIds || []).slice(0, MAIN_FEED_BEST_LIMIT)
+  const bestIdSet = bestMatchupIdSet(bestIds.map((id) => ({ id })))
+  const hotIds = pickHotIdsFromSortedPool(hotSortedIds, MAIN_FEED_HOT_LIMIT + 1, bestIdSet)
+  const fullIds = [...new Set([...bestIds, ...hotIds])]
 
-  const hotIds = pickHotIdsFromSortedPool(hotSortedIds, MAIN_FEED_HOT_LIMIT + 1, bestIds)
-  let hotPicked = []
-  if (hotIds.length > 0) {
-    const { data: hotFullRows, error: hotFullErr } = await supabase
+  let fullRows = []
+  if (fullIds.length > 0) {
+    const { data, error } = await supabase
       .from('matchups')
       .select(MATCHUP_EMBED)
-      .in('id', hotIds)
-    if (hotFullErr) {
-      console.warn('[mainFeed] hot full rows:', hotFullErr.message)
+      .in('id', fullIds)
+    if (error) {
+      console.warn('[mainFeed] best/hot full rows:', error.message)
     } else {
-      hotPicked = orderMatchupsByIds(hotFullRows || [], hotIds)
+      fullRows = data || []
     }
   }
 
@@ -185,8 +207,8 @@ export async function fetchMainMatchupsQuick() {
   const newPicked = newRows.slice(0, MAIN_FEED_NEW_LIMIT)
 
   return {
-    best: attachEmptyCreatorRank(bestPicked),
-    hot: attachEmptyCreatorRank(hotPicked).slice(0, MAIN_FEED_HOT_LIMIT),
+    best: attachEmptyCreatorRank(orderMatchupsByIds(fullRows, bestIds)),
+    hot: attachEmptyCreatorRank(orderMatchupsByIds(fullRows, hotIds)).slice(0, MAIN_FEED_HOT_LIMIT),
     new: attachEmptyCreatorRank(newPicked),
   }
 }
@@ -214,15 +236,15 @@ export function featuredListBadgeRoleByIdFromQuick(quick) {
 const FEATURED_RESTRICTION_CACHE_MS = 60_000
 let featuredRestrictionCache = null
 let featuredRestrictionCacheAt = 0
-/** `/feed/hot` 박빙 정렬 id 캐시 (페이지마다 전체 재조회 방지) */
-let hotSortedIdCache = null
-let hotSortedIdCacheAt = 0
+/** 투표 진행 중 풀의 베스트·추천 정렬 id 캐시 */
+let voteSortedIdCache = null
+let voteSortedIdCacheAt = 0
 
 export function invalidateMainFeaturedFeedCache() {
   featuredRestrictionCache = null
   featuredRestrictionCacheAt = 0
-  hotSortedIdCache = null
-  hotSortedIdCacheAt = 0
+  voteSortedIdCache = null
+  voteSortedIdCacheAt = 0
 }
 
 function normalizeFeaturedMatchupId(id) {
@@ -236,24 +258,11 @@ export async function fetchMainFeaturedFeedRestriction() {
     return featuredRestrictionCache
   }
 
-  const [{ data: bestRows }, hotSortedIds] = await Promise.all([
-    withVotingInProgressFilter(
-      supabase
-        .from('matchups')
-        .select('id')
-        .eq('status', 'active')
-        .not('right_type', 'is', null)
-        .gt('total_votes', 0)
-        .order('total_votes', { ascending: false, nullsFirst: false })
-        .order('created_at', { ascending: false })
-        .limit(MAIN_FEED_BEST_LIMIT),
-    ),
-    fetchHotSortedMatchupIds(),
-  ])
+  const { bestIds: bestSortedIds, hotIds: hotSortedIds } = await fetchBestAndHotSortedMatchupIds()
 
   const roleById = {}
-  for (const m of bestRows || []) {
-    const id = normalizeFeaturedMatchupId(m?.id)
+  for (const rawId of (bestSortedIds || []).slice(0, MAIN_FEED_BEST_LIMIT)) {
+    const id = normalizeFeaturedMatchupId(rawId)
     if (id) roleById[id] = 'best'
   }
   const bestIds = new Set(Object.keys(roleById))
@@ -276,43 +285,51 @@ export async function fetchMainFeaturedMatchupIds() {
   return ids
 }
 
-async function fetchHotSortedMatchupIds() {
+async function fetchBestAndHotSortedMatchupIds() {
   const now = Date.now()
-  if (hotSortedIdCache && now - hotSortedIdCacheAt < FEATURED_RESTRICTION_CACHE_MS) {
-    return hotSortedIdCache
+  if (voteSortedIdCache && now - voteSortedIdCacheAt < FEATURED_RESTRICTION_CACHE_MS) {
+    return voteSortedIdCache
   }
 
   const data = await fetchActiveHotVotePoolRows()
-  const ids = sortHotVotePool(data).map((m) => m.id).filter(Boolean)
-  hotSortedIdCache = ids
-  hotSortedIdCacheAt = now
-  return ids
+  const result = {
+    bestIds: sortBestVotePool(data).map((m) => m.id).filter(Boolean),
+    hotIds: sortHotVotePool(data).map((m) => m.id).filter(Boolean),
+  }
+  voteSortedIdCache = result
+  voteSortedIdCacheAt = now
+  return result
 }
 
-/** `/feed/best` — 투표 진행 중 매치업 전체, 투표수 내림차순 */
-export async function fetchMainBestFeedPage({ page = 1, pageSize = 12 } = {}) {
-  const from = Math.max(0, (page - 1) * pageSize)
-  const to = from + pageSize - 1
+async function fetchHotSortedMatchupIds() {
+  const { hotIds } = await fetchBestAndHotSortedMatchupIds()
+  return hotIds
+}
 
-  const { data, error, count } = await withVotingInProgressFilter(
-    supabase
-      .from('matchups')
-      .select(MATCHUP_EMBED, { count: 'exact' })
-      .eq('status', 'active')
-      .not('right_type', 'is', null)
-      .order('total_votes', { ascending: false, nullsFirst: false })
-      .order('created_at', { ascending: false })
-      .range(from, to),
-  )
+/** `/feed/best` — 투표 진행 중 매치업, 화면 득표 내림차순(동점만 랜덤) */
+export async function fetchMainBestFeedPage({ page = 1, pageSize = 12 } = {}) {
+  const { bestIds } = await fetchBestAndHotSortedMatchupIds()
+  const totalCount = bestIds.length
+  const from = Math.max(0, (page - 1) * pageSize)
+  const pageIds = bestIds.slice(from, from + pageSize)
+
+  if (!pageIds.length) {
+    return { rows: [], totalCount }
+  }
+
+  const { data: fullRows, error } = await supabase
+    .from('matchups')
+    .select(MATCHUP_EMBED)
+    .in('id', pageIds)
   if (error) throw error
 
   return {
-    rows: attachEmptyCreatorRank(data || []),
-    totalCount: typeof count === 'number' ? count : (data || []).length,
+    rows: attachEmptyCreatorRank(orderMatchupsByIds(fullRows || [], pageIds)),
+    totalCount,
   }
 }
 
-/** `/feed/hot` — 투표 진행 중·1표 이상 매치업 전체, 박빙(격차 비율) 순 */
+/** `/feed/hot` — 투표 진행 중 박빙 매치업만, 격차 작은 순 */
 export async function fetchMainHotFeedPage({ page = 1, pageSize = 12 } = {}) {
   const sortedIds = await fetchHotSortedMatchupIds()
   const totalCount = sortedIds.length

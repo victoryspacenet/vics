@@ -2,6 +2,7 @@
  * 투표 결과 스토리 카드 — Canvas 합성 (html-to-image DOM 캡처 대체)
  */
 import { safeMediaUrl } from './sanitize'
+import { displayVoteTotal } from './displayVoteCount'
 
 const CARD_W = 900
 const HEADER_H = 52
@@ -400,7 +401,7 @@ export async function composeVoteResultStoryImage({
   await drawVsBadge(ctx, HALF_W, panelY + PANEL_H / 2)
 
   drawCombinedBar(ctx, panelY + PANEL_H, leftPct, rightPct)
-  drawFooter(ctx, panelY + PANEL_H + BAR_H, aiComment, matchup.total_votes)
+  drawFooter(ctx, panelY + PANEL_H + BAR_H, aiComment, displayVoteTotal(matchup.total_votes, matchup.id))
 
   const result = await canvasToJpegFile(canvas, filename)
   if (!result.file || result.file.size < 800) {

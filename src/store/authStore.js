@@ -13,6 +13,7 @@ import { useUIStore } from './uiStore'
 import { useAdminPermissionStore } from './adminPermissionStore'
 import { SIGNUP_BONUS_POINTS, grantSignupBonusIfNeeded } from '../lib/signupRewards'
 import { touchProfileLastVisit } from '../lib/profileLastVisit'
+import { playUxSound } from '../lib/uxSounds'
 
 /** 새 비밀번호 설정 페이지: auth Mutex 경합 줄이려 프로필·푸시 부가 작업 건너뜀(로그인 후 로드됨). */
 function skipHeavyAuthHooksOnResetPasswordPage() {
@@ -260,9 +261,11 @@ export const useAuthStore = create((set, get) => ({
               }
 
               if (session?.user) {
+                const wasLoggedOut = !get().user?.id
                 setAuthSessionCache(session)
                 set({ user: session.user })
                 finishInitialSession()
+                if (event === 'SIGNED_IN' && wasLoggedOut) playUxSound('loginSuccess')
 
                 void useAdminPermissionStore.getState().load(session.user)
                 if (skipHeavyAuthHooksOnResetPasswordPage()) return

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
-import { calcPercent, formatNumber } from '../lib/utils'
-import { fetchLandingPublicStats } from '../lib/landingPublicStats'
+import { formatNumber } from '../lib/utils'
+import { displayVoteCounts } from '../lib/displayVoteCount'
+import { fetchLandingPublicStats, fetchLandingLiveHotMatchup } from '../lib/landingPublicStats'
+import { usePageEnterSound } from '../lib/uxSounds'
 import { safeMediaUrl } from '../lib/sanitize'
 import { Logo } from '../components/ui/Logo'
 import { VsBadge } from '../components/ui/VsBadge'
@@ -186,6 +187,7 @@ function LiveVoteBar({ pct, color, label, delay = 0 }) {
 }
 
 export function LandingPage() {
+  usePageEnterSound('landingEnter')
   const location = useLocation()
   const [heroRef,       heroVisible]       = useScrollReveal(0.1)
   const [liveRef,       liveVisible]       = useScrollReveal(0.2)
@@ -204,20 +206,15 @@ export function LandingPage() {
   useEffect(() => {
     let cancelled = false
     const load = async () => {
-      const [stats, hotRes] = await Promise.all([
+      const [stats, data] = await Promise.all([
         fetchLandingPublicStats(),
-        supabase
-          .from('matchups')
-          .select('id, title, category, tags, left_thumbnail_url, left_label, right_thumbnail_url, right_label, left_votes, right_votes, total_votes')
-          .eq('status', 'active')
-          .not('right_type', 'is', null)
-          .order('total_votes', { ascending: false })
-          .limit(1)
-          .maybeSingle(),
+        fetchLandingLiveHotMatchup().catch((err) => {
+          console.warn('[LandingPage] live hot matchup:', err)
+          return null
+        }),
       ])
       if (cancelled) return
       setLandingStats({ loading: false, matchupCount: stats.matchupCount, voteCount: stats.voteCount, activeUserCount: stats.activeUserCount })
-      const data = hotRes.data
       if (data) {
         setHotMatchup({
           id: data.id,
@@ -228,8 +225,12 @@ export function LandingPage() {
           option_a_label: data.left_label,
           option_b_label: data.right_label,
         })
-        const pct = calcPercent(data.left_votes, data.right_votes)
-        setLiveVotes({ left: pct.left, right: pct.right, total: (data.left_votes || 0) + (data.right_votes || 0) })
+        const shown = displayVoteCounts(data)
+        setLiveVotes({
+          left: shown.leftPct,
+          right: shown.rightPct,
+          total: shown.total,
+        })
       }
     }
     load()

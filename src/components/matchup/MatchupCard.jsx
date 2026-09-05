@@ -15,7 +15,8 @@ import { MatchupThumbFrame } from '../ui/MatchupThumbFrame'
 import { getTier, tierAtLeast } from '../../lib/tiers'
 import { isFeedBannerHighlightActive } from '../../lib/bannerHighlightBoost'
 import { isMatchupCreatorVipTierGlow, VIP_MATCHUP_SURFACE_CLASS } from '../../lib/matchupCreatorVipGlow'
-import { formatDate, formatNumber, calcPercent, cn } from '../../lib/utils'
+import { formatDate, formatNumber, cn } from '../../lib/utils'
+import { displayVotePercents, displayVoteTotal } from '../../lib/displayVoteCount'
 import { formatMatchupRegisteredAt } from '../../lib/matchupRegisteredAt'
 import { copyMatchupShareLink, getMatchupSharePageUrl, getMatchupShareImageUrl, shareMatchupToSns, warmMatchupSharePreview } from '../../lib/socialShare'
 import { voteViaApi } from '../../lib/voteApi'
@@ -163,7 +164,7 @@ export function MatchupCard({ matchup: initialMatchup, compact, onVoteUpdate }) 
     })
   }
 
-  const { left, right } = calcPercent(matchup.left_votes, matchup.right_votes)
+  const { left, right } = displayVotePercents(matchup)
   const creator = matchup.profiles
   const bannerGlow = isFeedBannerHighlightActive(matchup)
   const vipFrame =
@@ -285,7 +286,7 @@ export function MatchupCard({ matchup: initialMatchup, compact, onVoteUpdate }) 
             rightPercent={right}
             leftLabel={matchup.left_label || 'A'}
             rightLabel={matchup.right_label || 'B'}
-            totalVotes={matchup.total_votes || 0}
+            totalVotes={displayVoteTotal(matchup.total_votes, matchup.id)}
           />
         </div>
       )}
@@ -313,7 +314,7 @@ export function MatchupCard({ matchup: initialMatchup, compact, onVoteUpdate }) 
         <div className="flex-1" />
 
         <span className="text-xs text-gray-400 mr-2">
-          {formatNumber(matchup.total_votes || 0)}표
+          {formatNumber(displayVoteTotal(matchup.total_votes, matchup.id))}표
         </span>
 
         <button

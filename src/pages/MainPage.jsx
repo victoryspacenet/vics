@@ -5,6 +5,7 @@ import { fetchMainMatchupsQuick, enrichMainFeedCreatorRanks, MAIN_FEED_BEST_LIMI
 import { fetchActiveMainSpotlightMatchup } from '../lib/mainSpotlight'
 import { runWhenIdle } from '../lib/runDeferred'
 import { useAuthStore } from '../store/authStore'
+import { usePageEnterSound } from '../lib/uxSounds'
 import {
   SpotlightSection,
   MatchupCarousel,
@@ -18,6 +19,7 @@ const MainPageLowerSections = lazy(() =>
 )
 
 export function MainPage() {
+  usePageEnterSound('mainWelcome')
   const user = useAuthStore((s) => s.user)
   const [data, setData] = useState({ best: [], hot: [], new: [] })
   const [spotlightMatchup, setSpotlightMatchup] = useState(null)
@@ -203,7 +205,13 @@ export function MainPage() {
             ? Array.from({ length: MAIN_FEED_HOT_LIMIT }).map((_, i) => (
                 <MainCardSkeleton key={`sk-${i}`} compact staticLcp={i === 0} />
               ))
-            : data.hot.slice(0, MAIN_FEED_HOT_LIMIT).map((m, i) => (
+            : data.hot.length === 0
+              ? (
+                <p className="px-4 py-8 text-center text-sm text-gray-400">
+                  지금은 박빙 매치업이 없어요
+                </p>
+                )
+              : data.hot.slice(0, MAIN_FEED_HOT_LIMIT).map((m, i) => (
                 <div
                   key={m.id}
                   className="animate-fade-in-feed-stagger"

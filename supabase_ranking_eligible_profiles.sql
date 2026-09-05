@@ -5,7 +5,11 @@
 -- * profiles.id = auth.users.id 인 행만 후보로 본다 (SQL로만 존재하던 phantom 프로필 제거).
 -- * auth.users 의 example.com / example.org / test.com 메일 패턴 계정 제외 (로컬 테스트용).
 -- * 카카오 등 이메일이 비어 있는 실제 회원은 그대로 노출된다.
+-- * is_bot 프로필·봇 전용 이메일은 제외 (supabase_virtual_vote_bots.sql).
 -- =============================================================================
+
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS is_bot boolean NOT NULL DEFAULT false;
 
 CREATE OR REPLACE FUNCTION public.rank_profile_eligible_for_board(p_id uuid)
 RETURNS boolean
@@ -19,19 +23,21 @@ AS $$
     FROM public.profiles p
     INNER JOIN auth.users u ON u.id = p.id
     WHERE p.id = p_id
+      AND NOT COALESCE(p.is_bot, false)
       AND (
         NULLIF(trim(COALESCE(u.email, '')), '') IS NULL
         OR (
           lower(trim(u.email)) NOT LIKE '%@example.com'
           AND lower(trim(u.email)) NOT LIKE '%@example.org'
           AND lower(trim(u.email)) NOT LIKE '%@test.com'
+          AND lower(trim(u.email)) NOT LIKE '%@bots.victoryspace.internal'
         )
       )
   );
 $$;
 
 COMMENT ON FUNCTION public.rank_profile_eligible_for_board(uuid) IS
-  '랭킹/Goat 노출 가능 프로필: auth 연동 + 예시·테스트 이메일 도메인 제외.';
+  '랭킹/Goat 노출 가능 프로필: auth 연동 + 예시·테스트·봇 이메일/is_bot 제외.';
 
 REVOKE ALL ON FUNCTION public.rank_profile_eligible_for_board(uuid) FROM PUBLIC;
 

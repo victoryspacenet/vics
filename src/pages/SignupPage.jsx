@@ -9,6 +9,7 @@ import { messageForSignUpError } from '../lib/signInPasswordErrors'
 import { isRejoinCooldownDbError, REJOIN_COOLDOWN_USER_MESSAGE } from '../lib/rejoinCooldown'
 import { useAuthStore } from '../store/authStore'
 import { useUIStore } from '../store/uiStore'
+import { markSignupJustCompleted, playUxSound } from '../lib/uxSounds'
 import { Logo } from '../components/ui/Logo'
 import { SignupTasteSection } from '../components/signup/SignupTasteSection'
 import { isSignupTasteComplete, normalizeSignupTasteAnswers, SIGNUP_TASTE_QUESTIONS } from '../lib/signupTasteQuestions'
@@ -147,6 +148,8 @@ export function SignupPage() {
         } catch (e) {
           console.warn('[Signup] profiles-bootstrap-signup fetch', e?.message || e)
         }
+        markSignupJustCompleted()
+        playUxSound('signupComplete')
         showToast('가입 확인 메일을 보냈어요. 메일함(스팸함 포함)에서 링크를 눌러 인증한 뒤 로그인해 주세요.', 'success')
         const q = new URLSearchParams({ registered: '1', email: form.email.trim() })
         navigate(`/login?${q.toString()}`, { replace: true })
@@ -174,6 +177,8 @@ export function SignupPage() {
         try { window.dispatchEvent(new CustomEvent('vics:adminUsers:updated')) } catch { /* ignore */ }
       }
 
+      markSignupJustCompleted()
+      playUxSound('signupComplete')
       navigate('/welcome', { replace: true, state: { nickname: form.nickname.trim(), avatarUrl: null } })
     } catch (err) {
       if (isRejoinCooldownDbError(err)) { await supabase.auth.signOut(); showToast(REJOIN_COOLDOWN_USER_MESSAGE, 'error') }
