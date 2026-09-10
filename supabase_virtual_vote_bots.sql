@@ -14,10 +14,13 @@
 --        사람 표 없으면 조회수만.
 --   3) Netlify scheduled function `virtual-vote-bots` 가 10분마다 RPC 호출
 --      (또는 하단 pg_cron 주석 해제)
+--   4) 관전봇 매치업 생성·도전은 supabase_virtual_bot_matchups.sql 의
+--      run_virtual_bot_matchups() — 같은 스케줄에서 이어서 호출합니다.
 --
 -- 경쟁 무결성
 --   - 봇 투표는 화면 표 수(left/right/total_votes)와 승패 포인트 정산에 포함됩니다
---   - 작성자 알림·작성자 받은 표·공개 랭킹·봇 본인 포인트는 제외합니다
+--   - 작성자 알림·작성자 받은 표는 봇 투표에서 제외합니다
+--   - 봇 매치업 생성·도전은 랭킹·Champion 포인트에 포함합니다 (자동 투표 Oracle 포인트는 제외)
 --
 -- 끄기: admin_settings key = virtual_vote_bots 의 {"enabled": false}
 -- =============================================================================
@@ -31,7 +34,7 @@ ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS is_bot boolean NOT NULL DEFAULT false;
 
 COMMENT ON COLUMN public.profiles.is_bot IS
-  'true: 가상 투표/조회 봇. 랭킹·알림·봇 본인 포인트에서 제외. 승패 정산 표에는 포함';
+  'true: 가상 투표/조회·매치업 봇. 자동 투표 알림·받은 표·Oracle 포인트는 제외. 생성/도전 Champion·공개 랭킹에는 포함';
 
 CREATE INDEX IF NOT EXISTS profiles_is_bot_idx
   ON public.profiles (id)
@@ -86,7 +89,7 @@ AS $$
 $$;
 
 -- ─────────────────────────────────────────────
--- 3. 랭킹에서 봇 제외
+-- 3. 랭킹 노출 — 관전봇 포함, 로컬 테스트 메일만 제외
 -- ─────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION public.rank_profile_eligible_for_board(p_id uuid)
 RETURNS boolean
@@ -100,14 +103,12 @@ AS $$
     FROM public.profiles p
     INNER JOIN auth.users u ON u.id = p.id
     WHERE p.id = p_id
-      AND NOT COALESCE(p.is_bot, false)
       AND (
         NULLIF(trim(COALESCE(u.email, '')), '') IS NULL
         OR (
           lower(trim(u.email)) NOT LIKE '%@example.com'
           AND lower(trim(u.email)) NOT LIKE '%@example.org'
           AND lower(trim(u.email)) NOT LIKE '%@test.com'
-          AND lower(trim(u.email)) NOT LIKE '%@bots.victoryspace.internal'
         )
       )
   );
@@ -539,6 +540,32 @@ $$;
 -- ─────────────────────────────────────────────
 -- 6. 봇 계정 시드 (auth.users + profiles)
 -- ─────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.virtual_bot_pick_seed_nickname(p_i integer)
+RETURNS text
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_pool text[];
+  v_nick text;
+BEGIN
+  BEGIN
+    v_pool := public.virtual_bot_nickname_pool();
+    IF p_i IS NOT NULL AND p_i >= 1 AND p_i <= COALESCE(array_length(v_pool, 1), 0) THEN
+      v_nick := v_pool[p_i];
+    END IF;
+  EXCEPTION WHEN undefined_function THEN
+    v_nick := NULL;
+  END;
+  IF v_nick IS NULL OR length(trim(v_nick)) = 0 THEN
+    v_nick := format('관전봇%s', lpad(GREATEST(1, COALESCE(p_i, 1))::text, 2, '0'));
+  END IF;
+  RETURN v_nick;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION public.seed_virtual_vote_bots(p_count integer DEFAULT 100)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -581,7 +608,7 @@ BEGIN
 
   FOR i IN 1..p_count LOOP
     v_email := format('vote-bot-%s@bots.victoryspace.internal', lpad(i::text, 3, '0'));
-    v_nick := format('관전봇%s', lpad(i::text, 2, '0'));
+    v_nick := public.virtual_bot_pick_seed_nickname(i);
 
     IF EXISTS (SELECT 1 FROM auth.users u WHERE lower(u.email) = lower(v_email)) THEN
       v_skipped := v_skipped + 1;
@@ -763,7 +790,6 @@ BEGIN
     SELECT m.id, m.right_type, m.expires_at
     FROM public.matchups m
     WHERE COALESCE(m.status, 'active') = 'active'
-      AND COALESCE(m.is_complete, false) = false
       AND COALESCE(m.is_demo, false) = false
       AND m.created_at <= now() - interval '10 minutes'
       AND m.created_at > now() - interval '14 days'

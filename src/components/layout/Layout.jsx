@@ -11,6 +11,7 @@ import { WelcomeBackOverlay } from '../ui/WelcomeBackOverlay'
 import { FandomMilestoneGate } from '../fandom/FandomMilestoneGate'
 import { TendencyReportGate } from '../tendency/TendencyReportGate'
 import { OfflineConnectivityBanner } from '../system/OfflineConnectivityBanner'
+import { PwaInstallBanner } from '../system/PwaInstallBanner'
 import { ChallengeCompleteShareModal } from '../matchup/ChallengeCompleteShareModal'
 import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
@@ -120,6 +121,7 @@ export function Layout({ children }) {
       <ChallengeCompleteShareModal />
       <PopupNoticeDisplay />
       <BottomNav legendDiamondShell={legendDiamondShell} />
+      <PwaInstallBanner />
       <NotificationPanelOverlay />
       <WelcomeBackOverlay />
       <FandomMilestoneGate />

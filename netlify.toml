@@ -126,9 +126,10 @@
 [functions."sla-inquiry-reminders"]
 schedule = "@hourly"
 
-# 가상 투표 봇 — 10분마다 `run_virtual_vote_bots` (등록 10분 후부터 표·조회수 인플레)
+# 가상 투표 봇 — 10분마다 `run_virtual_vote_bots` + `run_virtual_bot_matchups`
 [functions."virtual-vote-bots"]
-schedule = "*/10 * * * *"
+  schedule = "*/10 * * * *"
+  timeout = 60
 
 [[redirects]]
   from = "/api/tendency-og-image"
@@ -164,3 +165,20 @@ schedule = "*/10 * * * *"
   from = "/*"
   to = "/index.html"
   status = 200
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+    Service-Worker-Allowed = "/"
+
+[[headers]]
+  for = "/workbox-*.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json; charset=utf-8"
+    Cache-Control = "public, max-age=0, must-revalidate"

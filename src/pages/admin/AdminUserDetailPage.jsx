@@ -30,7 +30,7 @@ import {
 } from '../../lib/userAdminStorage'
 import { getWarningHistory } from '../../lib/warnSanctionStorage'
 import { resolveAdminUsersDetailReturnTo, rememberAdminUsersDetailEntry } from '../../lib/adminUsersListNav'
-import { useNavigateBack } from '../../lib/listPageNav'
+import { AdminNickname } from '../../components/admin/AdminNickname'
 
 const STATUS_LABEL = {
   active: '활성',
@@ -329,8 +329,8 @@ export function AdminUserDetailPage() {
                 <p className="text-xs font-bold uppercase tracking-wider text-emerald-700/80">
                   유저 상세 프로필
                 </p>
-                <h1 className="mt-1 truncate text-xl font-black tracking-tight text-[#22282E] sm:text-2xl">
-                  {user.nickname}
+                <h1 className="mt-1 text-xl font-black tracking-tight text-[#22282E] sm:text-2xl">
+                  <AdminNickname user={user} className="max-w-full" nickClassName="truncate" />
                 </h1>
                 {user.email && (
                   <p className="mt-1 flex items-center gap-1.5 truncate text-sm text-gray-600">
@@ -621,7 +621,7 @@ export function AdminUserDetailPage() {
             </div>
           </div>
           <p className="text-sm leading-relaxed text-gray-700">
-            <strong className="text-[#22282E]">{user?.nickname}</strong> 유저를{' '}
+            <strong className="text-[#22282E]"><AdminNickname user={user} /></strong> 유저를{' '}
             <strong className="text-emerald-700">복구(활성)</strong>하시겠습니까?
           </p>
           <div className="flex justify-end gap-3 pt-1">
@@ -650,7 +650,7 @@ export function AdminUserDetailPage() {
       >
         <div className="space-y-4">
           <p className="text-gray-600 text-sm">
-            <strong>{user?.nickname}</strong> 유저를 <strong>영구 차단</strong>하시겠습니까?
+            <strong><AdminNickname user={user} /></strong> 유저를 <strong>영구 차단</strong>하시겠습니까?
             <br />
             영구 차단된 유저는 서비스 이용이 제한되며, 복구하려면 관리자 조치가 필요합니다.
           </p>
@@ -680,7 +680,7 @@ export function AdminUserDetailPage() {
       >
         <div className="space-y-4">
           <p className="text-gray-600 text-sm">
-            <strong>{user?.nickname}</strong> 유저를 <strong>7일 정지</strong>하시겠습니까?
+            <strong><AdminNickname user={user} /></strong> 유저를 <strong>7일 정지</strong>하시겠습니까?
             <br />
             정지된 유저는 7일간 서비스 이용이 제한됩니다.
           </p>
@@ -721,7 +721,7 @@ export function AdminUserDetailPage() {
       >
         <div className="space-y-4">
           <p className="text-sm leading-relaxed text-gray-700">
-            <strong className="text-[#22282E]">{user?.nickname}</strong> 유저의 활동 포인트를 회수합니다.{' '}
+            <strong className="text-[#22282E]"><AdminNickname user={user} /></strong> 유저의 활동 포인트를 회수합니다.{' '}
             아래에서 <strong>차감 항목</strong>을 선택한 뒤 금액을 입력해 주세요. 회수된 포인트는 복구할 수
             없습니다.
           </p>

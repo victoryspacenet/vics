@@ -3,10 +3,12 @@ import { HelmetProvider } from 'react-helmet-async'
 import './index.css'
 import App from './App.jsx'
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
+import { registerPwaServiceWorker } from './pwaRegister'
 import { startCategoryConfigRemoteSync } from './lib/categoryAdminStorage'
 import { setupDevEmbeddedBrowserReload } from './lib/devEmbeddedBrowser'
 
 startCategoryConfigRemoteSync()
+registerPwaServiceWorker()
 
 if (import.meta.env.DEV) {
   setupDevEmbeddedBrowserReload()

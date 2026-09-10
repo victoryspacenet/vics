@@ -8,6 +8,7 @@ import {
   REPORT_SORT_OPTIONS,
   ACTIVITY_SORT_OPTIONS,
 } from '../../lib/userAdminStorage'
+import { AdminNickname } from '../../components/admin/AdminNickname'
 import {
   adminUsersListReturnTo,
   patchAdminUsersSearchParams,
@@ -259,7 +260,7 @@ export function AdminUsersPage() {
                       onClick={() => rememberAdminUsersDetailEntry(u.id, listReturnTo)}
                       className="hover:underline text-[#22282E]"
                     >
-                      {u.nickname}
+                      <AdminNickname user={u} />
                     </Link>
                   </td>
                   <td className="px-4 py-3 tabular-nums">{formatPointCell(u.matchupResultPoints)}</td>

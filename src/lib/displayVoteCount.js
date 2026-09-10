@@ -2,11 +2,11 @@
  * 화면용 투표 수 Display Offset.
  * DB·정산은 실제 표(+봇 표)를 쓰고, UI 숫자·막대·비율은 같은 표시값으로 맞춘다.
  *
- * shownTotal = max(30, raw * 15 + offset(matchupId))
+ * shownTotal = max(30, raw * 5 + offset(matchupId))
  * 좌/우 분할은 실제 비율을 따르되, 한쪽이 0표(100:0)이면 90:10으로 누그러뜨린다.
  */
 
-export const VOTE_DISPLAY_MULTIPLIER = 15
+export const VOTE_DISPLAY_MULTIPLIER = 5
 export const VOTE_DISPLAY_MIN = 30
 /** 한쪽에만 표가 있을 때 소수 측 최소 비율 */
 export const VOTE_DISPLAY_EXTREME_MINOR = 0.1

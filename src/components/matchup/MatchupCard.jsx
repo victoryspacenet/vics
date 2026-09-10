@@ -56,16 +56,22 @@ export function MatchupCard({ matchup: initialMatchup, compact, onVoteUpdate }) 
       if (batchEngagement.userVote) {
         setUserVote(batchEngagement.userVote)
         setVoteLocked(true)
-      } else {
+      } else if (batchEngagement.votesQueryOk !== false) {
         setUserVote(null)
         setVoteLocked(false)
+      } else {
+        void fetchUserVote()
       }
-      setLiked(batchEngagement.liked)
+      if (batchEngagement.likesQueryOk !== false) {
+        setLiked(batchEngagement.liked)
+      } else {
+        void fetchUserLike()
+      }
       return
     }
     void fetchUserVote()
     void fetchUserLike()
-  }, [user, matchup.id, batchEngagement?.ready, batchEngagement?.userVote, batchEngagement?.liked])
+  }, [user, matchup.id, batchEngagement?.ready, batchEngagement?.userVote, batchEngagement?.liked, batchEngagement?.votesQueryOk, batchEngagement?.likesQueryOk])
 
   const fetchUserVote = async () => {
     const { data } = await supabase

@@ -7,6 +7,7 @@ import { supabase } from './supabase'
 import { mapPrimaryActivityFromCounts } from './userPrimaryActivity'
 import { fetchVoteTendencySummaryForUser } from './tendencyReport'
 import { fetchAdminUserPrimaryCategory, derivePrimaryCategoryFromTopCategories } from './userPrimaryCategory'
+import { isSpectatorBotUser } from './adminSpectatorBot'
 
 /** @deprecated 레거시 전체 목록 저장(마이그레이션 시 UUID 행만 오버레이로 승격) */
 const ADMIN_USERS_KEY = 'admin_users_v1'
@@ -92,10 +93,10 @@ const MOCK_USER_DETAILS = {
 
 /** 관리자 UI용 profiles 컬럼 (없는 컬럼이면 fetchProfilesForAdmin에서 축소 재시도) */
 const PROFILE_ADMIN_FIELDS_FULL =
-  'id, nickname, email, points, oracle_points, creator_wins, total_matchups, total_votes_received, vote_total, vote_hits, wins, losses, reports_received_count, created_at, birthdate, gender'
+  'id, nickname, email, points, oracle_points, creator_wins, total_matchups, total_votes_received, vote_total, vote_hits, wins, losses, reports_received_count, created_at, birthdate, gender, is_bot'
 
 const PROFILE_ADMIN_FIELDS_MIN =
-  'id, nickname, email, points, total_matchups, wins, losses, reports_received_count, created_at, birthdate, gender'
+  'id, nickname, email, points, total_matchups, wins, losses, reports_received_count, created_at, birthdate, gender, is_bot'
 
 /** 목록 전용 — 상세·수정에 필요한 컬럼은 `getUserDetail` 등에서 조회 */
 const PROFILE_ADMIN_LIST_FIELDS = PROFILE_ADMIN_FIELDS_FULL
@@ -235,6 +236,7 @@ function filterUsersBySearch(list, searchRaw) {
   const q = String(searchRaw || '').trim().toLowerCase()
   const base = list.filter((u) => !isExcludedVirtualAdminUser(u))
   if (!q) return base
+  if (q === '관전봇') return base.filter((u) => isSpectatorBotUser(u))
   return base.filter(
     (u) =>
       (u.nickname || '').toLowerCase().includes(q) ||
@@ -344,7 +346,9 @@ export async function getUsersPaged({
         x = x.not('id', 'in', `(${capped.join(',')})`)
       }
     }
-    if (search) {
+    if (search === '관전봇') {
+      x = x.eq('is_bot', true)
+    } else if (search) {
       x = x.or(ilikeOrNicknameEmail(search))
     }
     return x
@@ -575,6 +579,7 @@ function mapProfileRowToAdminUser(row, overlay = {}) {
     social: '앱',
     birthdate: row.birthdate || null,
     gender: row.gender || null,
+    is_bot: Boolean(row.is_bot) || isSpectatorBotUser(row),
   }
 }
 

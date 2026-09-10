@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { VitePWA } from 'vite-plugin-pwa'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -32,7 +33,41 @@ export default defineConfig({
     },
     chunkSizeWarningLimit: 1200,
   },
-  plugins: [react()],
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      injectRegister: false,
+      manifest: false,
+      includeAssets: [
+        'logo.png',
+        'apple-touch-icon.png',
+        'pwa-192.png',
+        'pwa-512.png',
+        'pwa-512-maskable.png',
+        'manifest.webmanifest',
+      ],
+      workbox: {
+        navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/api\//],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,webmanifest}'],
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
+            handler: 'NetworkOnly',
+          },
+          {
+            urlPattern: /^https:\/\/[^/]*supabase\.co\/.*/i,
+            handler: 'NetworkOnly',
+          },
+        ],
+      },
+      devOptions: {
+        enabled: false,
+      },
+    }),
+  ],
   // Netlify Dev(netlify.toml targetPort=5173)가 이 포트로만 붙습니다.
   // Windows: localhost(IPv6 ::1)와 127.0.0.1 혼용 시 탭마다 연결 실패·로딩 멈춤이 날 수 있어 IPv4로 고정합니다.
   server: {

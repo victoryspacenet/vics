@@ -12,6 +12,23 @@ const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL ||
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || ''
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+
+function json(statusCode, body) {
+  return {
+    statusCode,
+    headers: {
+      ...CORS,
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+    body: JSON.stringify(body),
+  }
+}
+
 let serviceClient = null
 
 function getServiceClient() {
@@ -60,19 +77,16 @@ function mapVoteError(error) {
   const msg = error?.message || ''
   const code = error?.code || ''
   if (msg.includes('VOTE_IP_LIMIT') || code === 'P0001') {
-    return {
-      statusCode: 429,
-      body: JSON.stringify({
-        error: '이 기기/네트워크에서 해당 매치업에 대한 투표 한도를 초과했어요 (최대 3표)',
-        code: 'VOTE_IP_LIMIT',
-      }),
-    }
+    return json(429, {
+      error: '이 기기/네트워크에서 해당 매치업에 대한 투표 한도를 초과했어요 (최대 3표)',
+      code: 'VOTE_IP_LIMIT',
+    })
   }
   if (code === '23505') {
-    return { statusCode: 409, body: JSON.stringify({ error: '이미 투표했어요' }) }
+    return json(409, { error: '이미 투표했어요' })
   }
   if (code === '42501' || msg.includes('로그인이 필요')) {
-    return { statusCode: 401, body: JSON.stringify({ error: '로그인이 필요해요' }) }
+    return json(401, { error: '로그인이 필요해요' })
   }
   return null
 }
@@ -159,26 +173,29 @@ async function castVoteWithUserToken(supabase, { matchupId, side, clientIp, toke
  * FCM 알림은 투표 응답을 막지 않도록 `context.waitUntil`로 연장 실행합니다.
  */
 const voteHandler = async (event, context) => {
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 204, headers: CORS, body: '' }
+  }
   if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) }
+    return json(405, { error: 'Method not allowed' })
   }
 
   const authHeader = event.headers['authorization'] || event.headers['Authorization']
   const token = authHeader?.replace(/^Bearer\s+/i, '')
   if (!token) {
-    return { statusCode: 401, body: JSON.stringify({ error: '로그인이 필요해요' }) }
+    return json(401, { error: '로그인이 필요해요' })
   }
 
   let body
   try {
     body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body || {}
   } catch {
-    return { statusCode: 400, body: JSON.stringify({ error: '잘못된 요청이에요' }) }
+    return json(400, { error: '잘못된 요청이에요' })
   }
 
   const { matchup_id, side } = body
   if (!matchup_id || !['left', 'right'].includes(side)) {
-    return { statusCode: 400, body: JSON.stringify({ error: 'matchup_id와 side(left/right)가 필요해요' }) }
+    return json(400, { error: 'matchup_id와 side(left/right)가 필요해요' })
   }
 
   const clientIp = getClientIp(event) || 'unknown'
@@ -218,12 +235,12 @@ const voteHandler = async (event, context) => {
       ),
       context,
     )
-    return { statusCode: 500, body: JSON.stringify({ error: '투표 중 오류가 발생했어요' }) }
+    return json(500, { error: '투표 중 오류가 발생했어요' })
   }
 
   scheduleBackground(runFcmAfterVote(matchup_id, result.userId), context)
 
-  return { statusCode: 200, body: JSON.stringify({ ok: true }) }
+  return json(200, { ok: true })
 }
 
 exports.handler = withIpRateLimit(

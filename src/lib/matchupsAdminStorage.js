@@ -270,8 +270,8 @@ async function fetchMatchupDetailFromSupabase(id) {
       left_type, left_text, right_text,
       left_url, left_thumbnail_url, right_url, right_thumbnail_url,
       user_id, right_user_id,
-      profiles:user_id(id, nickname, avatar_url),
-      right_profiles:right_user_id(id, nickname, avatar_url)`
+      profiles:user_id(id, nickname, avatar_url, is_bot),
+      right_profiles:right_user_id(id, nickname, avatar_url, is_bot)`
     )
     .eq('id', id)
     .maybeSingle()
@@ -313,6 +313,7 @@ async function fetchMatchupDetailFromSupabase(id) {
     ...listBase,
     userA: {
       name: row.profiles?.nickname ?? '-',
+      isBot: Boolean(row.profiles?.is_bot),
       imageUrl: leftSide.mediaUrl,
       sideType: leftSide.sideType,
       sideText: leftSide.sideText,
@@ -322,6 +323,7 @@ async function fetchMatchupDetailFromSupabase(id) {
     userB: hasChallenger
       ? {
           name: row.right_profiles?.nickname ?? '-',
+          isBot: Boolean(row.right_profiles?.is_bot),
           imageUrl: rightSide.mediaUrl,
           sideType: rightSide.sideType,
           sideText: rightSide.sideText,
@@ -330,6 +332,7 @@ async function fetchMatchupDetailFromSupabase(id) {
         }
       : {
           name: null,
+          isBot: false,
           imageUrl: null,
           sideType: null,
           sideText: '',

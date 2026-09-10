@@ -1,8 +1,16 @@
 /**
  * 시즌제 유틸 (4개월 단위, supabase_seasons.sql의 interval '4 months'와 맞춤)
+ * 시즌 1 시작: 2026-09-10 00:00 KST (관전봇 참여 시점)
  */
 
-const SEASON_DAYS = 120 // 4개월 ≈ 120일 (30일×4, 달력 월과 동기화는 DB 시즌 테이블·cron이 담당)
+/** 시즌 1 시작 (한국시간) */
+export const SEASON_1_START = new Date('2026-09-10T00:00:00+09:00')
+
+function addMonths(date, months) {
+  const next = new Date(date.getTime())
+  next.setMonth(next.getMonth() + months)
+  return next
+}
 
 /**
  * 현재 시즌 번호 계산 (앱 기준, DB 없이)
@@ -10,14 +18,15 @@ const SEASON_DAYS = 120 // 4개월 ≈ 120일 (30일×4, 달력 월과 동기화
  * @returns {{ number: number, startAt: Date, endAt: Date }}
  */
 export function getCurrentSeason(now = new Date()) {
-  const epoch = new Date('2026-03-01T00:00:00Z') // 시즌 1 시작
-  const msPerDay = 24 * 60 * 60 * 1000
-  const elapsed = now - epoch
-  const daysElapsed = Math.floor(elapsed / msPerDay)
-  const number = Math.floor(daysElapsed / SEASON_DAYS) + 1
-  const startDays = (number - 1) * SEASON_DAYS
-  const startAt = new Date(epoch.getTime() + startDays * msPerDay)
-  const endAt = new Date(startAt.getTime() + SEASON_DAYS * msPerDay)
+  let number = 1
+  let startAt = new Date(SEASON_1_START)
+  let endAt = new Date('2027-01-10T00:00:00+09:00')
+  const t = now.getTime()
+  while (t >= endAt.getTime()) {
+    number += 1
+    startAt = endAt
+    endAt = addMonths(startAt, 4)
+  }
   return { number, startAt, endAt }
 }
 

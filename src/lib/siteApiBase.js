@@ -3,7 +3,7 @@
  * Netlify Functions로 연결되지 않습니다. 프로덕션 사이트 절대 URL을 붙여 해결합니다.
  *
  * 웹 브라우저: `VITE_SITE_ORIGIN` 미설정 시 상대 경로 유지(기존 동작).
- * 네이티브 빌드: `vite build` 시 `VITE_SITE_ORIGIN=https://배포도메인` 필수 권장.
+ * 네이티브: env가 없어도 `https://www.victoryspace.net`으로 /api/* 를 보냅니다.
  */
 
 import { isCapacitorNativeShell, MOBILE_OAUTH_CALLBACK_URL } from './capacitorShell'
@@ -11,6 +11,9 @@ import { isCapacitorNativeShell, MOBILE_OAUTH_CALLBACK_URL } from './capacitorSh
 function trimSlash(s) {
   return String(s || '').trim().replace(/\/+$/, '')
 }
+
+/** 네이티브 빌드에 VITE_SITE_ORIGIN이 없을 때 /api/* 가 앱 HTML로 떨어지지 않게 */
+const DEFAULT_NATIVE_SITE_ORIGIN = 'https://www.victoryspace.net'
 
 /** @returns {string} 예: https://vics.example.netlify.app (없으면 '') */
 export function getSiteOrigin() {
@@ -25,6 +28,7 @@ export function resolveSiteUrl(path) {
   const p = path.startsWith('/') ? path : `/${path}`
   const origin = getSiteOrigin()
   if (origin) return `${origin}${p}`
+  if (isCapacitorNativeShell()) return `${DEFAULT_NATIVE_SITE_ORIGIN}${p}`
   return p
 }
 

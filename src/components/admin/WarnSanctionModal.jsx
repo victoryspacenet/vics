@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Modal } from '../ui/Modal'
+import { AdminNickname } from './AdminNickname'
 import {
   getWarningCount,
   getLastSanctionLabel,
@@ -108,7 +109,7 @@ export function WarnSanctionModal({ isOpen, onClose, user, onSuccess }) {
           <h3 className="text-sm font-bold text-[#22282E] mb-3">[1] 대상 유저 정보</h3>
           <div className="bg-gray-50 rounded-xl border border-gray-100 px-4 py-3 space-y-1.5 text-sm">
             <p>
-              <strong>닉네임:</strong> {user.nickname} ({user.id})
+              <strong>닉네임:</strong> <AdminNickname user={user} /> ({user.id})
             </p>
             <p>
               <strong>누적 경고 횟수:</strong>{' '}

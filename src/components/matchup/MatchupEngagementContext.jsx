@@ -17,12 +17,20 @@ export function MatchupEngagementProvider({ matchupIds, children }) {
     ready: false,
     votesByMatchupId: {},
     likedMatchupIds: new Set(),
+    votesQueryOk: true,
+    likesQueryOk: true,
   })
 
   useEffect(() => {
     let cancelled = false
     if (!user?.id || !idKey) {
-      setState({ ready: true, votesByMatchupId: {}, likedMatchupIds: new Set() })
+      setState({
+        ready: true,
+        votesByMatchupId: {},
+        likedMatchupIds: new Set(),
+        votesQueryOk: true,
+        likesQueryOk: true,
+      })
       return undefined
     }
     setState((s) => ({ ...s, ready: false }))
@@ -33,6 +41,8 @@ export function MatchupEngagementProvider({ matchupIds, children }) {
         ready: true,
         votesByMatchupId: result.votesByMatchupId,
         likedMatchupIds: result.likedMatchupIds,
+        votesQueryOk: result.votesQueryOk !== false,
+        likesQueryOk: result.likesQueryOk !== false,
       })
     })
     return () => {
@@ -45,8 +55,10 @@ export function MatchupEngagementProvider({ matchupIds, children }) {
       ready: state.ready,
       votesByMatchupId: state.votesByMatchupId,
       likedMatchupIds: state.likedMatchupIds,
+      votesQueryOk: state.votesQueryOk,
+      likesQueryOk: state.likesQueryOk,
     }),
-    [state.ready, state.votesByMatchupId, state.likedMatchupIds],
+    [state.ready, state.votesByMatchupId, state.likedMatchupIds, state.votesQueryOk, state.likesQueryOk],
   )
 
   return (
@@ -58,9 +70,12 @@ export function useMatchupEngagement(matchupId) {
   const ctx = useContext(MatchupEngagementContext)
   if (!ctx || !matchupId) return null
   const id = String(matchupId)
+  const key = id.toLowerCase()
   return {
     ready: ctx.ready,
-    userVote: ctx.votesByMatchupId[id] ?? null,
-    liked: ctx.likedMatchupIds.has(id),
+    userVote: ctx.votesByMatchupId[id] ?? ctx.votesByMatchupId[key] ?? null,
+    liked: ctx.likedMatchupIds.has(id) || ctx.likedMatchupIds.has(key),
+    votesQueryOk: ctx.votesQueryOk !== false,
+    likesQueryOk: ctx.likesQueryOk !== false,
   }
 }

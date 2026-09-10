@@ -15,6 +15,7 @@ import {
 import { applyMatchupAdminUserSuspension, sendWarning } from '../../lib/warnSanctionStorage'
 import { Modal } from '../../components/ui/Modal'
 import { VsBadge } from '../../components/ui/VsBadge'
+import { AdminNickname } from '../../components/admin/AdminNickname'
 import { safeMediaUrl } from '../../lib/sanitize'
 
 function AdminMatchupSideMedia({ side, sideType, sideText, imageUrl, label }) {
@@ -274,7 +275,9 @@ export function AdminMatchupDetailPage() {
         <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] gap-4 sm:gap-4 p-4 sm:p-6 items-stretch">
           <div className="flex flex-col items-center p-4 rounded-xl bg-gray-50 border border-gray-100">
             <p className="text-xs font-bold text-gray-500 mb-2">USER A</p>
-            <p className="text-base font-black text-[#22282E] mb-3 truncate max-w-full">{matchup.userA?.name ?? '-'}</p>
+            <p className="text-base font-black text-[#22282E] mb-3 max-w-full">
+              <AdminNickname nickname={matchup.userA?.name} isBot={matchup.userA?.isBot} className="max-w-full" nickClassName="truncate" />
+            </p>
             <div className="w-full aspect-square max-w-[120px] sm:max-w-[140px] rounded-xl overflow-hidden bg-gray-200 mb-3">
               <AdminMatchupSideMedia
                 side="left"
@@ -293,8 +296,8 @@ export function AdminMatchupDetailPage() {
             <p className="text-xs font-bold text-gray-500 mb-2">USER B</p>
             {matchup.hasChallenger ? (
               <>
-                <p className="text-base font-black text-[#22282E] mb-3 truncate max-w-full">
-                  {matchup.userB?.name ?? '-'}
+                <p className="text-base font-black text-[#22282E] mb-3 max-w-full">
+                  <AdminNickname nickname={matchup.userB?.name} isBot={matchup.userB?.isBot} className="max-w-full" nickClassName="truncate" />
                 </p>
                 <div className="w-full aspect-square max-w-[120px] sm:max-w-[140px] rounded-xl overflow-hidden bg-gray-200 mb-3">
                   <AdminMatchupSideMedia

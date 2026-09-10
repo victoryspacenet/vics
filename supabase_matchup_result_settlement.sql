@@ -355,7 +355,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 COMMENT ON FUNCTION public.settle_matchup_result_points(uuid) IS
-  '매치업 1건 승/패/무 포인트 정산 — 봇 포함 left/right_votes로 승자, 포인트는 사람에게만. Champion 50/10/30 · Oracle 25/5/15';
+  '매치업 1건 승/패/무 포인트 정산 — 봇 포함 표로 승자. Champion은 사람+봇 생성/도전, Oracle은 사람만. Champion 50/10/30 · Oracle 25/5/15';
 COMMENT ON FUNCTION public.settle_all_due_matchup_results() IS
   '마감된 미정산 매치업 일괄 정산. pg_cron 또는 수동 실행.';
 

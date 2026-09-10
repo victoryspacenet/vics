@@ -13,6 +13,7 @@ import { Modal } from '../../components/ui/Modal'
 import { useUIStore } from '../../store/uiStore'
 import { supabase } from '../../lib/supabase'
 import { resolveSiteUrl } from '../../lib/siteApiBase'
+import { AdminNickname } from '../../components/admin/AdminNickname'
 
 const STATUS_LABELS = {
   [ADMIN_STATUS.pending]: '미답변',
@@ -66,16 +67,18 @@ export function InquiryAdminDetailPage() {
         if (data) {
           // profiles 별도 조회
           let nickname = '(알 수 없음)'
+          let isBot = false
           let userTier = '-'
           let userJoinedAt = null
           if (data.user_id) {
             const { data: prof } = await supabase
               .from('profiles')
-              .select('nickname, tier, created_at')
+              .select('nickname, tier, created_at, is_bot')
               .eq('id', data.user_id)
               .single()
             if (prof) {
               nickname = prof.nickname || nickname
+              isBot = Boolean(prof.is_bot)
               userTier = prof.tier || userTier
               userJoinedAt = prof.created_at
             }
@@ -101,6 +104,7 @@ export function InquiryAdminDetailPage() {
             title: data.title,
             content: data.content,
             nickname,
+            isBot,
             userTier,
             userJoinedAt,
             attachments: data.image_urls || [],
@@ -263,7 +267,7 @@ export function InquiryAdminDetailPage() {
         <div className="bg-white rounded-xl border border-gray-100 p-4 mb-6">
           <h3 className="text-sm font-bold text-[#22282E] mb-3">유저 정보</h3>
           <p className="text-sm text-gray-600">
-            닉네임: <strong>{inquiry.nickname}</strong>
+            닉네임: <strong><AdminNickname nickname={inquiry.nickname} isBot={inquiry.isBot} /></strong>
             {inquiry.userLevel ? ` (lv.${inquiry.userLevel})` : ''}
             {inquiry.userTier ? ` | 티어: ${inquiry.userTier}` : ''}
             {inquiry.userJoinedAt ? ` | 가입일: ${formatFullDate(inquiry.userJoinedAt)}` : ''}
@@ -384,7 +388,7 @@ export function InquiryAdminDetailPage() {
       >
         <div className="space-y-4">
           <p className="text-sm text-gray-600">
-            <strong className="text-[#22282E]">{inquiry.nickname}</strong>님의 문의에 답변을 발송하시겠습니까?
+            <strong className="text-[#22282E]"><AdminNickname nickname={inquiry.nickname} isBot={inquiry.isBot} /></strong>님의 문의에 답변을 발송하시겠습니까?
             <br />
             <span className="text-gray-500">발송 후 상태가 <strong>완료</strong>로 변경됩니다.</span>
           </p>

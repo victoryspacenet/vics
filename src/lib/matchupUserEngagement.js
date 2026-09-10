@@ -10,17 +10,33 @@ function chunkIds(ids) {
   return out
 }
 
+function engagementKey(id) {
+  return String(id || '').toLowerCase()
+}
+
 /**
  * 로그인 유저의 투표·좋아요를 매치업 ID 목록 기준으로 배치 조회
- * @returns {{ votesByMatchupId: Record<string, 'left'|'right'>, likedMatchupIds: Set<string> }}
+ * @returns {{
+ *   votesByMatchupId: Record<string, 'left'|'right'>,
+ *   likedMatchupIds: Set<string>,
+ *   votesQueryOk: boolean,
+ *   likesQueryOk: boolean,
+ * }}
  */
 export async function fetchUserEngagementForMatchups(userId, matchupIds) {
   const ids = [...new Set((matchupIds || []).map(String).filter(Boolean))]
-  const empty = { votesByMatchupId: {}, likedMatchupIds: new Set() }
+  const empty = {
+    votesByMatchupId: {},
+    likedMatchupIds: new Set(),
+    votesQueryOk: true,
+    likesQueryOk: true,
+  }
   if (!userId || ids.length === 0) return empty
 
   const votesByMatchupId = {}
   const likedMatchupIds = new Set()
+  let votesQueryOk = true
+  let likesQueryOk = true
 
   const chunks = chunkIds(ids)
   await Promise.all(
@@ -33,16 +49,24 @@ export async function fetchUserEngagementForMatchups(userId, matchupIds) {
           .in('matchup_id', part),
         supabase.from('likes').select('matchup_id').eq('user_id', userId).in('matchup_id', part),
       ])
-      for (const row of votesRes.data || []) {
-        if (row?.matchup_id && (row.side === 'left' || row.side === 'right')) {
-          votesByMatchupId[row.matchup_id] = row.side
+      if (votesRes.error) {
+        votesQueryOk = false
+      } else {
+        for (const row of votesRes.data || []) {
+          if (row?.matchup_id && (row.side === 'left' || row.side === 'right')) {
+            votesByMatchupId[engagementKey(row.matchup_id)] = row.side
+          }
         }
       }
-      for (const row of likesRes.data || []) {
-        if (row?.matchup_id) likedMatchupIds.add(row.matchup_id)
+      if (likesRes.error) {
+        likesQueryOk = false
+      } else {
+        for (const row of likesRes.data || []) {
+          if (row?.matchup_id) likedMatchupIds.add(engagementKey(row.matchup_id))
+        }
       }
     }),
   )
 
-  return { votesByMatchupId, likedMatchupIds }
+  return { votesByMatchupId, likedMatchupIds, votesQueryOk, likesQueryOk }
 }

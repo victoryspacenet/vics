@@ -9,6 +9,7 @@ import {
 } from '../../lib/inquiryAdminStorage'
 import { getAutoReplyExcludedInquiryIds } from '../../lib/inquiryAdminAutoReplyIds'
 import { supabase } from '../../lib/supabase'
+import { AdminNickname } from '../../components/admin/AdminNickname'
 
 async function loadSLAHours() {
   const { data } = await supabase
@@ -165,17 +166,18 @@ export function InquiryAdminListPage() {
       if (userIds.length > 0) {
         const { data: profRows } = await supabase
           .from('profiles')
-          .select('id, nickname')
+          .select('id, nickname, is_bot')
           .in('id', userIds)
         for (const p of profRows || []) {
-          nicknameById[String(p.id)] = p.nickname || ''
+          nicknameById[String(p.id)] = { nickname: p.nickname || '', isBot: Boolean(p.is_bot) }
         }
       }
 
       setListRows(
         rows.map((row) => ({
           ...normalizeSupabaseInquiry(row),
-          nickname: nicknameById[String(row.user_id)] || '(알 수 없음)',
+          nickname: nicknameById[String(row.user_id)]?.nickname || '(알 수 없음)',
+          isBot: Boolean(nicknameById[String(row.user_id)]?.isBot),
           _autoReplied: autoSet.has(String(row.id)),
         }))
       )
@@ -396,7 +398,9 @@ export function InquiryAdminListPage() {
                       </td>
                       <td className="px-4 py-3 text-gray-600">{row.categoryLabel || row.category}</td>
                       <td className="px-4 py-3 font-medium text-[#22282E] truncate max-w-[200px]">{row.title}</td>
-                      <td className="px-4 py-3 text-gray-600">{row.nickname}</td>
+                      <td className="px-4 py-3 text-gray-600">
+                        <AdminNickname nickname={row.nickname} isBot={row.isBot} />
+                      </td>
                       <td className="px-4 py-3 text-gray-500">{formatDate(row.createdAt)}</td>
                       <td className="px-4 py-3 text-center">
                         <Link

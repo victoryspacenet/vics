@@ -135,16 +135,22 @@ export function FeedCard({
         setUserVote(side)
         setVoteLocked(true)
         setBarAnimated(true)
-      } else {
+      } else if (batchEngagement.votesQueryOk !== false) {
         setUserVote(null)
         setVoteLocked(false)
+      } else {
+        void fetchUserVote()
       }
-      setLiked(batchEngagement.liked)
+      if (batchEngagement.likesQueryOk !== false) {
+        setLiked(batchEngagement.liked)
+      } else {
+        void fetchUserLike()
+      }
       return
     }
     void fetchUserVote()
     void fetchUserLike()
-  }, [user, matchup.id, batchEngagement?.ready, batchEngagement?.userVote, batchEngagement?.liked])
+  }, [user, matchup.id, batchEngagement?.ready, batchEngagement?.userVote, batchEngagement?.liked, batchEngagement?.votesQueryOk, batchEngagement?.likesQueryOk])
 
   // 바 애니메이션: userVote 확정 후 실행
   useEffect(() => {
