@@ -30,6 +30,7 @@ import {
 } from '../../lib/userAdminStorage'
 import { getWarningHistory } from '../../lib/warnSanctionStorage'
 import { resolveAdminUsersDetailReturnTo, rememberAdminUsersDetailEntry } from '../../lib/adminUsersListNav'
+import { useNavigateBack } from '../../lib/listPageNav'
 import { AdminNickname } from '../../components/admin/AdminNickname'
 
 const STATUS_LABEL = {
