@@ -936,7 +936,7 @@ export function RankingPage() {
                     · {TYPE_OPTIONS.find((t) => t.id === typeTab)?.label}
                   </span>
                 </h2>
-                <p className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-amber-500/70">일 1회 업데이트</p>
+                <p className="mt-1 text-[11px] font-black tracking-tight text-cyan-600">일 1회 업데이트</p>
               </div>
             </div>
             {/* 드롭다운 필터 3종 */}
