@@ -6,6 +6,22 @@ import { ErrorBoundary } from './components/ui/ErrorBoundary'
 import { registerPwaServiceWorker } from './pwaRegister'
 import { startCategoryConfigRemoteSync } from './lib/categoryAdminStorage'
 import { setupDevEmbeddedBrowserReload } from './lib/devEmbeddedBrowser'
+import {
+  hasAttemptedStaleClientRecovery,
+  markStaleClientRecoveryAttempted,
+  recoverStaleClientCache,
+  reloadAfterStaleClientRecovery,
+} from './lib/staleClientCache'
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('vite:preloadError', (event) => {
+    event.preventDefault?.()
+    console.error('[vite:preloadError]', event)
+    if (hasAttemptedStaleClientRecovery()) return
+    markStaleClientRecoveryAttempted()
+    void recoverStaleClientCache().then(() => reloadAfterStaleClientRecovery())
+  })
+}
 
 startCategoryConfigRemoteSync()
 registerPwaServiceWorker()

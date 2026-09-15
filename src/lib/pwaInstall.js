@@ -1,10 +1,19 @@
 import { isCapacitorNativeShell } from './capacitorShell'
 import { isInAppBrowser } from './inAppBrowser'
 
+function safeMatchMedia(query) {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+  try {
+    return Boolean(window.matchMedia(query).matches)
+  } catch {
+    return false
+  }
+}
+
 export function isPwaStandalone() {
   if (typeof window === 'undefined') return false
-  if (window.matchMedia('(display-mode: standalone)').matches) return true
-  if (window.matchMedia('(display-mode: fullscreen)').matches) return true
+  if (safeMatchMedia('(display-mode: standalone)')) return true
+  if (safeMatchMedia('(display-mode: fullscreen)')) return true
   if (window.navigator.standalone === true) return true
   return false
 }
@@ -31,7 +40,7 @@ export function isMobileBrowserViewport() {
   const ua = navigator.userAgent || ''
   if (/iphone|ipod|android.+mobile|windows phone/i.test(ua)) return true
   if (/ipad/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) return true
-  return window.matchMedia('(max-width: 767px) and (pointer: coarse)').matches
+  return safeMatchMedia('(max-width: 767px) and (pointer: coarse)')
 }
 
 export function shouldOfferPwaInstall() {
@@ -50,10 +59,14 @@ export function shouldOfferPwaInstall() {
  * - none: 이미 설치됨·데스크톱·네이티브 앱
  */
 export function getPwaInstallMode() {
-  if (!shouldOfferPwaInstall()) return 'none'
-  if (isInAppBrowser()) return 'in-app'
-  if (isIosSafariFamily()) return 'ios-safari'
-  if (isIosDevice()) return 'ios-other'
-  if (isMobileBrowserViewport()) return 'android'
-  return 'none'
+  try {
+    if (!shouldOfferPwaInstall()) return 'none'
+    if (isInAppBrowser()) return 'in-app'
+    if (isIosSafariFamily()) return 'ios-safari'
+    if (isIosDevice()) return 'ios-other'
+    if (isMobileBrowserViewport()) return 'android'
+    return 'none'
+  } catch {
+    return 'none'
+  }
 }
