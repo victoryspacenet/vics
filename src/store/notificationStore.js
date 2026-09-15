@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
 import { startVisibilityPolling } from '../lib/visibilityPolling'
+import { useAuthStore } from './authStore'
+import { viewerCanSeeVoteRoster, VOTE_ROSTER_NOTIFICATION_TYPE } from '../lib/notificationVisibility'
 
 /** Auth 스토리지 락(steal)·중복 요청으로 인한 abort — 사용자 조치 불필요 */
 function isBenignNotificationFetchError(err) {
@@ -43,12 +45,18 @@ export const useNotificationStore = create((set, get) => ({
     notifFetchInFlight = (async () => {
       set({ loading: true })
       try {
-        const { data, error } = await supabase
+        const user = useAuthStore.getState().user
+        let query = supabase
           .from('notifications')
           .select('*')
           .eq('user_id', userId)
           .order('created_at', { ascending: false })
           .limit(50)
+        if (!viewerCanSeeVoteRoster(user)) {
+          query = query.neq('type', VOTE_ROSTER_NOTIFICATION_TYPE)
+        }
+
+        const { data, error } = await query
 
         if (error) throw error
         if (epoch !== notifFetchEpoch) return

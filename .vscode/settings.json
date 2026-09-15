@@ -1,3 +1,19 @@
 {
-  "task.allowAutomaticTasks": "on"
+  "task.allowAutomaticTasks": "on",
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/node_modules/**": true,
+    "**/.netlify/**": true,
+    "**/tmp-og/**": true,
+    "**/dist/**": true,
+    "**/android/**/build/**": true,
+    "**/android/.gradle/**": true
+  },
+  "search.exclude": {
+    "**/.netlify/**": true,
+    "**/tmp-og/**": true,
+    "**/dist/**": true,
+    "**/node_modules/**": true
+  }
 }

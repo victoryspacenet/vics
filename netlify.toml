@@ -126,9 +126,14 @@
 [functions."sla-inquiry-reminders"]
 schedule = "@hourly"
 
-# 가상 투표 봇 — 10분마다 `run_virtual_vote_bots` + `run_virtual_bot_matchups`
+# 가상 봇 — 10분마다 호출. 투표 + 텍스트 생성·도전. 조회/표 인플레는 RPC 내부에서 30분마다만 실행
 [functions."virtual-vote-bots"]
   schedule = "*/10 * * * *"
+  timeout = 60
+
+# 관전봇 사진 전용 — 투표 스케줄과 5분 어긋나게. 사진 성공 후에만 이미지 생성·도전
+[functions."virtual-bot-images"]
+  schedule = "5,15,25,35,45,55 * * * *"
   timeout = 60
 
 [[redirects]]

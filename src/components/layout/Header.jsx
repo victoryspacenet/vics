@@ -14,6 +14,7 @@ import { cn } from '../../lib/utils'
 import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../../lib/layoutShellClasses'
 import { encodeForUrl } from '../../lib/sanitize'
 import { useCanAccessAdmin } from '../../lib/adminAuth'
+import { unreadVisibleNotificationCount } from '../../lib/notificationVisibility'
 import { isLegendDiamondShellActive } from '../../lib/legendDiamondUiTheme'
 
 export function Header() {
@@ -22,8 +23,8 @@ export function Header() {
   const showAdminNav = useCanAccessAdmin()
   const shellLd = Boolean(user && isLegendDiamondShellActive(profile))
   const { openCreateDrawer, openLoginModal } = useUIStore()
-  const { unreadCount } = useNotificationStore()
-  const totalUnread = unreadCount
+  const { notifications } = useNotificationStore()
+  const totalUnread = unreadVisibleNotificationCount(notifications, showAdminNav)
   const navigate = useNavigate()
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')

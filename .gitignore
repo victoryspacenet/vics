@@ -37,6 +37,11 @@ android/app/google-services.json
 # Local Netlify folder
 .netlify
 
+# Local debug/render dumps (not product assets)
+tmp-og/
+tmp-path.txt
+supabase/.temp/
+
 # Capacitor 네이티브 — 로컬/CI 빌드 산출물 (android·ios 템플릿은 커밋)
 android/app/build/
 android/.gradle/

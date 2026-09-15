@@ -17,6 +17,8 @@ import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
 import { setLastPathBeforeLogin } from '../../lib/loginReturn'
 import { useNotificationStore } from '../../store/notificationStore'
+import { useCanAccessAdmin } from '../../lib/adminAuth'
+import { unreadVisibleNotificationCount } from '../../lib/notificationVisibility'
 import { cn } from '../../lib/utils'
 import { LAYOUT_CONTENT_MAX_WIDTH_CLASS } from '../../lib/layoutShellClasses'
 import { isLegendDiamondShellActive } from '../../lib/legendDiamondUiTheme'
@@ -305,8 +307,9 @@ function BottomNav({ legendDiamondShell = false }) {
   const location  = useLocation()
   const { user }  = useAuthStore()
   const { openCreateDrawer, openLoginModal, openNotificationPanel, isNotificationPanelOpen } = useUIStore()
-  const { unreadCount } = useNotificationStore()
-  const totalUnread = unreadCount
+  const { notifications } = useNotificationStore()
+  const canSeeVoteRoster = useCanAccessAdmin()
+  const totalUnread = unreadVisibleNotificationCount(notifications, canSeeVoteRoster)
 
   const handleCreate = () => {
     if (!user) { openLoginModal(); return }

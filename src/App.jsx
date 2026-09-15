@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from
 import { useAuthStore } from './store/authStore'
 import { useUIStore } from './store/uiStore'
 import { useNotificationStore } from './store/notificationStore'
+import { useCanAccessAdmin } from './lib/adminAuth'
 import { Layout } from './components/layout/Layout'
 import { Modal } from './components/ui/Modal'
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
@@ -91,6 +92,7 @@ function App() {
   const { isLoginModalOpen, closeLoginModal, showToast, loginModalContext } = useUIStore()
   const { fetchNotifications, subscribeRealtime, reset: resetNotifications } = useNotificationStore()
   const noticePushRefresh = useUIStore((s) => s.noticePushRefresh)
+  const canSeeVoteRoster = useCanAccessAdmin()
   const homeRefreshRef = useRef(null)
 
   useEffect(() => {
@@ -166,6 +168,11 @@ function App() {
     if (noticePushRefresh <= 0) return
     void fetchNotifications(user.id, { force: true })
   }, [noticePushRefresh, user?.id, fetchNotifications])
+
+  useEffect(() => {
+    if (!user?.id || !canSeeVoteRoster) return
+    void fetchNotifications(user.id, { force: true })
+  }, [canSeeVoteRoster, user?.id, fetchNotifications])
 
   useEffect(() => {
     const onNotif = () => {

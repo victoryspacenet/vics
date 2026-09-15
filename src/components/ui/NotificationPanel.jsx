@@ -17,6 +17,11 @@ import { useNotificationStore } from '../../store/notificationStore'
 import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
 import { formatDate } from '../../lib/utils'
+import {
+  filterVoteRosterNotifications,
+  unreadVisibleNotificationCount,
+  useCanSeeVoteRosterNotifications,
+} from '../../lib/notificationVisibility'
 
 /** MZ 파스텔 — 타입별 아이콘 링 */
 const TYPE_CONFIG = {
@@ -91,12 +96,20 @@ export function NotificationPanel({ onClose }) {
   const navigate = useNavigate()
   const { user, profile } = useAuthStore()
   const { openWelcomeBackModal } = useUIStore()
-  const { notifications, unreadCount, loading, markAsRead, markAllAsRead } = useNotificationStore()
+  const { notifications, loading, markAsRead, markAllAsRead } = useNotificationStore()
+  const canSeeVoteRoster = useCanSeeVoteRosterNotifications()
   const panelRef = useRef(null)
 
   const mergedList = useMemo(
-    () => [...notifications].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)),
-    [notifications]
+    () =>
+      filterVoteRosterNotifications(notifications, canSeeVoteRoster).sort(
+        (a, b) => new Date(b.created_at) - new Date(a.created_at),
+      ),
+    [notifications, canSeeVoteRoster],
+  )
+  const visibleUnreadCount = useMemo(
+    () => unreadVisibleNotificationCount(notifications, canSeeVoteRoster),
+    [notifications, canSeeVoteRoster],
   )
 
   useEffect(() => {
@@ -162,13 +175,13 @@ export function NotificationPanel({ onClose }) {
           <span className="bg-gradient-to-r from-fuchsia-800 via-violet-700 to-cyan-700 bg-clip-text text-sm font-black tracking-tight text-transparent">
             알림
           </span>
-          {unreadCount > 0 && (
+          {visibleUnreadCount > 0 && (
             <span className="shrink-0 rounded-full bg-gradient-to-r from-fuchsia-600 to-pink-500 px-2 py-0.5 text-[10px] font-black text-white shadow-sm shadow-fuchsia-400/40 ring-1 ring-white/40">
-              {unreadCount}
+              {visibleUnreadCount}
             </span>
           )}
         </div>
-        {unreadCount > 0 && (
+        {visibleUnreadCount > 0 && (
           <button
             type="button"
             onClick={handleMarkAll}

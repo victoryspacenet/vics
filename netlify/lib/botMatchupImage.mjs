@@ -1,9 +1,12 @@
 /**
  * 관전봇 매치업 이미지 (OpenAI Images → matchup-media)
- * 생성: 왼쪽 주제 이미지. 도전: A측이 이미지일 때 오른쪽 이미지를 새로 만듦.
- * 회원 미디어는 재사용하지 않음. 실패 시 생성은 텍스트 유지, 이미지 도전은 슬롯을 되돌림.
+ * 생성: 사진을 만든 뒤에만 올린다. 실패하면 매치업을 만들지 않는다.
+ * 도전: A측이 이미지일 때 오른쪽 이미지를 새로 만든 뒤에만 도전한다.
+ * 회원 미디어는 재사용하지 않음.
  */
-import { mapBotChallengeCategoryKey } from './botChallengeCopy.mjs'
+import { composeBotChallengeCopy } from './botChallengeCopy.mjs'
+import { loadBotCategoryCatalog, resolveBotCategoryKey, resolveBotCategoryLabel } from './botCategoryMap.mjs'
+import { assertBotChallengeSimilarity } from './botChallengeSimilarity.mjs'
 
 const BUCKET = 'matchup-media'
 const IMAGE_TIMEOUT_MS = 22_000
@@ -29,10 +32,10 @@ async function fetchWithTimeout(url, init, ms) {
   }
 }
 
-async function generatePngBytes(scenePrompt) {
+export async function generatePngBytes(scenePrompt, safety = SAFETY) {
   const key = openaiKey()
   if (!key) return null
-  const prompt = `${String(scenePrompt || '').trim()}. ${SAFETY}`
+  const prompt = `${String(scenePrompt || '').trim()}. ${safety}`
   const res = await fetchWithTimeout(
     'https://api.openai.com/v1/images/generations',
     {
@@ -65,9 +68,9 @@ async function generatePngBytes(scenePrompt) {
   return Buffer.from(await imgRes.arrayBuffer())
 }
 
-async function uploadBotPng(supabase, objectPath, bytes) {
+export async function uploadBotPng(supabase, objectPath, bytes, contentType = 'image/png') {
   const { error: upErr } = await supabase.storage.from(BUCKET).upload(objectPath, bytes, {
-    contentType: 'image/png',
+    contentType,
     upsert: true,
     cacheControl: '3600',
   })
@@ -78,16 +81,24 @@ async function uploadBotPng(supabase, objectPath, bytes) {
   return publicUrl
 }
 
-function challengeScenePrompt({ title, category, description }) {
+async function removeBotObject(supabase, objectPath) {
+  if (!objectPath) return
+  try {
+    await supabase.storage.from(BUCKET).remove([objectPath])
+  } catch {
+    /* best-effort */
+  }
+}
+
+function challengeScenePrompt({ title, categoryKey, description }) {
   const topic = String(title || 'this matchup').replace(/\s+/g, ' ').trim().slice(0, 80)
   const vibe = String(description || '').replace(/\s+/g, ' ').trim().slice(0, 120)
-  const key = mapBotChallengeCategoryKey(category)
   const setting =
-    key === 'fashion'
+    categoryKey === 'fashion'
       ? 'street style and clothes in Seoul'
-      : key === '맛집'
+      : categoryKey === '맛집'
         ? 'a restaurant or neighborhood food spot in Korea'
-        : key === '맛식'
+        : categoryKey === '맛식'
           ? 'a close food moment at a Korean table'
           : 'everyday Korean life, dating or lifestyle'
   return `Opposing viewpoint photo about "${topic}". ${vibe}. Scene: ${setting}`
@@ -105,12 +116,13 @@ export async function attachBotMatchupImages(supabase, createdIds, opts = {}) {
   }
 
   const started = opts.started || Date.now()
+  const budgetMs = Number(opts.budgetMs) > 0 ? Number(opts.budgetMs) : PHASE_BUDGET_MS
   let attached = 0
   let attempted = 0
   const errors = []
 
   for (const id of ids) {
-    if (Date.now() - started > PHASE_BUDGET_MS) {
+    if (Date.now() - started > budgetMs) {
       errors.push('time_budget')
       break
     }
@@ -159,6 +171,15 @@ export async function attachBotMatchupImages(supabase, createdIds, opts = {}) {
   return { attempted, attached, errors: errors.slice(0, 6) }
 }
 
+function shuffle(list) {
+  const rows = [...list]
+  for (let i = rows.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[rows[i], rows[j]] = [rows[j], rows[i]]
+  }
+  return rows
+}
+
 async function reopenBotChallenge(supabase, id) {
   await supabase
     .from('matchups')
@@ -177,94 +198,375 @@ async function reopenBotChallenge(supabase, id) {
     .eq('id', id)
 }
 
-async function reopenEmptyImageChallenges(supabase, ids) {
+/** 사진 없이 남은 이미지 봇 도전은 가이드 위반이므로 슬롯을 되돌린다. */
+export async function abandonEmptyBotImageChallenges(supabase) {
+  const { data: bots, error: botErr } = await supabase.from('profiles').select('id').eq('is_bot', true)
+  if (botErr) throw botErr
+  const botIds = (bots || []).map((b) => b.id).filter(Boolean)
+  if (!botIds.length) return { reopened: 0 }
+
+  const { data, error } = await supabase
+    .from('matchups')
+    .select('id')
+    .eq('left_type', 'image')
+    .eq('right_type', 'image')
+    .in('right_user_id', botIds)
+    .is('right_url', null)
+  if (error) throw error
+
   let reopened = 0
-  for (const id of ids) {
-    const { data } = await supabase
+  for (const row of data || []) {
+    await reopenBotChallenge(supabase, row.id)
+    reopened += 1
+  }
+  return { reopened }
+}
+
+function asRow(data) {
+  if (!data) return null
+  return Array.isArray(data) ? data[0] || null : data
+}
+
+async function listEligibleBots(supabase, intervalHours, recentColumn) {
+  const hours = Math.max(1, Number(intervalHours) || 48)
+  const since = new Date(Date.now() - hours * 3600 * 1000).toISOString()
+  const { data: bots, error: botErr } = await supabase.from('profiles').select('id, nickname').eq('is_bot', true)
+  if (botErr) throw botErr
+  const all = bots || []
+  if (!all.length) return []
+  const busy = new Set()
+  const chunk = 80
+  const timeColumn = recentColumn === 'right_user_id' ? 'challenger_joined_at' : 'created_at'
+  for (let i = 0; i < all.length; i += chunk) {
+    const part = all.slice(i, i + chunk).map((b) => b.id)
+    const { data: recent, error: recentErr } = await supabase
       .from('matchups')
-      .select('left_type, right_type, right_url')
-      .eq('id', id)
-      .maybeSingle()
-    if (data?.left_type === 'image' && data?.right_type === 'image' && !String(data.right_url || '').trim()) {
-      await reopenBotChallenge(supabase, id)
-      reopened += 1
+      .select(recentColumn)
+      .in(recentColumn, part)
+      .gte(timeColumn, since)
+    if (recentErr) throw recentErr
+    for (const row of recent || []) {
+      if (row[recentColumn]) busy.add(row[recentColumn])
     }
   }
-  return reopened
+  return shuffle(all.filter((b) => b?.id && !busy.has(b.id)))
+}
+
+async function listEligibleCreateBots(supabase, intervalHours) {
+  return listEligibleBots(supabase, intervalHours, 'user_id')
+}
+
+async function pickCreatePrompt(supabase) {
+  const { data: category, error: catErr } = await supabase.rpc('bot_random_category_id')
+  if (catErr) throw catErr
+  const categoryId = String(category || '').trim()
+  if (!categoryId) return null
+  const { data: keyData, error: keyErr } = await supabase.rpc('bot_admin_category_prompt_key', {
+    p_admin_id: categoryId,
+  })
+  if (keyErr) throw keyErr
+  const promptKey = String(keyData || '').trim()
+  if (!promptKey) return null
+  const { data: promptData, error: promptErr } = await supabase.rpc('bot_pick_prompt', {
+    p_category: promptKey,
+  })
+  if (promptErr) throw promptErr
+  const prompt = asRow(promptData)
+  if (!prompt?.title) return null
+  return { categoryId, prompt }
+}
+
+async function listEligibleChallengeBots(supabase, intervalHours) {
+  return listEligibleBots(supabase, intervalHours, 'right_user_id')
 }
 
 /**
- * A측이 이미지인 봇 도전에 반대 측 이미지를 새로 붙인다.
- * @param {import('@supabase/supabase-js').SupabaseClient} supabase
- * @param {string[] | null | undefined} challengedIds
- * @param {{ started?: number }} [opts]
+ * 이미지 NEW는 사진 생성 + 사람 도전과 같은 유사도 검사를 통과한 뒤에만 도전한다.
  */
-export async function attachBotChallengeImages(supabase, challengedIds, opts = {}) {
-  const ids = (challengedIds || []).map((id) => String(id || '').trim()).filter(Boolean)
-  if (!ids.length) return { attempted: 0, attached: 0, skipped: 'none' }
-  if (!openaiKey()) {
-    const reopened = await reopenEmptyImageChallenges(supabase, ids)
-    return { attempted: 0, attached: 0, skipped: 'no_openai_key', reopened }
-  }
+export async function challengeBotImageMatchups(supabase, opts = {}) {
+  const remaining = Math.max(0, Number(opts.remaining) || 0)
+  if (remaining <= 0) return { attempted: 0, challenged: 0, skipped: 'quota' }
+  if (!openaiKey()) return { attempted: 0, challenged: 0, skipped: 'no_openai_key' }
 
   const started = opts.started || Date.now()
-  let attached = 0
-  let attempted = 0
-  let reopened = 0
-  const errors = []
+  const budgetMs = Number(opts.budgetMs) > 0 ? Number(opts.budgetMs) : PHASE_BUDGET_MS
+  const intervalHours = opts.intervalHours || 48
+  const bots = await listEligibleChallengeBots(supabase, intervalHours)
+  if (!bots.length) return { attempted: 0, challenged: 0, skipped: 'no_eligible_bots' }
 
-  for (let i = 0; i < ids.length; i += 1) {
-    const id = ids[i]
-    if (Date.now() - started > PHASE_BUDGET_MS) {
+  const catalog = await loadBotCategoryCatalog(supabase)
+  const { data: waiting, error: waitErr } = await supabase
+    .from('matchups')
+    .select('id, title, description, category, user_id, left_type, left_text, left_url, left_thumbnail_url')
+    .eq('status', 'active')
+    .eq('left_type', 'image')
+    .is('right_type', null)
+    .not('is_demo', 'eq', true)
+    .is('challenger_forfeit_at', null)
+    .limit(80)
+  if (waitErr) throw waitErr
+
+  const targets = shuffle(waiting || [])
+  if (!targets.length) return { attempted: 0, challenged: 0, skipped: 'no_image_waiting' }
+
+  let attempted = 0
+  let challenged = 0
+  const challengedIds = []
+  const errors = []
+  let botIdx = 0
+
+  for (const target of targets) {
+    if (challenged >= remaining) break
+    if (Date.now() - started > budgetMs) {
       errors.push('time_budget')
-      reopened += await reopenEmptyImageChallenges(supabase, ids.slice(i))
       break
     }
-    try {
-      const { data: matchup, error: mErr } = await supabase
-        .from('matchups')
-        .select('id, title, category, left_type, right_type, right_url, right_description')
-        .eq('id', id)
-        .maybeSingle()
-      if (mErr || !matchup) throw new Error(mErr?.message || 'matchup missing')
-      if (matchup.left_type !== 'image' || matchup.right_type !== 'image') continue
-      if (String(matchup.right_url || '').includes('/bot/')) continue
+    const bot = bots[botIdx]
+    if (!bot) break
+    if (bot.id === target.user_id) continue
 
-      attempted += 1
+    const categoryKey = resolveBotCategoryKey(target.category, catalog)
+    const copy = composeBotChallengeCopy({ categoryKey })
+    if (!copy) {
+      errors.push(`${target.id}: unknown_category`)
+      continue
+    }
+
+    attempted += 1
+    let objectPath = ''
+    try {
       const scene = challengeScenePrompt({
-        title: matchup.title,
-        category: matchup.category,
-        description: matchup.right_description,
+        title: target.title,
+        categoryKey,
+        description: copy.description,
       })
       const bytes = await generatePngBytes(scene)
       if (!bytes?.length) {
-        await reopenBotChallenge(supabase, id)
-        reopened += 1
+        errors.push(`${target.id}: empty_image`)
         continue
       }
-      const publicUrl = await uploadBotPng(supabase, `bot/${id}/right.png`, bytes)
-      const { error: uErr } = await supabase
+      objectPath = `bot/${target.id}/right-${crypto.randomUUID()}.png`
+      const publicUrl = await uploadBotPng(supabase, objectPath, bytes)
+      const sim = await assertBotChallengeSimilarity({
+        matchup: target,
+        categoryLabel: resolveBotCategoryLabel(target.category, catalog),
+        right: { type: 'image', url: publicUrl, thumb: publicUrl },
+      })
+      if (!sim.ok) {
+        await removeBotObject(supabase, objectPath)
+        errors.push(`${target.id}: ${sim.reason}${sim.similarity != null ? `(${sim.similarity})` : ''}`)
+        continue
+      }
+      const nickname = String(bot.nickname || '').trim() || 'B'
+      const { data: updated, error: uErr } = await supabase
         .from('matchups')
         .update({
           right_type: 'image',
           right_url: publicUrl,
           right_thumbnail_url: publicUrl,
           right_text: null,
+          right_description: copy.description,
+          right_label: nickname,
+          right_user_id: bot.id,
+          is_complete: true,
+          challenger_joined_at: new Date().toISOString(),
+          expires_at: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
           updated_at: new Date().toISOString(),
         })
-        .eq('id', id)
+        .eq('id', target.id)
+        .is('right_type', null)
+        .select('id')
       if (uErr) throw new Error(uErr.message)
-      attached += 1
-    } catch (e) {
-      errors.push(`${id}: ${e?.message || e}`)
-      try {
-        await reopenBotChallenge(supabase, id)
-        reopened += 1
-      } catch {
-        /* ignore */
+      if (!updated?.length) {
+        await removeBotObject(supabase, objectPath)
+        continue
       }
+      challenged += 1
+      challengedIds.push(target.id)
+      botIdx += 1
+    } catch (e) {
+      await removeBotObject(supabase, objectPath)
+      errors.push(`${target.id}: ${e?.message || e}`)
     }
   }
 
-  return { attempted, attached, reopened, errors: errors.slice(0, 6) }
+  return { attempted, challenged, challenged_ids: challengedIds, errors: errors.slice(0, 6) }
+}
+
+/**
+ * 텍스트 NEW는 사람 도전과 같은 유사도 검사를 통과한 뒤에만 도전한다.
+ */
+export async function challengeBotTextMatchups(supabase, opts = {}) {
+  const remaining = Math.max(0, Number(opts.remaining) || 0)
+  if (remaining <= 0) return { attempted: 0, challenged: 0, skipped: 'quota' }
+  if (!openaiKey()) return { attempted: 0, challenged: 0, skipped: 'no_openai_key' }
+
+  const started = opts.started || Date.now()
+  const budgetMs = Number(opts.budgetMs) > 0 ? Number(opts.budgetMs) : PHASE_BUDGET_MS
+  const intervalHours = opts.intervalHours || 48
+  const bots = await listEligibleChallengeBots(supabase, intervalHours)
+  if (!bots.length) return { attempted: 0, challenged: 0, skipped: 'no_eligible_bots' }
+
+  const catalog = await loadBotCategoryCatalog(supabase)
+  const { data: waiting, error: waitErr } = await supabase
+    .from('matchups')
+    .select('id, title, description, category, user_id, left_type, left_text, left_url, left_thumbnail_url')
+    .eq('status', 'active')
+    .or('left_type.eq.text,left_type.is.null')
+    .is('right_type', null)
+    .not('is_demo', 'eq', true)
+    .is('challenger_forfeit_at', null)
+    .limit(80)
+  if (waitErr) throw waitErr
+
+  const targets = shuffle(waiting || [])
+  if (!targets.length) return { attempted: 0, challenged: 0, skipped: 'no_text_waiting' }
+
+  let attempted = 0
+  let challenged = 0
+  const challengedIds = []
+  const errors = []
+  let botIdx = 0
+
+  for (const target of targets) {
+    if (challenged >= remaining) break
+    if (Date.now() - started > budgetMs) {
+      errors.push('time_budget')
+      break
+    }
+    const bot = bots[botIdx]
+    if (!bot) break
+    if (bot.id === target.user_id) continue
+
+    const categoryKey = resolveBotCategoryKey(target.category, catalog)
+    const copy = composeBotChallengeCopy({ categoryKey })
+    if (!copy) {
+      errors.push(`${target.id}: unknown_category`)
+      continue
+    }
+
+    attempted += 1
+    try {
+      const rightText = `${copy.description}\n${copy.bodyText}`.trim()
+      const sim = await assertBotChallengeSimilarity({
+        matchup: { ...target, left_type: target.left_type || 'text' },
+        categoryLabel: resolveBotCategoryLabel(target.category, catalog),
+        right: { type: 'text', text: rightText },
+      })
+      if (!sim.ok) {
+        errors.push(`${target.id}: ${sim.reason}${sim.similarity != null ? `(${sim.similarity})` : ''}`)
+        continue
+      }
+      const nickname = String(bot.nickname || '').trim() || 'B'
+      const { data: updated, error: uErr } = await supabase
+        .from('matchups')
+        .update({
+          right_type: 'text',
+          right_url: null,
+          right_thumbnail_url: null,
+          right_text: copy.bodyText,
+          right_description: copy.description,
+          right_label: nickname,
+          right_user_id: bot.id,
+          is_complete: true,
+          challenger_joined_at: new Date().toISOString(),
+          expires_at: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', target.id)
+        .is('right_type', null)
+        .select('id')
+      if (uErr) throw new Error(uErr.message)
+      if (!updated?.length) continue
+      challenged += 1
+      challengedIds.push(target.id)
+      botIdx += 1
+    } catch (e) {
+      errors.push(`${target.id}: ${e?.message || e}`)
+    }
+  }
+
+  return { attempted, challenged, challenged_ids: challengedIds, errors: errors.slice(0, 6) }
+}
+
+function createScenePrompt(prompt) {
+  const scene = String(prompt?.image_prompt || '').trim()
+  if (scene) return scene
+  const topic = String(prompt?.title || 'this matchup').replace(/\s+/g, ' ').trim().slice(0, 80)
+  return `Everyday Korean lifestyle photo about "${topic}"`
+}
+
+/**
+ * 사진을 만든 뒤에만 이미지 매치업을 올린다. 실패하면 행을 만들지 않는다.
+ */
+export async function createBotImageMatchups(supabase, opts = {}) {
+  const remaining = Math.max(0, Number(opts.remaining) || 0)
+  if (remaining <= 0) return { attempted: 0, created: 0, skipped: 'quota' }
+  if (!openaiKey()) return { attempted: 0, created: 0, skipped: 'no_openai_key' }
+
+  const started = opts.started || Date.now()
+  const budgetMs = Number(opts.budgetMs) > 0 ? Number(opts.budgetMs) : PHASE_BUDGET_MS
+  const intervalHours = opts.intervalHours || 48
+  const bots = await listEligibleCreateBots(supabase, intervalHours)
+  if (!bots.length) return { attempted: 0, created: 0, skipped: 'no_eligible_bots' }
+
+  let attempted = 0
+  let created = 0
+  const createdIds = []
+  const errors = []
+
+  for (const bot of bots) {
+    if (created >= remaining) break
+    if (Date.now() - started > budgetMs) {
+      errors.push('time_budget')
+      break
+    }
+
+    attempted += 1
+    try {
+      const picked = await pickCreatePrompt(supabase)
+      if (!picked?.prompt) {
+        errors.push(`${bot.id}: no_prompt`)
+        continue
+      }
+      const bytes = await generatePngBytes(createScenePrompt(picked.prompt))
+      if (!bytes?.length) {
+        errors.push(`${bot.id}: empty_image`)
+        continue
+      }
+
+      const id = crypto.randomUUID()
+      const objectPath = `bot/${id}/left.png`
+      const publicUrl = await uploadBotPng(supabase, objectPath, bytes)
+      const nickname = String(bot.nickname || '').trim() || 'A'
+      const tags = Array.isArray(picked.prompt.tags) ? picked.prompt.tags.filter(Boolean) : []
+      const { error: insErr } = await supabase.from('matchups').insert({
+        id,
+        user_id: bot.id,
+        title: picked.prompt.title,
+        description: picked.prompt.description || null,
+        left_type: 'image',
+        left_url: publicUrl,
+        left_text: null,
+        left_thumbnail_url: publicUrl,
+        left_label: nickname,
+        right_type: null,
+        tags: tags.length ? tags : null,
+        category: picked.categoryId,
+        expires_at: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
+        status: 'active',
+        is_complete: false,
+      })
+      if (insErr) {
+        await removeBotObject(supabase, objectPath)
+        throw new Error(insErr.message)
+      }
+      created += 1
+      createdIds.push(id)
+    } catch (e) {
+      errors.push(`${bot.id}: ${e?.message || e}`)
+    }
+  }
+
+  return { attempted, created, created_ids: createdIds, errors: errors.slice(0, 6) }
 }

@@ -5,6 +5,7 @@ import { displayVoteCounts } from '../lib/displayVoteCount'
 import { fetchLandingPublicStats, fetchLandingLiveHotMatchup } from '../lib/landingPublicStats'
 import { usePageEnterSound } from '../lib/uxSounds'
 import { safeMediaUrl } from '../lib/sanitize'
+import { readMatchupSideText, resolveMatchupSideType } from '../lib/matchupSideDisplay'
 import { Logo } from '../components/ui/Logo'
 import { VsBadge } from '../components/ui/VsBadge'
 import { TIERS, TIER_MIN_HOLD_POINTS } from '../lib/tiers'
@@ -164,6 +165,72 @@ function useScrollReveal(threshold = 0.15) {
   return [ref, visible]
 }
 
+function HotMatchupSidePreview({ side, matchup }) {
+  const isLeft = side === 'left'
+  const rawType = isLeft ? matchup.left_type : matchup.right_type
+  const url = isLeft ? matchup.left_url : matchup.right_url
+  const thumb = isLeft ? matchup.left_thumbnail_url : matchup.right_thumbnail_url
+  const rawText = isLeft ? matchup.left_text : matchup.right_text
+  const type = resolveMatchupSideType(rawType, { text: rawText, url, thumbnail: thumb })
+  const text = readMatchupSideText(type, rawText)
+  const label = isLeft ? (matchup.left_label || 'A') : (matchup.right_label || 'B')
+  const panelGrad = isLeft
+    ? 'from-blue-600/30 to-blue-800/30'
+    : 'from-red-600/30 to-red-800/30'
+  const textGrad = isLeft
+    ? 'from-amber-950/90 via-orange-900/80 to-rose-950/85'
+    : 'from-violet-950/90 via-fuchsia-900/80 to-indigo-950/85'
+  const sideFade = isLeft
+    ? 'bg-gradient-to-r from-transparent to-black/20'
+    : 'bg-gradient-to-l from-transparent to-black/20'
+  const nameBadge = (
+    <div className={`absolute bottom-3 ${isLeft ? 'left-3' : 'right-3 text-right'}`}>
+      <span className={`rounded-lg px-2.5 py-1 text-xs font-black text-white shadow-lg backdrop-blur-sm ${isLeft ? 'bg-blue-500/90' : 'bg-red-500/90'}`}>
+        {label}
+      </span>
+    </div>
+  )
+
+  if (type === 'text') {
+    return (
+      <div className={`relative flex aspect-square items-center justify-center overflow-hidden bg-gradient-to-br ${textGrad} px-4 py-5`}>
+        <p className="line-clamp-6 text-center text-sm font-bold leading-relaxed text-white/95">
+          {text || '—'}
+        </p>
+      </div>
+    )
+  }
+
+  const src = safeMediaUrl(thumb || url || '')
+  if (type === 'video' && !thumb && src) {
+    return (
+      <div className={`relative aspect-square overflow-hidden bg-gradient-to-br ${panelGrad}`}>
+        <video src={src} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+        <div className={`absolute inset-0 ${sideFade}`} />
+        {nameBadge}
+      </div>
+    )
+  }
+
+  if (src) {
+    return (
+      <div className={`relative aspect-square overflow-hidden bg-gradient-to-br ${panelGrad}`}>
+        <img src={src} alt={label} className="h-full w-full object-cover" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+        <div className={`absolute inset-0 ${sideFade}`} />
+        {nameBadge}
+      </div>
+    )
+  }
+
+  return (
+    <div className={`relative flex aspect-square items-center justify-center overflow-hidden bg-gradient-to-br ${panelGrad}`}>
+      <span className="text-xs font-bold text-white/60">{label}</span>
+    </div>
+  )
+}
+
 function LiveVoteBar({ pct, color, label, delay = 0 }) {
   const [width, setWidth] = useState(0)
   useEffect(() => {
@@ -173,7 +240,7 @@ function LiveVoteBar({ pct, color, label, delay = 0 }) {
   return (
     <div className="space-y-1.5">
       <div className="flex justify-between items-center">
-        <span className="text-xs font-bold text-white/60 uppercase tracking-wider">{label}</span>
+        <span className="text-xs font-bold text-white/60 tracking-wide">{label}</span>
         <span className="text-2xl font-black text-white tabular-nums">{pct}%</span>
       </div>
       <div className="h-3 bg-white/10 rounded-full overflow-hidden">
@@ -217,13 +284,8 @@ export function LandingPage() {
       setLandingStats({ loading: false, matchupCount: stats.matchupCount, voteCount: stats.voteCount, activeUserCount: stats.activeUserCount })
       if (data) {
         setHotMatchup({
-          id: data.id,
-          title: data.title,
+          ...data,
           category: data.category || (Array.isArray(data.tags) && data.tags[0]) || null,
-          option_a_media: data.left_thumbnail_url,
-          option_b_media: data.right_thumbnail_url,
-          option_a_label: data.left_label,
-          option_b_label: data.right_label,
         })
         const shown = displayVoteCounts(data)
         setLiveVotes({
@@ -363,46 +425,24 @@ export function LandingPage() {
               <div>
                 <div className="px-6 pt-6 pb-4 border-b border-white/[0.06] bg-white/[0.02]">
                   <p className="text-[11px] text-white/35 font-black uppercase tracking-widest mb-1.5">
-                    {hotMatchup.category || '매치업'}
+                    {hotMatchup.category && !/^cat_/i.test(hotMatchup.category)
+                      ? hotMatchup.category
+                      : '매치업'}
                   </p>
                   <h3 className="text-lg font-black text-white line-clamp-2 leading-tight">{hotMatchup.title}</h3>
                 </div>
 
                 <div className="grid grid-cols-[1fr_auto_1fr]">
-                  <div className="relative aspect-square bg-gradient-to-br from-blue-600/30 to-blue-800/30 flex items-center justify-center overflow-hidden">
-                    {hotMatchup.option_a_media
-                      ? <img src={safeMediaUrl(hotMatchup.option_a_media)} alt="A" className="w-full h-full object-cover" />
-                      : <div className="flex flex-col items-center gap-2"><span className="text-4xl">⚡</span><span className="text-xs text-white/60 font-bold px-2 text-center">{hotMatchup.option_a_label || 'A'}</span></div>
-                    }
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-                    <div className="absolute inset-0 bg-gradient-to-r from-transparent to-black/20" />
-                    <div className="absolute bottom-3 left-3">
-                      <span className="text-xs font-black text-white bg-blue-500/90 backdrop-blur-sm px-2.5 py-1 rounded-lg shadow-lg">
-                        {hotMatchup.option_a_label || 'A'}
-                      </span>
-                    </div>
-                  </div>
+                  <HotMatchupSidePreview side="left" matchup={hotMatchup} />
                   <div className="flex items-center justify-center px-3 bg-[#07070f]/80 z-10">
                     <VsBadge size="lg" variant="story" />
                   </div>
-                  <div className="relative aspect-square bg-gradient-to-br from-red-600/30 to-red-800/30 flex items-center justify-center overflow-hidden">
-                    {hotMatchup.option_b_media
-                      ? <img src={safeMediaUrl(hotMatchup.option_b_media)} alt="B" className="w-full h-full object-cover" />
-                      : <div className="flex flex-col items-center gap-2"><span className="text-4xl">🔥</span><span className="text-xs text-white/60 font-bold px-2 text-center">{hotMatchup.option_b_label || 'B'}</span></div>
-                    }
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-                    <div className="absolute inset-0 bg-gradient-to-l from-transparent to-black/20" />
-                    <div className="absolute bottom-3 right-3 text-right">
-                      <span className="text-xs font-black text-white bg-red-500/90 backdrop-blur-sm px-2.5 py-1 rounded-lg shadow-lg">
-                        {hotMatchup.option_b_label || 'B'}
-                      </span>
-                    </div>
-                  </div>
+                  <HotMatchupSidePreview side="right" matchup={hotMatchup} />
                 </div>
 
                 <div className="px-6 py-5 space-y-3.5 bg-white/[0.02]">
-                  <LiveVoteBar pct={liveVotes.left}  color="bg-gradient-to-r from-blue-500 to-blue-400"  label={hotMatchup.option_a_label || 'A'} />
-                  <LiveVoteBar pct={liveVotes.right} color="bg-gradient-to-r from-red-500 to-rose-400"   label={hotMatchup.option_b_label || 'B'} delay={200} />
+                  <LiveVoteBar pct={liveVotes.left}  color="bg-gradient-to-r from-blue-500 to-blue-400"  label={`${hotMatchup.left_label || 'A'} (Left)`} />
+                  <LiveVoteBar pct={liveVotes.right} color="bg-gradient-to-r from-red-500 to-rose-400"   label={`${hotMatchup.right_label || 'B'} (Right)`} delay={200} />
                   <div className="flex items-center justify-between pt-1">
                     <span className="text-xs text-white/35 font-semibold">📊 {formatNumber(liveVotes.total)}명 참여 중</span>
                     <Link to={`/matchup/${hotMatchup.id}`}

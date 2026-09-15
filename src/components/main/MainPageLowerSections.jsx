@@ -77,7 +77,7 @@ export function MainPageLowerSections({ quickLoading, newItems }) {
               <h2 className="text-base font-black leading-none bg-gradient-to-r from-amber-600 via-yellow-500 to-orange-500 bg-clip-text text-transparent tracking-tight">
                 랭킹 보드 TOP
               </h2>
-              <p className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-500/80">
+              <p className="mt-1 text-[11px] font-black tracking-tight text-orange-700">
                 시즌 {getCurrentSeason().number} · {getDaysUntilSeasonEnd()}일 후 종료
               </p>
             </div>

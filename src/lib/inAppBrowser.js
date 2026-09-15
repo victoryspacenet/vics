@@ -33,3 +33,25 @@ export function getLoginPageUrl() {
   if (typeof window === 'undefined') return ''
   return `${window.location.origin}/login`
 }
+
+/** Android 인앱에서 Chrome으로 열기. iOS는 스키마가 불안정해 false. */
+export function openInExternalBrowser(url) {
+  if (typeof window === 'undefined') return false
+  const target = url || window.location.href
+  const ua = navigator.userAgent || ''
+  if (!/Android/i.test(ua)) return false
+
+  let parsed
+  try {
+    parsed = new URL(target, window.location.origin)
+  } catch {
+    return false
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false
+
+  const hostAndPath = `${parsed.host}${parsed.pathname}${parsed.search}`
+  const fallback = encodeURIComponent(parsed.href)
+  window.location.href =
+    `intent://${hostAndPath}#Intent;scheme=${parsed.protocol.replace(':', '')};package=com.android.chrome;S.browser_fallback_url=${fallback};end`
+  return true
+}
