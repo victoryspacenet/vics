@@ -1,10 +1,9 @@
-import { createRequire } from 'module'
+import similarityCore from './matchupChallengeSimilarityCore.cjs'
 
-const require = createRequire(import.meta.url)
 const {
   minChallengeSimilarity,
   scoreChallengeSimilarity,
-} = require('./matchupChallengeSimilarityCore.cjs')
+} = similarityCore
 
 function asLeftSide(matchup) {
   const type = String(matchup?.left_type || 'text').trim() || 'text'
@@ -38,7 +37,11 @@ export async function assertBotChallengeSimilarity({ matchup, right, categoryLab
       right,
     })
   } catch (e) {
-    return { ok: false, reason: 'ai_error', error: e?.message || String(e) }
+    const msg = e?.message || String(e)
+    if (/incorrect api key|invalid api key|invalid_api_key|openai 401/i.test(msg)) {
+      return { ok: false, reason: 'openai_auth', error: msg }
+    }
+    return { ok: false, reason: 'ai_error', error: msg }
   }
 
   if (!scored) {

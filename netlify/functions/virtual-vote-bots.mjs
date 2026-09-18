@@ -1,10 +1,10 @@
 /**
  * 가상 투표 봇 — 10분마다 호출
  *   1) `run_virtual_vote_bots` 조회/투표 인플레
- *   2) 텍스트 생성은 RPC, 텍스트 도전은 유사도 검사 통과 후에만.
+ *   2) 텍스트 생성·도전은 JS. 같은 제목·본문은 28일 안에 다시 올리지 않음.
  *      사진은 virtual-bot-images가 담당.
  */
-import { challengeBotTextMatchups } from '../lib/botMatchupImage.mjs'
+import { challengeBotTextMatchups, createBotTextMatchups } from '../lib/botMatchupImage.mjs'
 import {
   countActiveMediaMix,
   loadBotMatchupSettings,
@@ -24,7 +24,13 @@ export default async (req) => {
 
   try {
     const started = Date.now()
-    const votes = await callRpc(supabase, 'run_virtual_vote_bots')
+    let votes
+    try {
+      votes = await callRpc(supabase, 'run_virtual_vote_bots')
+    } catch (e) {
+      votes = { error: e?.message || String(e) }
+      console.warn('[virtual-vote-bots] votes rpc:', votes)
+    }
     const settings = await loadBotMatchupSettings(supabase)
     if (!settings.enabled) {
       return jsonResponse({ ok: true, result: { votes, matchups: { skipped: 'disabled' } } })
@@ -41,9 +47,25 @@ export default async (req) => {
     })
 
     const matchups = await callRpc(supabase, 'run_virtual_bot_matchups', {
-      p_max_create: planned.textCreate,
+      p_max_create: 0,
       p_max_challenge: 0,
+    }).catch((e) => {
+      const result = { error: e?.message || String(e) }
+      console.warn('[virtual-vote-bots] matchups rpc:', result)
+      return result
     })
+    let textCreates = { attempted: 0, created: 0, skipped: 'none' }
+    try {
+      textCreates = await createBotTextMatchups(supabase, {
+        remaining: planned.textCreate,
+        intervalHours: settings.intervalHours,
+        started,
+        budgetMs: 48_000,
+      })
+    } catch (e) {
+      textCreates = { attempted: 0, created: 0, error: e?.message || String(e) }
+      console.warn('[virtual-vote-bots] text creates:', textCreates)
+    }
     let textChallenges = { attempted: 0, challenged: 0, skipped: 'none' }
     try {
       textChallenges = await challengeBotTextMatchups(supabase, {
@@ -60,6 +82,7 @@ export default async (req) => {
     const result = {
       votes,
       matchups,
+      textCreates,
       textChallenges,
       quota: {
         textCreate: planned.textCreate,

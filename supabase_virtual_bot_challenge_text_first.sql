@@ -182,6 +182,22 @@ BEGIN
       v_skipped_create := v_skipped_create + 1;
       CONTINUE;
     END IF;
+    IF EXISTS (
+      SELECT 1 FROM public.matchups m
+      WHERE COALESCE(m.is_demo, false) = false
+        AND m.created_at > now() - interval '28 days'
+        AND (
+          m.title = v_prompt.title
+          OR (
+            NULLIF(trim(COALESCE(v_prompt.body_text, '')), '') IS NOT NULL
+            AND m.left_text IS NOT NULL
+            AND m.left_text = v_prompt.body_text
+          )
+        )
+    ) THEN
+      v_skipped_create := v_skipped_create + 1;
+      CONTINUE;
+    END IF;
 
     BEGIN
       INSERT INTO public.matchups (

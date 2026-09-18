@@ -1,16 +1,8 @@
 -- =============================================================================
--- 가상 투표 봇 Disk IO 절감 (1회)
--- 조회/표 인플레는 30분마다, 한 틱에 매치업 소수만 갱신.
--- 텍스트 생성·도전은 virtual-vote-bots, 이미지 생성·도전은 virtual-bot-images.
--- 전체 supabase_virtual_vote_bots.sql 은 시드가 있어 재실행하지 마세요.
+-- 관전봇 투표 비율: 90:10 고정 제거 → 매치업마다 다른 비율 (약 22:78~78:22)
+-- Supabase SQL Editor에서 이 파일만 실행하세요.
+-- 이미 들어간 봇 표는 바꾸지 않고, 이후 틱부터 새 비율을 맞춥니다.
 -- =============================================================================
-
-UPDATE public.admin_settings
-SET value = COALESCE(value, '{}'::jsonb)
-  || CASE WHEN value ? 'interval_minutes' THEN '{}'::jsonb ELSE '{"interval_minutes": 30}'::jsonb END
-  || CASE WHEN value ? 'max_view_matchups_per_run' THEN '{}'::jsonb ELSE '{"max_view_matchups_per_run": 15}'::jsonb END
-  || CASE WHEN value ? 'max_vote_matchups_per_run' THEN '{}'::jsonb ELSE '{"max_vote_matchups_per_run": 8}'::jsonb END
-WHERE key = 'virtual_vote_bots';
 
 CREATE OR REPLACE FUNCTION public.run_virtual_vote_bots()
 RETURNS jsonb
@@ -232,9 +224,3 @@ $$;
 
 COMMENT ON FUNCTION public.run_virtual_vote_bots() IS
   '조회/표 인플레는 interval_minutes(기본 30분)마다, 한 틱에 max_view_matchups_per_run(기본 15)건만 일괄 갱신. 봇 투표 비율은 매치업마다 다름(약 22:78~78:22).';
-
-CREATE INDEX IF NOT EXISTS matchups_virtual_vote_bots_idx
-  ON public.matchups (created_at DESC)
-  WHERE COALESCE(status, 'active') = 'active'
-    AND COALESCE(is_demo, false) = false
-    AND challenger_forfeit_at IS NULL;

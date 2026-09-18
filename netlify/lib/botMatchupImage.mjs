@@ -9,6 +9,7 @@ import { loadBotCategoryCatalog, resolveBotCategoryKey, resolveBotCategoryLabel 
 import { assertBotChallengeSimilarity } from './botChallengeSimilarity.mjs'
 
 const BUCKET = 'matchup-media'
+const CREATE_DEDUP_DAYS = 28
 const IMAGE_TIMEOUT_MS = 22_000
 export const PHASE_BUDGET_MS = 50_000
 const SAFETY =
@@ -16,6 +17,11 @@ const SAFETY =
 
 function openaiKey() {
   return String(process.env.OPENAI_API_KEY || '').trim()
+}
+
+function isFatalOpenAiError(err) {
+  const msg = String(err?.message || err || '')
+  return /incorrect api key|invalid api key|invalid_api_key|openai 401/i.test(msg)
 }
 
 function imageModel() {
@@ -222,11 +228,6 @@ export async function abandonEmptyBotImageChallenges(supabase) {
   return { reopened }
 }
 
-function asRow(data) {
-  if (!data) return null
-  return Array.isArray(data) ? data[0] || null : data
-}
-
 async function listEligibleBots(supabase, intervalHours, recentColumn) {
   const hours = Math.max(1, Number(intervalHours) || 48)
   const since = new Date(Date.now() - hours * 3600 * 1000).toISOString()
@@ -256,7 +257,79 @@ async function listEligibleCreateBots(supabase, intervalHours) {
   return listEligibleBots(supabase, intervalHours, 'user_id')
 }
 
-async function pickCreatePrompt(supabase) {
+function addCreateFingerprints(rows, used) {
+  for (const row of rows || []) {
+    const title = String(row.title || '').trim()
+    const body = String(row.left_text || '').trim()
+    if (title) used.titles.add(title)
+    if (body) used.bodies.add(body)
+  }
+}
+
+async function fetchMatchupsByColumnIn(supabase, column, values, since) {
+  const rows = []
+  const size = 40
+  for (let i = 0; i < values.length; i += size) {
+    const slice = values.slice(i, i + size)
+    if (!slice.length) continue
+    const { data, error } = await supabase
+      .from('matchups')
+      .select('title, left_text')
+      .not('is_demo', 'eq', true)
+      .gte('created_at', since)
+      .in(column, slice)
+    if (error) throw error
+    rows.push(...(data || []))
+  }
+  return rows
+}
+
+async function listUsedCreateFingerprints(supabase) {
+  const used = { titles: new Set(), bodies: new Set() }
+  const { data: prompts, error: promptErr } = await supabase
+    .from('virtual_bot_matchup_prompts')
+    .select('title, body_text')
+  if (promptErr) throw promptErr
+  const titles = [
+    ...new Set((prompts || []).map((row) => String(row.title || '').trim()).filter(Boolean)),
+  ]
+  const bodies = [
+    ...new Set((prompts || []).map((row) => String(row.body_text || '').trim()).filter(Boolean)),
+  ]
+  const since = new Date(Date.now() - CREATE_DEDUP_DAYS * 24 * 3600 * 1000).toISOString()
+  const byTitle = await fetchMatchupsByColumnIn(supabase, 'title', titles, since)
+  const byBody = await fetchMatchupsByColumnIn(supabase, 'left_text', bodies, since)
+  addCreateFingerprints(byTitle, used)
+  addCreateFingerprints(byBody, used)
+  return used
+}
+
+function markCreateFingerprint(used, prompt) {
+  const title = String(prompt?.title || '').trim()
+  const body = String(prompt?.body_text || '').trim()
+  if (title) used.titles.add(title)
+  if (body) used.bodies.add(body)
+}
+
+function isUnusedCreatePrompt(prompt, used) {
+  const title = String(prompt?.title || '').trim()
+  const body = String(prompt?.body_text || '').trim()
+  if (!title) return false
+  if (used.titles.has(title)) return false
+  if (body && used.bodies.has(body)) return false
+  return true
+}
+
+function adminIdForPromptKey(catalog, promptKey) {
+  const key = String(promptKey || '').trim()
+  if (!key || !catalog?.keyById) return ''
+  for (const [id, mapped] of catalog.keyById.entries()) {
+    if (mapped === key) return id
+  }
+  return ''
+}
+
+async function pickCreatePrompt(supabase, used) {
   const { data: category, error: catErr } = await supabase.rpc('bot_random_category_id')
   if (catErr) throw catErr
   const categoryId = String(category || '').trim()
@@ -267,13 +340,24 @@ async function pickCreatePrompt(supabase) {
   if (keyErr) throw keyErr
   const promptKey = String(keyData || '').trim()
   if (!promptKey) return null
-  const { data: promptData, error: promptErr } = await supabase.rpc('bot_pick_prompt', {
-    p_category: promptKey,
-  })
+  const { data: prompts, error: promptErr } = await supabase
+    .from('virtual_bot_matchup_prompts')
+    .select('id, title, description, body_text, tags, image_prompt, category_id')
+    .eq('category_id', promptKey)
   if (promptErr) throw promptErr
-  const prompt = asRow(promptData)
-  if (!prompt?.title) return null
-  return { categoryId, prompt }
+  const unused = shuffle((prompts || []).filter((row) => isUnusedCreatePrompt(row, used)))
+  if (unused.length) return { categoryId, prompt: unused[0] }
+
+  const { data: allPrompts, error: allErr } = await supabase
+    .from('virtual_bot_matchup_prompts')
+    .select('id, title, description, body_text, tags, image_prompt, category_id')
+  if (allErr) throw allErr
+  const unusedAny = shuffle((allPrompts || []).filter((row) => isUnusedCreatePrompt(row, used)))
+  if (!unusedAny.length) return null
+  const prompt = unusedAny[0]
+  const catalog = await loadBotCategoryCatalog(supabase)
+  const fallbackId = adminIdForPromptKey(catalog, prompt.category_id) || categoryId
+  return { categoryId: fallbackId, prompt }
 }
 
 async function listEligibleChallengeBots(supabase, intervalHours) {
@@ -303,7 +387,8 @@ export async function challengeBotImageMatchups(supabase, opts = {}) {
     .is('right_type', null)
     .not('is_demo', 'eq', true)
     .is('challenger_forfeit_at', null)
-    .limit(80)
+    .order('created_at', { ascending: true })
+    .limit(400)
   if (waitErr) throw waitErr
 
   const targets = shuffle(waiting || [])
@@ -355,6 +440,15 @@ export async function challengeBotImageMatchups(supabase, opts = {}) {
       if (!sim.ok) {
         await removeBotObject(supabase, objectPath)
         errors.push(`${target.id}: ${sim.reason}${sim.similarity != null ? `(${sim.similarity})` : ''}`)
+        if (sim.reason === 'openai_auth' || isFatalOpenAiError(sim.error)) {
+          return {
+            attempted,
+            challenged,
+            challenged_ids: challengedIds,
+            skipped: 'openai_auth',
+            errors: errors.slice(0, 6),
+          }
+        }
         continue
       }
       const nickname = String(bot.nickname || '').trim() || 'B'
@@ -387,6 +481,15 @@ export async function challengeBotImageMatchups(supabase, opts = {}) {
     } catch (e) {
       await removeBotObject(supabase, objectPath)
       errors.push(`${target.id}: ${e?.message || e}`)
+      if (isFatalOpenAiError(e)) {
+        return {
+          attempted,
+          challenged,
+          challenged_ids: challengedIds,
+          skipped: 'openai_auth',
+          errors: errors.slice(0, 6),
+        }
+      }
     }
   }
 
@@ -416,7 +519,8 @@ export async function challengeBotTextMatchups(supabase, opts = {}) {
     .is('right_type', null)
     .not('is_demo', 'eq', true)
     .is('challenger_forfeit_at', null)
-    .limit(80)
+    .order('created_at', { ascending: true })
+    .limit(400)
   if (waitErr) throw waitErr
 
   const targets = shuffle(waiting || [])
@@ -455,6 +559,15 @@ export async function challengeBotTextMatchups(supabase, opts = {}) {
       })
       if (!sim.ok) {
         errors.push(`${target.id}: ${sim.reason}${sim.similarity != null ? `(${sim.similarity})` : ''}`)
+        if (sim.reason === 'openai_auth' || isFatalOpenAiError(sim.error)) {
+          return {
+            attempted,
+            challenged,
+            challenged_ids: challengedIds,
+            skipped: 'openai_auth',
+            errors: errors.slice(0, 6),
+          }
+        }
         continue
       }
       const nickname = String(bot.nickname || '').trim() || 'B'
@@ -483,6 +596,15 @@ export async function challengeBotTextMatchups(supabase, opts = {}) {
       botIdx += 1
     } catch (e) {
       errors.push(`${target.id}: ${e?.message || e}`)
+      if (isFatalOpenAiError(e)) {
+        return {
+          attempted,
+          challenged,
+          challenged_ids: challengedIds,
+          skipped: 'openai_auth',
+          errors: errors.slice(0, 6),
+        }
+      }
     }
   }
 
@@ -494,6 +616,73 @@ function createScenePrompt(prompt) {
   if (scene) return scene
   const topic = String(prompt?.title || 'this matchup').replace(/\s+/g, ' ').trim().slice(0, 80)
   return `Everyday Korean lifestyle photo about "${topic}"`
+}
+
+export async function createBotTextMatchups(supabase, opts = {}) {
+  const remaining = Math.max(0, Number(opts.remaining) || 0)
+  if (remaining <= 0) return { attempted: 0, created: 0, skipped: 'quota' }
+
+  const started = opts.started || Date.now()
+  const budgetMs = Number(opts.budgetMs) > 0 ? Number(opts.budgetMs) : PHASE_BUDGET_MS
+  const intervalHours = opts.intervalHours || 48
+  const bots = await listEligibleCreateBots(supabase, intervalHours)
+  if (!bots.length) return { attempted: 0, created: 0, skipped: 'no_eligible_bots' }
+
+  const used = await listUsedCreateFingerprints(supabase)
+  let attempted = 0
+  let created = 0
+  const createdIds = []
+  const errors = []
+
+  for (const bot of bots) {
+    if (created >= remaining) break
+    if (Date.now() - started > budgetMs) {
+      errors.push('time_budget')
+      break
+    }
+
+    attempted += 1
+    try {
+      let picked = null
+      for (let n = 0; n < 4 && !picked; n += 1) {
+        picked = await pickCreatePrompt(supabase, used)
+      }
+      if (!picked?.prompt) {
+        errors.push(`${bot.id}: duplicate_prompt`)
+        continue
+      }
+      const nickname = String(bot.nickname || '').trim() || 'A'
+      const tags = Array.isArray(picked.prompt.tags) ? picked.prompt.tags.filter(Boolean) : []
+      const { data: inserted, error: insErr } = await supabase
+        .from('matchups')
+        .insert({
+          user_id: bot.id,
+          title: picked.prompt.title,
+          description: picked.prompt.description || null,
+          left_type: 'text',
+          left_url: null,
+          left_text: picked.prompt.body_text,
+          left_thumbnail_url: null,
+          left_label: nickname,
+          right_type: null,
+          tags: tags.length ? tags : null,
+          category: picked.categoryId,
+          expires_at: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
+          status: 'active',
+          is_complete: false,
+        })
+        .select('id')
+        .single()
+      if (insErr) throw new Error(insErr.message)
+      markCreateFingerprint(used, picked.prompt)
+      created += 1
+      if (inserted?.id) createdIds.push(inserted.id)
+    } catch (e) {
+      errors.push(`${bot.id}: ${e?.message || e}`)
+    }
+  }
+
+  return { attempted, created, created_ids: createdIds, errors: errors.slice(0, 6) }
 }
 
 /**
@@ -510,6 +699,7 @@ export async function createBotImageMatchups(supabase, opts = {}) {
   const bots = await listEligibleCreateBots(supabase, intervalHours)
   if (!bots.length) return { attempted: 0, created: 0, skipped: 'no_eligible_bots' }
 
+  const used = await listUsedCreateFingerprints(supabase)
   let attempted = 0
   let created = 0
   const createdIds = []
@@ -524,9 +714,12 @@ export async function createBotImageMatchups(supabase, opts = {}) {
 
     attempted += 1
     try {
-      const picked = await pickCreatePrompt(supabase)
+      let picked = null
+      for (let n = 0; n < 4 && !picked; n += 1) {
+        picked = await pickCreatePrompt(supabase, used)
+      }
       if (!picked?.prompt) {
-        errors.push(`${bot.id}: no_prompt`)
+        errors.push(`${bot.id}: duplicate_prompt`)
         continue
       }
       const bytes = await generatePngBytes(createScenePrompt(picked.prompt))
@@ -561,10 +754,14 @@ export async function createBotImageMatchups(supabase, opts = {}) {
         await removeBotObject(supabase, objectPath)
         throw new Error(insErr.message)
       }
+      markCreateFingerprint(used, picked.prompt)
       created += 1
       createdIds.push(id)
     } catch (e) {
       errors.push(`${bot.id}: ${e?.message || e}`)
+      if (isFatalOpenAiError(e)) {
+        return { attempted, created, created_ids: createdIds, skipped: 'openai_auth', errors: errors.slice(0, 6) }
+      }
     }
   }
 

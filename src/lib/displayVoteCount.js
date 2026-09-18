@@ -3,12 +3,15 @@
  * DB·정산은 실제 표(+봇 표)를 쓰고, UI 숫자·막대·비율은 같은 표시값으로 맞춘다.
  *
  * shownTotal = max(30, raw * 5 + offset(matchupId))
- * 좌/우 분할은 실제 비율을 따르되, 한쪽이 0표(100:0)이면 90:10으로 누그러뜨린다.
+ * 좌/우 분할은 실제 비율을 따르되, 한쪽이 0표이면 매치업마다 다른 소수 비율로 누그러뜨린다.
  */
 
 export const VOTE_DISPLAY_MULTIPLIER = 5
 export const VOTE_DISPLAY_MIN = 30
-/** 한쪽에만 표가 있을 때 소수 측 최소 비율 */
+/** 한쪽에만 표가 있을 때 소수 측 최소~최대 비율 (매치업마다 다름) */
+export const VOTE_DISPLAY_EXTREME_MINOR_MIN = 0.22
+export const VOTE_DISPLAY_EXTREME_MINOR_SPAN = 0.16
+/** @deprecated 고정 90:10 대신 extremeMinorShare(matchupId) 사용 */
 export const VOTE_DISPLAY_EXTREME_MINOR = 0.1
 
 const OFFSET_MIN = 8
@@ -34,6 +37,13 @@ function rawVoteInt(value) {
   return n > 0 ? n : 0
 }
 
+/** 매치업마다 고정되는 랜덤 소수 비율 (0.22~0.37). 100:0이 전부 90:10으로 보이지 않게. */
+export function extremeMinorShare(matchupId) {
+  const slots = Math.round(VOTE_DISPLAY_EXTREME_MINOR_SPAN * 100)
+  const slot = hashSeed(`${matchupId ?? ''}:extreme`) % slots
+  return VOTE_DISPLAY_EXTREME_MINOR_MIN + slot / 100
+}
+
 function percentsFromCounts(left, right) {
   const total = left + right
   if (total <= 0) return { leftPct: 50, rightPct: 50 }
@@ -43,15 +53,16 @@ function percentsFromCounts(left, right) {
 
 /**
  * 실제 좌/우 표 → 표시용 좌측 비율 (0~1).
- * 0:100 / 100:0 은 10:90 / 90:10. 양쪽 다 있으면 실제 비율.
+ * 0:100 / 100:0 은 매치업마다 다른 소수 비율. 양쪽 다 있으면 실제 비율.
  */
-export function displayLeftShare(leftRaw, rightRaw) {
+export function displayLeftShare(leftRaw, rightRaw, matchupId) {
   const left = rawVoteInt(leftRaw)
   const right = rawVoteInt(rightRaw)
   const rawTotal = left + right
   if (rawTotal <= 0) return null
-  if (left === 0) return VOTE_DISPLAY_EXTREME_MINOR
-  if (right === 0) return 1 - VOTE_DISPLAY_EXTREME_MINOR
+  const minor = extremeMinorShare(matchupId)
+  if (left === 0) return minor
+  if (right === 0) return 1 - minor
   return left / rawTotal
 }
 
@@ -79,7 +90,7 @@ export function displayVoteCounts(matchup) {
   const rawTotal = Math.max(leftRaw + rightRaw, rawVoteInt(matchup?.total_votes))
   const total = displayVoteTotal(rawTotal, id)
 
-  let leftShare = displayLeftShare(leftRaw, rightRaw)
+  let leftShare = displayLeftShare(leftRaw, rightRaw, id)
   if (leftShare == null) {
     leftShare = 0.45 + (voteDisplayOffset(id) % 11) / 100
   }

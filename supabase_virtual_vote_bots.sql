@@ -11,8 +11,7 @@
 --      interval_minutes(기본 30분)마다, 한 틱에 max_view_matchups_per_run(기본 15)건만:
 --      - 조회수(view_count) +2~12 (일괄 UPDATE)
 --      - 그중 라이브 대결 max_vote_matchups_per_run(기본 8)건에만 사람 표가 1건 이상일 때
---        봇 1~4명이 실제 좌/우 비율대로 투표.
---        사람 표가 100:0 / 0:100이면 화면과 같이 90:10 / 10:90으로 나눔.
+--        봇 1~4명이 매치업마다 다른 좌/우 비율로 투표(약 22:78~78:22, 90:10 고정 없음).
 --        사람 표 없으면 조회수만.
 --   3) Netlify scheduled function `virtual-vote-bots` 가 10분마다 RPC 호출
 --      (조회/표는 RPC가 interval로 스킵, 텍스트 생성·도전은 매 틱의 10%)
@@ -898,13 +897,12 @@ BEGIN
         CONTINUE;
       END IF;
 
-      IF v_human.left_c = 0 THEN
-        v_left_share := 0.1;
-      ELSIF v_human.right_c = 0 THEN
-        v_left_share := 0.9;
-      ELSE
-        v_left_share := v_human.left_c::numeric / v_human.total_c;
-      END IF;
+      -- 매치업마다 다른 비율(약 22:78~78:22). 90:10 고정 없음.
+      v_left_share := 0.22 + (abs(hashtext(v_matchup.id::text)) % 57)::numeric / 100.0;
+      v_left_share := GREATEST(
+        0.22,
+        LEAST(0.78, v_left_share + ((random() - 0.5) * 0.10))
+      );
 
       v_desired_left := ROUND((COALESCE(v_bot_vote_count, 0) + v_n) * v_left_share)::integer;
       v_left_n := v_desired_left - COALESCE(v_bot_left, 0);
@@ -974,7 +972,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.run_virtual_vote_bots() IS
-  '조회/표 인플레는 interval_minutes(기본 30분)마다, 한 틱에 max_view_matchups_per_run(기본 15)건만 일괄 갱신. 사람 표 비율대로 봇 투표(100:0은 90:10).';
+  '조회/표 인플레는 interval_minutes(기본 30분)마다, 한 틱에 max_view_matchups_per_run(기본 15)건만 일괄 갱신. 봇 투표 비율은 매치업마다 다름(약 22:78~78:22).';
 
 REVOKE ALL ON FUNCTION public.run_virtual_vote_bots() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.matchup_human_vote_counts(uuid) FROM PUBLIC;

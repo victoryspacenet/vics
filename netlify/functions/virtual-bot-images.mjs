@@ -3,6 +3,7 @@
  *   사진을 만든 뒤에만 생성·도전. 실패하면 슬롯을 건드리지 않음.
  *   한 틱의 90% + 전체 믹스가 이미지 90%에 못 미치면 생성은 이미지로만.
  *   프로필 사진이 전체의 50%에 못 미치면 틱마다 1장씩 채움.
+ *   도전은 아바타·생성보다 먼저 돌려 제한 시간 안에 빠지지 않게 한다.
  */
 import {
   abandonEmptyBotImageChallenges,
@@ -10,7 +11,6 @@ import {
   createBotImageMatchups,
   PHASE_BUDGET_MS,
 } from '../lib/botMatchupImage.mjs'
-import { ensureBotProfilePhotos } from '../lib/botProfilePhotos.mjs'
 import { stripBorrowedBotChallengeMedia } from '../lib/botChallengeCopy.mjs'
 import {
   countActiveMediaMix,
@@ -41,18 +41,6 @@ export default async (req) => {
     const started = Date.now()
     const budgetMs = Math.min(IMAGE_BUDGET_MS, PHASE_BUDGET_MS + 5_000)
 
-    let avatars = { uploaded: 0 }
-    try {
-      avatars = await ensureBotProfilePhotos(supabase, {
-        max: 1,
-        started,
-        budgetMs: Math.min(28_000, budgetMs),
-      })
-    } catch (e) {
-      avatars = { uploaded: 0, error: e?.message || String(e) }
-      console.warn('[virtual-bot-images] avatars:', avatars)
-    }
-
     let emptyImageChallenges = { reopened: 0 }
     try {
       emptyImageChallenges = await abandonEmptyBotImageChallenges(supabase)
@@ -69,6 +57,19 @@ export default async (req) => {
       console.warn('[virtual-bot-images] strip borrowed media:', strippedMedia)
     }
 
+    let challenges = { attempted: 0, challenged: 0, skipped: 'none' }
+    try {
+      challenges = await challengeBotImageMatchups(supabase, {
+        remaining: planned.imageChallenge,
+        started,
+        budgetMs,
+        intervalHours: settings.intervalHours,
+      })
+    } catch (e) {
+      challenges = { attempted: 0, challenged: 0, error: e?.message || String(e) }
+      console.warn('[virtual-bot-images] challenges:', challenges)
+    }
+
     let creates = { attempted: 0, created: 0, skipped: 'none' }
     try {
       creates = await createBotImageMatchups(supabase, {
@@ -82,17 +83,17 @@ export default async (req) => {
       console.warn('[virtual-bot-images] creates:', creates)
     }
 
-    let challenges = { attempted: 0, challenged: 0, skipped: 'none' }
+    let avatars = { uploaded: 0 }
     try {
-      challenges = await challengeBotImageMatchups(supabase, {
-        remaining: planned.imageChallenge,
+      const { ensureBotProfilePhotos } = await import('../lib/botProfilePhotos.mjs')
+      avatars = await ensureBotProfilePhotos(supabase, {
+        max: 1,
         started,
-        budgetMs,
-        intervalHours: settings.intervalHours,
+        budgetMs: Math.min(28_000, budgetMs),
       })
     } catch (e) {
-      challenges = { attempted: 0, challenged: 0, error: e?.message || String(e) }
-      console.warn('[virtual-bot-images] challenges:', challenges)
+      avatars = { uploaded: 0, error: e?.message || String(e) }
+      console.warn('[virtual-bot-images] avatars:', avatars)
     }
 
     const result = {

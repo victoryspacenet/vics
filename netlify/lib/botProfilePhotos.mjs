@@ -2,8 +2,12 @@
  * 관전봇 프로필 사진 — 전체의 50%만 아바타.
  * 인물이 들어가면 한국인만. 사진 봇 중 일부만 한국인 실사 얼굴, 나머지는 한국 일상 컷.
  */
-import sharp from 'sharp'
 import { uploadBotPng } from './botMatchupImage.mjs'
+
+async function loadSharp() {
+  const mod = await import('sharp')
+  return mod.default || mod
+}
 
 export const BOT_PHOTO_SHARE = 0.5
 /** 사진 있는 봇 가운데 한국인 얼굴 비율 */
@@ -178,6 +182,7 @@ function pickFaceCrop(bot, used) {
 }
 
 async function toSquareJpeg(bytes, box) {
+  const sharp = await loadSharp()
   const image = sharp(bytes)
   const meta = await image.metadata()
   const width = Number(meta.width) || 0

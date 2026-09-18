@@ -379,32 +379,31 @@ $$;
 CREATE OR REPLACE FUNCTION public.bot_pick_prompt(p_category text)
 RETURNS public.virtual_bot_matchup_prompts
 LANGUAGE plpgsql
-STABLE
+VOLATILE
 SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
   v_row public.virtual_bot_matchup_prompts;
 BEGIN
+  -- 28일 안에 같은 제목·본문이 있으면 다시 쓰지 않는다.
+  -- 풀이 소진되면 빈 행을 돌려 생성을 건너뛴다. 중복 폴백 없음.
   SELECT * INTO v_row
   FROM public.virtual_bot_matchup_prompts p
   WHERE p.category_id = p_category
     AND NOT EXISTS (
       SELECT 1 FROM public.matchups m
-      WHERE m.title = p.title
-        AND m.created_at > now() - interval '21 days'
-        AND COALESCE(m.is_demo, false) = false
+      WHERE COALESCE(m.is_demo, false) = false
+        AND (
+          m.title = p.title
+          OR (
+            NULLIF(trim(COALESCE(p.body_text, '')), '') IS NOT NULL
+            AND m.left_text IS NOT NULL
+            AND m.left_text = p.body_text
+          )
+        )
+        AND m.created_at > now() - interval '28 days'
     )
-  ORDER BY random()
-  LIMIT 1;
-
-  IF FOUND THEN
-    RETURN v_row;
-  END IF;
-
-  SELECT * INTO v_row
-  FROM public.virtual_bot_matchup_prompts p
-  WHERE p.category_id = p_category
   ORDER BY random()
   LIMIT 1;
 
@@ -416,19 +415,17 @@ BEGIN
   FROM public.virtual_bot_matchup_prompts p
   WHERE NOT EXISTS (
     SELECT 1 FROM public.matchups m
-    WHERE m.title = p.title
-      AND m.created_at > now() - interval '21 days'
-      AND COALESCE(m.is_demo, false) = false
+    WHERE COALESCE(m.is_demo, false) = false
+      AND (
+        m.title = p.title
+        OR (
+          NULLIF(trim(COALESCE(p.body_text, '')), '') IS NOT NULL
+          AND m.left_text IS NOT NULL
+          AND m.left_text = p.body_text
+        )
+      )
+      AND m.created_at > now() - interval '28 days'
   )
-  ORDER BY random()
-  LIMIT 1;
-
-  IF FOUND THEN
-    RETURN v_row;
-  END IF;
-
-  SELECT * INTO v_row
-  FROM public.virtual_bot_matchup_prompts
   ORDER BY random()
   LIMIT 1;
 
@@ -710,6 +707,22 @@ BEGIN
       v_skipped_create := v_skipped_create + 1;
       CONTINUE;
     END IF;
+    IF EXISTS (
+      SELECT 1 FROM public.matchups m
+      WHERE COALESCE(m.is_demo, false) = false
+        AND m.created_at > now() - interval '28 days'
+        AND (
+          m.title = v_prompt.title
+          OR (
+            NULLIF(trim(COALESCE(v_prompt.body_text, '')), '') IS NOT NULL
+            AND m.left_text IS NOT NULL
+            AND m.left_text = v_prompt.body_text
+          )
+        )
+    ) THEN
+      v_skipped_create := v_skipped_create + 1;
+      CONTINUE;
+    END IF;
 
     BEGIN
       INSERT INTO public.matchups (
@@ -940,13 +953,12 @@ BEGIN
         CONTINUE;
       END IF;
 
-      IF v_human.left_c = 0 THEN
-        v_left_share := 0.1;
-      ELSIF v_human.right_c = 0 THEN
-        v_left_share := 0.9;
-      ELSE
-        v_left_share := v_human.left_c::numeric / v_human.total_c;
-      END IF;
+      -- 매치업마다 다른 비율(약 22:78~78:22). 90:10 고정 없음.
+      v_left_share := 0.22 + (abs(hashtext(v_matchup.id::text)) % 57)::numeric / 100.0;
+      v_left_share := GREATEST(
+        0.22,
+        LEAST(0.78, v_left_share + ((random() - 0.5) * 0.10))
+      );
 
       v_desired_left := ROUND((COALESCE(v_bot_vote_count, 0) + v_n) * v_left_share)::integer;
       v_left_n := v_desired_left - COALESCE(v_bot_left, 0);
@@ -1016,4 +1028,4 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.run_virtual_vote_bots() IS
-  '조회/표 인플레는 interval_minutes(기본 30분)마다, 한 틱에 max_view_matchups_per_run(기본 15)건만 일괄 갱신. 사람 표 비율대로 봇 투표(100:0은 90:10).';
+  '조회/표 인플레는 interval_minutes(기본 30분)마다, 한 틱에 max_view_matchups_per_run(기본 15)건만 일괄 갱신. 봇 투표 비율은 매치업마다 다름(약 22:78~78:22).';
