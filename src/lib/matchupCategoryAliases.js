@@ -13,6 +13,7 @@ const LEGACY_VALUES_BY_CANONICAL = {
   balance_game: ['밸런스', '밸런스게임', 'balance'],
   food_gourmet: ['맛집', '맛집&맛식', 'food', 'tanghulu'],
   fashion: ['패션', 'ootd'],
+  lifestyle: ['라이프 스타일', '라이프스타일'],
 }
 
 function buildStoredToCanonicalMap() {

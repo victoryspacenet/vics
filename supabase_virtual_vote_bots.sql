@@ -10,9 +10,9 @@
 --   2) 매치업 등록 후 10분이 지난 건에 대해 run_virtual_vote_bots() 가
 --      interval_minutes(기본 30분)마다, 한 틱에 max_view_matchups_per_run(기본 15)건만:
 --      - 조회수(view_count) +2~12 (일괄 UPDATE)
---      - 그중 라이브 대결 max_vote_matchups_per_run(기본 8)건에만 사람 표가 1건 이상일 때
---        봇 1~4명이 매치업마다 다른 좌/우 비율로 투표(약 22:78~78:22, 90:10 고정 없음).
---        사람 표 없으면 조회수만.
+--      - 그중 라이브 대결 max_vote_matchups_per_run(기본 8)건에만 봇 1~4명이 투표.
+--        사람 글은 사람 표가 1건 이상일 때만. 관전봇끼리 대결은 사람 표 없이도 투표.
+--        봇끼리 대결의 약 30%는 박빙(42:58~58:42, 추천 매치업). 나머지는 22:78~78:22.
 --   3) Netlify scheduled function `virtual-vote-bots` 가 10분마다 RPC 호출
 --      (조회/표는 RPC가 interval로 스킵, 텍스트 생성·도전은 매 틱의 10%)
 --   4) 관전봇 텍스트 생성·도전은 run_virtual_bot_matchups(p_max_create, p_max_challenge)
@@ -783,6 +783,7 @@ DECLARE
   v_left_share numeric;
   v_bot_left integer;
   v_desired_left integer;
+  v_bot_matchup boolean;
 BEGIN
   PERFORM pg_advisory_xact_lock(829104573301);
 
@@ -892,17 +893,33 @@ BEGIN
         CONTINUE;
       END IF;
 
+      SELECT
+        COALESCE(pa.is_bot, false) AND COALESCE(pb.is_bot, false)
+      INTO v_bot_matchup
+      FROM public.matchups m
+      LEFT JOIN public.profiles pa ON pa.id = m.user_id
+      LEFT JOIN public.profiles pb ON pb.id = m.right_user_id
+      WHERE m.id = v_matchup.id;
+
       SELECT * INTO v_human FROM public.matchup_human_vote_counts(v_matchup.id);
-      IF COALESCE(v_human.total_c, 0) <= 0 THEN
+      IF NOT COALESCE(v_bot_matchup, false) AND COALESCE(v_human.total_c, 0) <= 0 THEN
         CONTINUE;
       END IF;
 
-      -- 매치업마다 다른 비율(약 22:78~78:22). 90:10 고정 없음.
-      v_left_share := 0.22 + (abs(hashtext(v_matchup.id::text)) % 57)::numeric / 100.0;
-      v_left_share := GREATEST(
-        0.22,
-        LEAST(0.78, v_left_share + ((random() - 0.5) * 0.10))
-      );
+      -- 봇끼리 대결의 30%는 박빙(추천 슬롯: 표시 격차 20%p 이하). 나머지는 22:78~78:22.
+      IF COALESCE(v_bot_matchup, false) AND (abs(hashtext(v_matchup.id::text || ':close')) % 10) < 3 THEN
+        v_left_share := 0.42 + (abs(hashtext(v_matchup.id::text || ':close-share')) % 17)::numeric / 100.0;
+        v_left_share := GREATEST(
+          0.42,
+          LEAST(0.58, v_left_share + ((random() - 0.5) * 0.04))
+        );
+      ELSE
+        v_left_share := 0.22 + (abs(hashtext(v_matchup.id::text)) % 57)::numeric / 100.0;
+        v_left_share := GREATEST(
+          0.22,
+          LEAST(0.78, v_left_share + ((random() - 0.5) * 0.10))
+        );
+      END IF;
 
       v_desired_left := ROUND((COALESCE(v_bot_vote_count, 0) + v_n) * v_left_share)::integer;
       v_left_n := v_desired_left - COALESCE(v_bot_left, 0);
@@ -972,7 +989,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.run_virtual_vote_bots() IS
-  '조회/표 인플레는 interval_minutes(기본 30분)마다, 한 틱에 max_view_matchups_per_run(기본 15)건만 일괄 갱신. 봇 투표 비율은 매치업마다 다름(약 22:78~78:22).';
+  '조회/표 인플레는 interval_minutes(기본 30분)마다, 한 틱에 max_view_matchups_per_run(기본 15)건만 일괄 갱신. 사람 글은 사람 표가 있을 때만 봇이 투표. 봇끼리 대결은 사람 표 없이도 투표하고, 그 중 약 30%는 박빙(42:58~58:42).';
 
 REVOKE ALL ON FUNCTION public.run_virtual_vote_bots() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.matchup_human_vote_counts(uuid) FROM PUBLIC;

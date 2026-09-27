@@ -1,14 +1,16 @@
 -- =============================================================================
 -- VICS — 관전봇 매치업 생성 주제 풀
--- 운영 카테고리 4종: 영원한 난제 / 패션 / 맛집 / 맛식
+-- 운영 카테고리 6종: 영원한 난제 / 패션 / 맛집 / 맛식 / 라이프 스타일 / 연애
 -- supabase_virtual_bot_matchups.sql 이후 실행하세요.
 --
 -- 카테고리 기획
 --   맛집: 특정 장소·식당·지역 특성·분위기·서비스 비교. 맛집 탐방 경험을 올리게.
 --   맛식: 음식 자체(맛·식감·조합) + 건강식·식단. 집이 아니라 메뉴.
---   영원한 난제: 연애 + 라이프스타일 + 일상 난제.
+--   영원한 난제: 일상 난제. 연애(썸·사귐·이별·데이트)는 연애 카테고리로만.
 --                정치·종교·젠더 이슈 금지. (테토에겐 등 젠더 라벨도 넣지 않음)
 --   패션: 옷·핏·소비 (기존 유지)
+--   라이프 스타일: 일상 취향·상황·선택·트렌드. 음식 맛·옷·매장 탐방·연애 난제는 넣지 않음.
+--   연애: 두 사람 사이의 호감·사랑·썸·사귐·이별 고민. 생활 습관·음식·패션은 넣지 않음.
 --
 -- 전제: 오른쪽 도전자가 무엇을 올릴지 모름.
 --   제목 ≤60자 / 설명 ≤200자 / 본문 = A측 한 방
@@ -23,17 +25,7 @@ TRUNCATE public.virtual_bot_matchup_prompts RESTART IDENTITY;
 INSERT INTO public.virtual_bot_matchup_prompts
   (category_id, title, description, body_text, tags, image_prompt)
 VALUES
-  -- ───────── 영원한 난제: 연애 ─────────
-  ('eternal_quest', '연애 연락 템포, 뭐가 진리임?', '난 하루 한두 번 밀도 있는 톡이 매일 확인 전쟁보다 나음. 답장 안 오면 불안한 거 인정하는데, 집착은 아님. 반박?', '연락은 횟수보다 온도임. 하루 종일 확인톡은 썸도 연애도 빨리 식힘.', ARRAY['연애','연락','템포'], 'A Korean woman in her early 20s on a couch sending one calm text, phone beside a mug, natural evening light'),
-  ('eternal_quest', '소개팅앱으로 만나는 거, 별로임?', '난 소개팅앱이 시간 효율이라고 봄. 자연스러운 만남만 기다리면 학기·출근에 사람 안 늘어남. 로맨스 순수파 들어와.', '자연만남은 운이고 앱은 선택임. 사진은 과장해도 만남에서 걸러짐.', ARRAY['소개팅','앱','연애'], 'A Korean man in his early 20s at a first-date cafe, nervous smile, two iced drinks on the table'),
-  ('eternal_quest', '밀당하는 거, 아직도 필요함?', '난 직진이 시간 아끼고 오해도 줄임. 밀당은 20대 스케줄이랑 안 맞음. 밀당 고수면 이득인 이유 대봐.', '밀당은 상대 멘탈 테스트지 호감 표현이 아님. 바쁜 사람은 바로 말함.', ARRAY['밀당','직진','연애'], 'A Korean woman in her early 20s putting her phone in her bag and walking, decisive expression, city sidewalk'),
-  ('eternal_quest', '손절 타이밍, 내 기준이 맞음?', '난 답장 온도가 일주일 식으면 미련보다 컷이 이득이라고 봄. 질질 끄는 게 더 상처임. 아직 기다리는 사람 나와봐.', '손절은 차가움이 아니라 자기 시간 보호임. 썸을 인턴처럼 질질 끌지 마.', ARRAY['손절','썸','연애'], 'A Korean man in his early 20s archiving a chat and looking out the window, quiet apartment, calm face'),
-  ('eternal_quest', '고백은 누가 먼저 하는 게 맞음?', '난 먼저 말하는 쪽이 리스크 지는 거라 더 끌림. 눈치만 보다가 타이밍 놓치는 거 스불재. 느린 사람 논리 들어봄.', '먼저 고백은 용기이지 손해 아님. 썸 석 달은 서로 에너지만 깎음.', ARRAY['고백','썸','용기'], 'A Korean woman in her early 20s taking a breath before speaking across a cafe table, candid, warm light'),
-  ('eternal_quest', '연애 안 하는 거, 지금 제일 이득임?', '난 무연애가 통장이랑 멘탈 지키는 선택이라고 봄. 외로운 거랑 손해가 꼭 같진 않음. 연애해야 사람 같다는 쪽 나와봐.', '연애는 필수 퀘스트 아님. 바쁜 시즌에 억지 썸이 더 현타임.', ARRAY['무연애','자존감','라이프'], 'A Korean man in his early 20s enjoying a solo movie night with snacks, relaxed smile, small living room'),
-  ('eternal_quest', '장거리 연애, 지금 세대에 가능함?', '난 주말에 밀도 있게 보는 게 매일 근처에서 권태보다 나을 수도 있다고 봄. 거리 핑계로 안 만나는 건 별개. 반박?', '장거리는 만남의 질이 이김. 톡만 쌓이면 그건 연애가 아니라 공지방임.', ARRAY['장거리','연애','만남'], 'A Korean woman in her early 20s at a train station platform with a small suitcase, hopeful expression'),
-  ('eternal_quest', '데이트 더치, 이 타이밍이 맞음?', '난 초반부터 더치가 서로 덜 계산하게 함. 한 사람이 계속 내면 호감이 빚으로 변함. 다른 타이밍 있으면 말해봐.', '첫 만남부터 더치해도 매너 안 죽음. 나중에 감정으로 정산하는 게 더 별로.', ARRAY['데이트','더치','연애'], 'Two Korean people in their early 20s splitting a cafe bill with cards, easy smiles, no tension'),
-
-  -- ───────── 영원한 난제: 라이프스타일 ─────────
+  -- ───────── 영원한 난제: 일상 난제 (연애 제외) ─────────
   ('eternal_quest', '인스타 보면 나만 뒤처진 기분, 이게 정상임?', '난 스토리 보다가 현타 오면 바로 끄는 쪽이 멘탈 지킴. 비교하면서 하루 버리는 거 ㄹㅇ 손해. 아직 들여다보는 사람 나와봐.', '인스타는 하이라이트만 올림. 내 평일이랑 비교하는 순간 멘탈 나감. 끄는 게 이득임.', ARRAY['인스타','현타','라이프'], 'A Korean woman in her early 20s in bed at night putting her phone face down, tired natural expression'),
   ('eternal_quest', '갓생 실패했는데, 루틴 포기하는 게 맞음?', '난 3일 만에 무너져도 다시 켜는 쪽이 이김. 완벽한 갓생 집착이 번아웃임. 한 방에 끝내려는 사람 반박해봐.', '갓생은 연속보다 재시작 횟수임. 오늘 망해도 내일 알람만 다시 켜면 됨.', ARRAY['갓생','번아웃','루틴'], 'A Korean man in his early 20s waking up messy-haired to an alarm, planner on the nightstand, morning light'),
   ('eternal_quest', '본가 사는 거, 20대에 꿀임 아님 현타임?', '난 월세 아끼는 본가가 지금 제일 이득이라고 봄. 자취 자랑이 통장보다 우선이면 나중에 선택지가 없음. 독립 자랑파 나와봐.', '본가는 꿀잠이지 못 나온 게 아님. 월세 나가면 친구 만나는 횟수부터 줄어듦.', ARRAY['본가','월세','라이프'], 'A Korean woman in her early 20s eating breakfast at a family home table in pajamas, cozy and unbothered'),
@@ -92,12 +84,20 @@ VALUES
   ('맛식', '간헐적 단식 한 끼, 더 맛있어짐?', '난 공복 뒤에 먹는 한 끼가 간도 식감도 더 선명하다고 봄. 세 끼 꼬박이 맛의 기본이라는 사람 나와봐.', '단식은 금식이 아니라 한 끼 밀도임. 배고플 때 먹으면 간이 과해지지 않음.', ARRAY['단식','한끼','식단'], 'A Korean man in his early 20s sitting down to a late hearty first meal of the day, focused and hungry'),
 
   -- ───────── 영원한 난제 추가 ─────────
-  ('eternal_quest', '선톡하는 거, 을임 매너임?', '난 선톡이 호감이지 들이댐이 아니라고 봄. 기다리기만 하면 둘 다 식음. 선톡 극혐파 논리 가져와.', '선톡은 용기지 을의 자세가 아님. 하루 더 고민하는 동안 상대는 다른 톡 봄.', ARRAY['선톡','호감','연애'], 'A Korean woman in her early 20s sending the first message on her phone at a cafe, slightly nervous smile'),
-  ('eternal_quest', '기념일 올인, 부담임 로맨스임?', '난 평소 배려가 케이크 한 판보다 큼. 기념일에만 올인하는 연애 극혐. 이벤트파면 논리 증명해봐.', '기념일은 인증샷용이면 식음. 평소 밥 한 끼가 더 남음.', ARRAY['기념일','연애','부담'], 'A Korean man in his early 20s bringing a simple home-cooked meal instead of a huge cake, small apartment table'),
   ('eternal_quest', '주말 약속 두 개, 과함임?', '난 주말 하나 비워두는 게 멘탈 충전이라고 봄. 빽빽한 스케줄이 인싸라는 사람 나와봐.', '주말은 실적이 아님. 공백이 있어야 다음 주도 사람이 됨.', ARRAY['주말','약속','라이프'], 'A Korean woman in her early 20s cancelling one weekend plan and staying home in loungewear, relieved'),
   ('eternal_quest', '배달 기본값, 요리하는 게 이득임?', '난 배달 한 번 참으면 주말 예산이 생긴다고 봄. 바쁜데 왜 하냐고 하는 사람 반박해봐.', '배달은 편의지 기본값이 아님. 한 끼 해먹으면 통장이 숨 쉼.', ARRAY['배달','요리','돈'], 'A Korean man in his early 20s cooking a simple pan meal in a small kitchen, phone with a delivery app face down'),
   ('eternal_quest', '친구 소수 정예, 이게 행복임?', '난 소수 정예가 유지 비용 적어서 이득이라고 봄. 넓은 관계는 단톡에 체력 다 씀. 인싸파 논리 들어봄.', '친구 수는 프로필이 아님. 바쁠 때 한 명 나오는 게 진짜임.', ARRAY['친구','소수정예','관계'], 'Two Korean friends in their early 20s talking at a quiet cafe table, unhurried, candid'),
   ('eternal_quest', '알람 다섯 개, 이게 생존임?', '난 알람 여러 개가 스누즈 습관을 더 만든다고 봄. 한 방에 일어나는 쪽이 아침을 이김. 알람 도미노파 들어와.', '알람 다섯 개는 보험이 아니라 수면 도둑임. 첫 알람에 일어나는 게 갓생임.', ARRAY['알람','수면','루틴'], 'A Korean woman in her early 20s turning off a single morning alarm and sitting up, messy hair, daylight'),
+  ('eternal_quest', '회식, 빠지는 게 맞음?', '난 약속 있는 회식은 빠져도 된다고 봄. 맨날 참석이 성실이라는 사람 나와봐.', '회식은 업무가 아님. 억지로 남으면 다음 날 몸이 먼저 짐.', ARRAY['회식','직장','눈치'], 'A Korean man in his early 20s leaving an office at dusk with a bag, coworkers still heading to dinner behind him'),
+  ('eternal_quest', '연차, 눈치 보고 쓰는 게 맞음?', '난 미리 말하고 쓰는 연차가 매너라고 봄. 팀 바쁠 때 쉬면 민폐라는 쪽 반박해봐.', '연차는 혜택이지 결석이 아님. 눈치로 쌓아 두면 쉬지도 못함.', ARRAY['연차','직장','휴식'], 'A Korean woman in her early 20s submitting a day-off request on a laptop, calm office morning'),
+  ('eternal_quest', '친구에게 돈 빌려주는 거, 이득임?', '난 금액이 커지면 관계보다 기록이 먼저라고 봄. 친구인데 뭘 적냐는 사람 들어와.', '빌림은 우정이 아니라 약속임. 날짜 없는 돈은 관계가 먼저 상함.', ARRAY['돈','친구','빌림'], 'A Korean man in his early 20s hesitating before sending money on a phone, friend across a cafe table'),
+  ('eternal_quest', '축의금, 이 금액이 맞음?', '난 내 형편 기준으로 내는 게 예의라고 봄. 받은 만큼 돌려줘야 한다는 쪽 논리 가져와.', '축의금은 체면 경쟁이 아님. 부담되면 참석보다 마음이 먼저 상함.', ARRAY['축의금','경조사','돈'], 'A Korean woman in her early 20s putting an envelope into a small bag before a wedding, thoughtful'),
+  ('eternal_quest', '층간소음, 말을 꺼내는 게 맞음?', '난 참다 폭발하는 것보다 한 번 말하는 게 낫다고 봄. 그냥 참는 게 어른이라는 사람 나와봐.', '한 번은 요청이지 싸움이 아님. 쪽지만 붙이면 감정만 쌓임.', ARRAY['층간소음','자취','이웃'], 'A Korean man in his early 20s looking up at the ceiling of a small apartment, earplugs on the desk'),
+  ('eternal_quest', '단체 카톡 답장, 의무임?', '난 호명된 말만 답해도 된다고 봄. 단톡마다 리액션이 매너라는 쪽 반박해봐.', '단톡은 회의가 아님. 모든 말에 답하면 하루가 알림으로 감.', ARRAY['단톡','답장','매너'], 'A Korean woman in her early 20s muting a group chat and replying to one message, commute seat'),
+  ('eternal_quest', '10분 지각, 이 정도면 매너임?', '난 10분도 상대 시간을 빌리는 거라고 봄. 서울에선 기본이라는 사람 들어와.', '지각은 사정이 아니라 약속 수정임. 미리 한 줄이 10분을 커버함.', ARRAY['지각','약속','매너'], 'A Korean man in his early 20s hurrying toward a cafe, checking the time, apologetic face'),
+  ('eternal_quest', '부모님께 월급 공개, 해야 함?', '난 큰 결정만 공유하는 게 독립이라고 봄. 숨기면 불효라는 쪽 논리 들어봄.', '월급 공개는 효도가 아니라 간섭의 시작일 수 있음. 용돈 약속은 따로임.', ARRAY['월급','부모','독립'], 'A Korean woman in her early 20s closing a banking app before a family dinner, calm not secretive'),
+  ('eternal_quest', '첫 이직, 언제가 맞음?', '난 배운 게 문장으로 되면 움직인다고 봄. 1년은 채워야 예의라는 사람 나와봐.', '이직은 배신이 아님. 버티기만 하는 1년은 경력이 아니라 시간임.', ARRAY['이직','직장','타이밍'], 'A Korean man in his early 20s updating a resume at a desk after work, city window, focused'),
+  ('eternal_quest', '술자리 2차, 빠지면 김새임?', '난 1차에서 인사하고 가는 게 충분하다고 봄. 2차까지 가야 친해진다는 쪽 반박해봐.', '2차는 친목 시험이 아님. 몸 상태를 말하는 게 매너임.', ARRAY['술자리','2차','거절'], 'A Korean woman in her early 20s waving goodbye outside a restaurant while others head to a second bar'),
 
   -- ───────── 패션 추가 ─────────
   ('fashion', '흰티가 옷장 진리임?', '난 흰티가 실패 확률 낮은 기본값이라고 봄. 패턴 티가 개성이라는 쪽 나와봐.', '흰티는 무난함이 아니라 코디 플랫폼임. 포인트는 겉옷이랑 신발이 하면 됨.', ARRAY['흰티','기본템','코디'], 'A Korean man in his early 20s wearing a plain white tee and a jacket, Seoul street, candid no logos'),
@@ -119,4 +119,48 @@ VALUES
   ('맛집', '주차 되는 집, 탐방 실력에 넣어도 됨?', '난 차 오는 친구 있으면 주차가 그 집 인프라라고 봄. 맛만 보면 된다는 쪽 논리 들어봄.', '주차는 사치가 아니라 동선임. 빙빙 돌다 화나면 그 집 음식이 먼저 식음.', ARRAY['주차','맛집','동선'], 'A Korean man in his early 20s parking near a small restaurant, looking relieved, residential street'),
   ('맛집', '대학가 분식골목, 핫플보다 탐방임?', '난 학생 회전 빠른 골목이 가격이랑 속도가 정직하다고 봄. 오픈런 핫플만 탐방이라는 사람 들어와.', '대학가는 유행이 아니라 허기 인프라임. 줄이 짧아도 그 맛이 현지임.', ARRAY['대학가','분식','골목'], 'Young Korean people in their early 20s eating at a small tteokbokki stall near a campus, casual'),
   ('맛집', '해장 탐방, 점심 핫플보다 그 지역임?', '난 아침 국밥집이 그 동네 생존 맛집이라고 봄. 브런치만 탐방이라는 쪽 나와봐.', '해장은 낭만이 아니라 회복 루트임. 문이 일찍 열리는 집이 지역을 먹임.', ARRAY['해장','국밥','탐방'], 'A Korean woman in her early 20s eating hangover soup in the morning at a no-frills restaurant, tired but comforted'),
-  ('맛집', '평일 점심 탐방이 주말 오픈런보다 맞음?', '난 평일 점심이 서비스랑 자리가 정직하다고 봄. 주말 줄이 진리라는 사람 반박해봐.', '주말 오픈런은 인기이지 탐방 실력이 아님. 평일 빈자리가 그 집 본판임.', ARRAY['평일','점심','탐방'], 'A Korean man in his early 20s being seated immediately at a weekday lunch restaurant, relaxed');
+  ('맛집', '평일 점심 탐방이 주말 오픈런보다 맞음?', '난 평일 점심이 서비스랑 자리가 정직하다고 봄. 주말 줄이 진리라는 사람 반박해봐.', '주말 오픈런은 인기이지 탐방 실력이 아님. 평일 빈자리가 그 집 본판임.', ARRAY['평일','점심','탐방'], 'A Korean man in his early 20s being seated immediately at a weekday lunch restaurant, relaxed'),
+
+  -- ───────── 라이프 스타일: 취향·상황·선택·트렌드 ─────────
+  ('lifestyle', '아침형 인간이 이득임?', '난 아침이 하루 선택지를 연다고 봄. 밤이 집중 시간이라는 사람 나와봐.', '아침형은 성격이 아니라 일정 선점임. 밤샘은 다음 날 선택지를 지움.', ARRAY['아침형','루틴','취향'], 'A Korean woman in her early 20s opening curtains to morning light, mug in hand, small apartment'),
+  ('lifestyle', '주말은 집이 진리임?', '난 주말 하루는 집 충전이어야 다음 주가 산다고 봄. 밖돌이파 논리 가져와.', '집 주말은 무기력이 아니라 회복임. 스케줄로 채운 주말은 월요일이 더 김.', ARRAY['주말','집','선택'], 'A Korean man in his early 20s on a couch with a blanket on Saturday morning, relaxed, plants by the window'),
+  ('lifestyle', '혼자 영화가 같이 보기보다 맞음?', '난 혼자 보는 게 몰입이라고 봄. 같이 봐야 영화라는 쪽 반박해봐.', '혼영은 외로움이 아니라 취향 보호임. 맞추다 보면 둘 다 반만 봄.', ARRAY['영화','혼자','취향'], 'A Korean woman in her early 20s in a dim cinema seat alone, small popcorn, focused calm face'),
+  ('lifestyle', '정주행 배속, 이게 맞음?', '난 1.5배가 시간을 지키는 선택이라고 봄. 원속이 예의라는 사람 들어와.', '배속은 불경이 아니라 시간 배분임. 한 시즌에 주말을 통째로 주는 게 손해임.', ARRAY['정주행','배속','트렌드'], 'A Korean man in his early 20s watching a show on a laptop at a desk, remote in hand, evening'),
+  ('lifestyle', '종이책이 전자책보다 남음?', '난 종이 넘기는 감각이 읽기를 끝까지 가게 한다고 봄. 전자책이 짐 없는 진리라는 쪽 나와봐.', '종이책은 낭만이 아니라 집중임. 알림 없는 페이지가 한 권을 끝내게 함.', ARRAY['책','독서','취향'], 'A Korean woman in her early 20s reading a paperback at a small table, phone face down'),
+  ('lifestyle', '취미는 하나 깊게가 이득임?', '난 하나 파는 게 여러 개 긁다 마는 것보다 남긴다고 봄. 다재다능파 논리 들어봄.', '취미는 개수가 프로필이 아님. 깊이 있는 하나가 주말을 채움.', ARRAY['취미','선택','취향'], 'A Korean man in his early 20s practicing one hobby at a desk, guitar or sketchbook, focused'),
+  ('lifestyle', '홈트가 헬스장보다 맞음?', '난 집 운동이 이동 시간을 아낀다고 봄. 헬스장 분위기파 들어와.', '홈트는 게으름이 아니라 지속임. 가방 싸는 날만 운동이면 루틴이 끊김.', ARRAY['홈트','운동','선택'], 'A Korean woman in her early 20s doing a simple floor workout in a small living room, mat, natural light'),
+  ('lifestyle', '러닝은 혼자 뛰는 게 맞음?', '난 혼자 뛰어야 페이스가 내 것이라고 봄. 크루여야 지속된다는 쪽 반박해봐.', '혼자 러닝은 외로움이 아니라 속도 조절임. 맞추다 보면 몸이 먼저 지침.', ARRAY['러닝','혼자','트렌드'], 'A Korean man in his early 20s jogging alone on a riverside path at dawn, ordinary clothes, no logos'),
+  ('lifestyle', '팝업스토어 줄, 설렘임 낭비임?', '난 한정 경험을 사러 가는 거라고 봄. 줄 서는 순간 진 거라는 사람 나와봐.', '팝업은 물건보다 그 주 이야기임. 사진만 남고 안 쓰면 그게 낭비임.', ARRAY['팝업','트렌드','줄'], 'A Korean woman in her early 20s waiting in a short line outside a small pop-up shop, curious not posed'),
+  ('lifestyle', '굿즈 모으는 거, 과함임?', '난 좋아하는 거 하나 사는 게 기분 예산이라고 봄. 실용만 사라는 쪽 논리 가져와.', '굿즈는 허세가 아니라 취향의 실물임. 서랍에만 있으면 그때부터 짐임.', ARRAY['굿즈','취향','소비'], 'A Korean man in his early 20s placing one small character item on a tidy shelf, pleased, ordinary room'),
+  ('lifestyle', '필름 카메라가 폰보다 기록임?', '난 장수 제한이 찍는 장면을 고르게 한다고 봄. 폰이 다 담는다는 사람 반박해봐.', '필름은 감성이 아니라 선택 촬영임. 만 장 갤러리는 나중에 안 봄.', ARRAY['필름','사진','트렌드'], 'A Korean woman in her early 20s holding a simple film camera on a street, about to shoot, candid'),
+  ('lifestyle', '개인컵 들고 다니는 거, 이득임?', '난 텀블러가 충동 음료를 줄인다고 봄. 매번 새 컵이 편하다는 쪽 들어와.', '개인컵은 인증이 아니라 습관임. 집 커피 한 잔이 줄 서는 시간을 아낌.', ARRAY['텀블러','습관','선택'], 'A Korean man in his early 20s filling a plain tumbler at home before leaving, morning kitchen'),
+  ('lifestyle', '식물 키우는 집이 맞음?', '난 화분 하나가 방 온도를 바꾼다고 봄. 관리 귀찮다는 사람 나와봐.', '식물은 인테리어 소품이 아니라 루틴임. 물 주는 날이 집을 보게 함.', ARRAY['식물','방','취향'], 'A Korean woman in her early 20s watering one small plant by a window, casual home clothes'),
+  ('lifestyle', '방 조명은 간접등이 진리임?', '난 천장 형광이 방을 사무실로 만든다고 봄. 밝아야 산다는 쪽 논리 들어봄.', '간접등은 꾸밈이 아니라 저녁 컨디션임. 눈이 편해야 집에 있고 싶음.', ARRAY['조명','방','취향'], 'A Korean man in his early 20s sitting in a room lit by a warm floor lamp, phone aside, evening'),
+  ('lifestyle', '알림 끄기가 생산임?', '난 배너 끄면 집중이 돌아온다고 봄. 실시간 답장이 매너라는 사람 반박해봐.', '알림은 정보가 아니라 호출임. 모아서 보는 게 하루를 지킴.', ARRAY['알림','폰','선택'], 'A Korean woman in her early 20s turning on do-not-disturb and setting the phone face down, desk'),
+  ('lifestyle', '폰은 침실 밖에 두는 게 맞음?', '난 충전을 거실에 두면 잠이 먼저 온다고 봄. 침대 옆이 편리하다는 쪽 들어와.', '침실 폰은 알람 핑계임. 한 번 누우면 스크롤이 수면을 가져감.', ARRAY['수면','폰','습관'], 'A Korean man in his early 20s leaving his phone on a living-room shelf and walking toward the bedroom'),
+  ('lifestyle', '가계부 쓰는 거, 스트레스임 이득임?', '난 쓴 돈을 봐야 다음 선택이 줄어든다고 봄. 기분 나쁘다는 사람 나와봐.', '가계부는 잔소리가 아니라 선택 기록임. 안 적으면 같은 결제를 반복함.', ARRAY['가계부','돈','선택'], 'A Korean woman in her early 20s checking a simple spending note beside a card, calm kitchen table'),
+  ('lifestyle', '여행은 즉흥이 맞음?', '난 큰 틀만 잡고 비우는 날이 여행이라고 봄. 분 단위 계획파 논리 가져와.', '즉흥은 무계획이 아니라 여백임. 동선에 쫓기면 현지보다 시간을 봄.', ARRAY['여행','즉흥','선택'], 'A Korean man in his early 20s with a small backpack at a quiet station, deciding which way to walk'),
+  ('lifestyle', '혼행이 같이 가기보다 이득임?', '난 혼자 가면 먹고 걷는 속도가 내 것이라고 봄. 동행이 추억이라는 쪽 반박해봐.', '혼행은 외로움 자랑이 아니라 일정 자유임. 맞추다 보면 여행이 회의가 됨.', ARRAY['혼행','여행','취향'], 'A Korean woman in her early 20s sitting alone at a small-town bus stop with a day bag, content'),
+  ('lifestyle', '국내 여행이 지금 이득임?', '난 이동이 짧은 국내가 휴가를 실제로 쉬게 한다고 봄. 해외여야 여행이라는 사람 들어와.', '국내는 타협이 아니라 밀도임. 공항에서 하루를 쓰면 휴가가 이동이 됨.', ARRAY['국내여행','휴가','선택'], 'A Korean man in his early 20s looking out a train window at Korean countryside, small bag on the seat'),
+
+  -- ───────── 연애: 호감·사랑·썸·사귐·이별 ─────────
+  ('romance', '사귀자, 언제 말하는 게 맞음?', '난 호감이 식기 전에 말하는 게 서로 덜 헤맨다고 봄. 분위기만 보자는 쪽 나와봐.', '확답은 부담이 아니라 방향임. 썸만 길면 둘 다 다른 가능성을 붙잡음.', ARRAY['사귀자','고백','썸'], 'A Korean woman in her early 20s pausing before speaking across a quiet cafe table, hopeful'),
+  ('romance', '연애 공개, 인스타에 올려도 됨?', '난 둘만 아는 연애가 더 오래간다고 봄. 공개해야 진심이라는 사람 반박해봐.', '비공개는 숨기는 게 아니라 관계 보호임. 피드용 커플은 빨리 지침.', ARRAY['공개연애','인스타','연애'], 'A Korean man in his early 20s putting his phone away while sitting with a partner, candid cafe'),
+  ('romance', '이성 친구, 연애 중에도 됨?', '난 연애 전 친구를 끊는 게 더 이상하다고 봄. 단둘이 만남은 선 그어야 한다는 쪽 들어와.', '친구와 애인은 자리가 다름. 숨기면 그때부터 문제임.', ARRAY['이성친구','경계','연애'], 'A Korean woman in her early 20s waving to a friend on the street while holding a partner hand loosely'),
+  ('romance', '질투하는 거, 사랑임 구속임?', '난 질투를 말로 꺼내는 게 삼키는 것보다 낫다고 봄. 쿨해야 성숙이라는 사람 논리 가져와.', '질투는 사랑이 아니라 불안의 신호임. 확인이 반복되면 구속이 됨.', ARRAY['질투','신뢰','연애'], 'A Korean man in his early 20s looking at a phone with a worried face, partner beside him out of focus'),
+  ('romance', '싸움 나면 누가 먼저 연락함?', '난 먼저 톡하는 쪽이 관계를 살린다고 봄. 식힐 시간이 필요하다는 쪽 나와봐.', '침묵은 정리 시간이 아니라 벌이 되기 쉬움. 한 줄이 밤을 넘김.', ARRAY['싸움','연락','연애'], 'A Korean woman in her early 20s typing a short message at night, serious but calm'),
+  ('romance', '애정 표현, 매일 해야 함?', '난 매일 한 마디가 관계를 유지한다고 봄. 있을 때만 해도 충분하다는 사람 반박해봐.', '표현은 이벤트가 아니라 온도임. 특별한 날에만 하면 평일이 비움.', ARRAY['애정','표현','연애'], 'A Korean man in his early 20s sending a simple goodnight text, small smile, bedroom lamp'),
+  ('romance', '커플 여행, 초반에 가도 됨?', '난 같이 이동해 봐야 호흡이 보인다고 봄. 사귄 지 오래돼야 간다는 쪽 들어와.', '여행은 시험이 아니라 시간 밀도임. 초반이라도 일정이 짧으면 됨.', ARRAY['커플여행','데이트','연애'], 'Two Korean people in their early 20s with small bags at a train platform, easy not dramatic'),
+  ('romance', '위치 공유, 신뢰임 감시임?', '난 늦을 때 안심하라고 켜 두는 거라고 봄. 위치는 감시라는 사람 논리 들어봄.', '공유는 합의면 배려임. 끄면 의심부터 하면 그때 감시가 됨.', ARRAY['위치공유','신뢰','연애'], 'A Korean woman in her early 20s showing a map pin to a partner, both looking at one phone, calm'),
+  ('romance', '권태기, 버티는 게 맞음?', '난 설레임이 줄어도 루틴이 남으면 연애라고 봄. 심심하면 끝내야 한다는 쪽 나와봐.', '권태는 실패 선언이 아님. 대화 없이 버티기만 하면 그때 끝임.', ARRAY['권태','연애','고민'], 'A Korean man in his early 20s sitting with a partner on a couch, quiet but together, evening'),
+  ('romance', '이별 통보, 만나서 하는 게 맞음?', '난 얼굴 보고 말하는 게 최소한의 매너라고 봄. 톡이 덜 잔인하다는 사람 반박해봐.', '이별은 결론이지 처벌이 아님. 잠수보다 한 번의 대화가 남음.', ARRAY['이별','매너','연애'], 'A Korean woman in her early 20s sitting across a quiet table, serious gentle expression, daytime'),
+  ('romance', '재회, 한 번은 기회임?', '난 이유가 달라졌으면 한 번은 다시 볼 수 있다고 봄. 끝난 건 끝난 거라는 쪽 들어와.', '재회는 미련 소비가 아님. 같은 싸움만 반복되면 그때 닫아야 함.', ARRAY['재회','이별','연애'], 'A Korean man in his early 20s meeting someone at a park bench, cautious hopeful face'),
+  ('romance', '썸 기간, 한 달이면 김?', '난 한 달이면 마음을 말할 타이밍이라고 봄. 더 봐야 안 다친다는 사람 나와봐.', '긴 썸은 안전이 아니라 소모임. 확답이 없어도 방향은 있어야 함.', ARRAY['썸','기간','연애'], 'A Korean woman in her early 20s checking the calendar on her phone after a date, thoughtful'),
+  ('romance', '확답 요구, 부담임 매너임?', '난 어디쯤인지 묻는 게 서로 예의를 아낀다고 봄. 재촉이라는 쪽 논리 가져와.', '확답은 들이댐이 아니라 정리임. 애매한 호감이 제일 오래 아픔.', ARRAY['확답','썸','연애'], 'A Korean man in his early 20s talking honestly over two drinks, nervous but direct'),
+  ('romance', '데이트 코스, 번갈아 정하는 게 맞음?', '난 한 사람이 항상 짜면 취향이 연애가 된다고 봄. 잘하는 쪽이 맡으면 된다는 사람 반박해봐.', '코스는 취향 존중임. 번갈아 정해야 둘 다 기대가 생김.', ARRAY['데이트','코스','연애'], 'Two Korean people in their early 20s looking at a phone map together on a sidewalk, deciding'),
+  ('romance', '애칭, 있어야 연애임?', '난 이름 부르는 온도면 충분하다고 봄. 애칭 없으면 맘이 식은 거라는 쪽 들어와.', '애칭은 증거가 아니라 놀이임. 없어도 편하면 그게 애정임.', ARRAY['애칭','호칭','연애'], 'A Korean woman in her early 20s laughing at a nickname on a chat screen, partner beside her'),
+  ('romance', '스킨십 속도, 맞추는 게 먼저임?', '난 느린 쪽에 맞추는 게 다정이라고 봄. 표현이 사랑이라는 사람 나와봐.', '속도는 애정 점수가 아님. 불편한 속도를 참으면 연애가 시험이 됨.', ARRAY['스킨십','속도','연애'], 'A Korean man in his early 20s walking beside someone, hands close but not forced, evening street'),
+  ('romance', '미래 얘기, 사귄 지 얼마 만에 함?', '난 방향이 다르면 빨리 아는 게 덜 다친다고 봄. 아직 이르다는 쪽 논리 들어봄.', '미래 얘기는 압박이 아니라 지도임. 피하기만 하면 가정만 커짐.', ARRAY['미래','연애','대화'], 'A Korean woman in her early 20s talking quietly with a partner at a late cafe, serious warm light'),
+  ('romance', '미안할 때 먼저 사과가 이김?', '난 누가 맞는지보다 먼저 푸는 쪽이 관계를 남긴다고 봄. 맞는 말이 먼저라는 사람 반박해봐.', '사과는 패배가 아님. 옳음을 지키다 밤을 넘기면 주제는 사라짐.', ARRAY['사과','싸움','연애'], 'A Korean man in his early 20s saying sorry across a small table, sincere, no drama'),
+  ('romance', '혼자만의 시간, 연애 중에 필요함?', '난 각자 저녁 하나가 연애를 덜 지치게 한다고 봄. 항상 같이 있어야 사랑이라는 쪽 나와봐.', '혼자 시간은 거리가 아니라 충전임. 붙잡히면 애정이 일정표가 됨.', ARRAY['개인시간','경계','연애'], 'A Korean woman in her early 20s reading alone at home, a text from a partner left unread for a moment'),
+  ('romance', '부모님 인사, 이 타이밍이 맞음?', '난 서로 확신이 생긴 뒤에 인사가 예의라고 봄. 일찍 보여줘야 진심이라는 사람 들어와.', '인사는 이벤트가 아니라 관계의 다음 문임. 준비 없이 가면 둘 다 긴장만 남음.', ARRAY['인사','부모님','연애'], 'A Korean man in his early 20s straightening his jacket before meeting someone, nervous small smile');

@@ -24,6 +24,7 @@ const DEFAULT_ACTIVE_CATEGORIES = [
   { id: 'balance_game', slug: '밸런스게임', label: '밸런스게임', pinned: false },
   { id: 'food_gourmet', slug: '맛집&맛식', label: '맛집&맛식', pinned: false },
   { id: 'fashion', slug: '패션', label: '패션', pinned: false },
+  { id: 'lifestyle', slug: '라이프 스타일', label: '라이프 스타일', pinned: false, iconEmoji: '🌿' },
 ]
 
 const DEFAULT_BANNER = {
@@ -40,6 +41,7 @@ const LINK_OPTIONS = [
   { value: 'balance_game', label: '밸런스게임' },
   { value: 'food_gourmet', label: '맛집&맛식' },
   { value: 'fashion', label: '패션' },
+  { value: 'lifestyle', label: '라이프 스타일' },
 ]
 
 const LEGACY_IDS = ['ootd', 'tanghulu', 'idol']
@@ -53,6 +55,7 @@ export const DEFAULT_CATEGORY_EMOJI_BY_ID = {
   balance_game: '⚖️',
   food_gourmet: '🍜',
   fashion: '👗',
+  lifestyle: '🌿',
 }
 
 function normalizeCategoryData(data) {

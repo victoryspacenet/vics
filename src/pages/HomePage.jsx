@@ -179,10 +179,20 @@ export function HomePage({ refreshRef }) {
           const now = new Date().toISOString()
           next = next.or(`expires_at.is.null,expires_at.gt.${now}`)
         } else if (queryFilter === 'completed') {
-          next = next.not('expires_at', 'is', null).lt('expires_at', new Date().toISOString())
+          next = next
+            .eq('status', 'active')
+            .not('expires_at', 'is', null)
+            .lt('expires_at', new Date().toISOString())
         }
         return next
       }
+
+      /** 진행 중·내 매치업은 투표 시작(도전 합류) 시각, 완료는 투표 종료 시각 기준 */
+      const orderByRecency = (q) =>
+        (queryFilter === 'completed'
+          ? q.order('expires_at', { ascending: false, nullsFirst: false })
+          : q.order('challenger_joined_at', { ascending: false, nullsFirst: false })
+        ).order('created_at', { ascending: false })
 
       let dataQuery = applyFeedFilters(
         supabase.from('matchups').select(HOME_FEED_MATCHUP_SELECT),
@@ -192,11 +202,12 @@ export function HomePage({ refreshRef }) {
       )
 
       if (sortBy === 'popular') {
+        /** 화면 표 수(displayVoteTotal) 순서와 같게: 실제 표 → id(표시 오프셋) */
         dataQuery = dataQuery
           .order('total_votes', { ascending: false, nullsFirst: false })
-          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
       } else {
-        dataQuery = dataQuery.order('created_at', { ascending: false })
+        dataQuery = orderByRecency(dataQuery)
       }
 
       const from = (pageFromUrl - 1) * PAGE_SIZE

@@ -4,9 +4,14 @@
  * 도전: A측이 이미지일 때 오른쪽 이미지를 새로 만든 뒤에만 도전한다.
  * 회원 미디어는 재사용하지 않음.
  */
-import { composeBotChallengeCopy } from './botChallengeCopy.mjs'
 import { loadBotCategoryCatalog, resolveBotCategoryKey, resolveBotCategoryLabel } from './botCategoryMap.mjs'
-import { assertBotChallengeSimilarity } from './botChallengeSimilarity.mjs'
+import { resetMatchupVotes } from './botChallengeCopy.mjs'
+import {
+  assertBotChallengeTopicFit,
+  composeCheckedBotChallenge,
+  recordPassedBotChallenge,
+  writeBotChallengeCopy,
+} from './botChallengeWriter.mjs'
 
 const BUCKET = 'matchup-media'
 const CREATE_DEDUP_DAYS = 28
@@ -96,9 +101,11 @@ async function removeBotObject(supabase, objectPath) {
   }
 }
 
-function challengeScenePrompt({ title, categoryKey, description }) {
+export function challengeScenePrompt({ title, categoryKey, description, imagePrompt }) {
   const topic = String(title || 'this matchup').replace(/\s+/g, ' ').trim().slice(0, 80)
   const vibe = String(description || '').replace(/\s+/g, ' ').trim().slice(0, 120)
+  const entry = String(imagePrompt || '').replace(/\s+/g, ' ').trim().slice(0, 300)
+  if (entry) return `${entry} Topic: "${topic}". Mood: ${vibe}`
   const setting =
     categoryKey === 'fashion'
       ? 'street style and clothes in Seoul'
@@ -106,7 +113,11 @@ function challengeScenePrompt({ title, categoryKey, description }) {
         ? 'a restaurant or neighborhood food spot in Korea'
         : categoryKey === '맛식'
           ? 'a close food moment at a Korean table'
-          : 'everyday Korean life, dating or lifestyle'
+          : categoryKey === 'lifestyle'
+            ? 'everyday Korean lifestyle, a small choice or trend at home or in the city'
+            : categoryKey === 'romance'
+              ? 'a candid dating moment between two Korean people in their early 20s'
+              : 'everyday Korean life, dating or lifestyle'
   return `Opposing viewpoint photo about "${topic}". ${vibe}. Scene: ${setting}`
 }
 
@@ -187,7 +198,8 @@ function shuffle(list) {
 }
 
 async function reopenBotChallenge(supabase, id) {
-  await supabase
+  await resetMatchupVotes(supabase, id)
+  const { error } = await supabase
     .from('matchups')
     .update({
       right_type: null,
@@ -199,9 +211,14 @@ async function reopenBotChallenge(supabase, id) {
       right_user_id: null,
       is_complete: false,
       challenger_joined_at: null,
+      left_votes: 0,
+      right_votes: 0,
+      total_votes: 0,
+      result_points_settled_at: null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
+  if (error) throw new Error(error.message)
 }
 
 /** 사진 없이 남은 이미지 봇 도전은 가이드 위반이므로 슬롯을 되돌린다. */
@@ -338,7 +355,11 @@ async function pickCreatePrompt(supabase, used) {
     p_admin_id: categoryId,
   })
   if (keyErr) throw keyErr
-  const promptKey = String(keyData || '').trim()
+  let promptKey = String(keyData || '').trim()
+  if (!promptKey) {
+    const catalog = await loadBotCategoryCatalog(supabase)
+    promptKey = resolveBotCategoryKey(categoryId, catalog) || ''
+  }
   if (!promptKey) return null
   const { data: prompts, error: promptErr } = await supabase
     .from('virtual_bot_matchup_prompts')
@@ -364,8 +385,48 @@ async function listEligibleChallengeBots(supabase, intervalHours) {
   return listEligibleBots(supabase, intervalHours, 'right_user_id')
 }
 
+/** 같은 제목의 다른 봇 글이 공개 중이면 그 봇 글에는 도전하지 않는다. */
+async function dropDuplicateBotTitleTargets(supabase, targets) {
+  const list = targets || []
+  if (!list.length) return { kept: list, skipped: 0 }
+  const { data: bots, error: botErr } = await supabase.from('profiles').select('id').eq('is_bot', true)
+  if (botErr) throw botErr
+  const botIds = new Set((bots || []).map((b) => b.id))
+  const titles = [
+    ...new Set(
+      list
+        .filter((t) => botIds.has(t.user_id))
+        .map((t) => String(t.title || '').trim())
+        .filter(Boolean),
+    ),
+  ]
+  if (!titles.length) return { kept: list, skipped: 0 }
+
+  const botPostsByTitle = new Map()
+  for (let i = 0; i < titles.length; i += 40) {
+    const { data, error } = await supabase
+      .from('matchups')
+      .select('id, title, user_id')
+      .in('title', titles.slice(i, i + 40))
+      .or('status.eq.active,status.is.null')
+      .not('is_demo', 'eq', true)
+    if (error) throw error
+    for (const row of data || []) {
+      if (!botIds.has(row.user_id)) continue
+      const title = String(row.title || '').trim()
+      botPostsByTitle.set(title, (botPostsByTitle.get(title) || 0) + 1)
+    }
+  }
+
+  const kept = list.filter((t) => {
+    if (!botIds.has(t.user_id)) return true
+    return (botPostsByTitle.get(String(t.title || '').trim()) || 0) <= 1
+  })
+  return { kept, skipped: list.length - kept.length }
+}
+
 /**
- * 이미지 NEW는 사진 생성 + 사람 도전과 같은 유사도 검사를 통과한 뒤에만 도전한다.
+ * 이미지 NEW는 매치업에 맞춘 B글·사진을 만들고 봇 전용 엄격 검사를 통과한 뒤에만 도전한다.
  */
 export async function challengeBotImageMatchups(supabase, opts = {}) {
   const remaining = Math.max(0, Number(opts.remaining) || 0)
@@ -391,8 +452,11 @@ export async function challengeBotImageMatchups(supabase, opts = {}) {
     .limit(400)
   if (waitErr) throw waitErr
 
-  const targets = shuffle(waiting || [])
-  if (!targets.length) return { attempted: 0, challenged: 0, skipped: 'no_image_waiting' }
+  const { kept, skipped: duplicateTitleSkipped } = await dropDuplicateBotTitleTargets(supabase, waiting)
+  const targets = shuffle(kept)
+  if (!targets.length) {
+    return { attempted: 0, challenged: 0, skipped: 'no_image_waiting', duplicate_title_skipped: duplicateTitleSkipped }
+  }
 
   let attempted = 0
   let challenged = 0
@@ -411,19 +475,30 @@ export async function challengeBotImageMatchups(supabase, opts = {}) {
     if (bot.id === target.user_id) continue
 
     const categoryKey = resolveBotCategoryKey(target.category, catalog)
-    const copy = composeBotChallengeCopy({ categoryKey })
-    if (!copy) {
-      errors.push(`${target.id}: unknown_category`)
-      continue
-    }
+    const categoryLabel = resolveBotCategoryLabel(target.category, catalog)
 
     attempted += 1
     let objectPath = ''
     try {
+      const copy = await writeBotChallengeCopy({ matchup: target, categoryLabel })
+      if (!copy.ok) {
+        errors.push(`${target.id}: ${copy.reason}`)
+        if (isFatalOpenAiError(copy.error)) {
+          return {
+            attempted,
+            challenged,
+            challenged_ids: challengedIds,
+            skipped: 'openai_auth',
+            errors: errors.slice(0, 6),
+          }
+        }
+        continue
+      }
       const scene = challengeScenePrompt({
         title: target.title,
         categoryKey,
         description: copy.description,
+        imagePrompt: copy.imagePrompt,
       })
       const bytes = await generatePngBytes(scene)
       if (!bytes?.length) {
@@ -432,14 +507,14 @@ export async function challengeBotImageMatchups(supabase, opts = {}) {
       }
       objectPath = `bot/${target.id}/right-${crypto.randomUUID()}.png`
       const publicUrl = await uploadBotPng(supabase, objectPath, bytes)
-      const sim = await assertBotChallengeSimilarity({
+      const sim = await assertBotChallengeTopicFit({
         matchup: target,
-        categoryLabel: resolveBotCategoryLabel(target.category, catalog),
-        right: { type: 'image', url: publicUrl, thumb: publicUrl },
+        categoryLabel,
+        right: { description: copy.description, imageUrl: publicUrl },
       })
       if (!sim.ok) {
         await removeBotObject(supabase, objectPath)
-        errors.push(`${target.id}: ${sim.reason}${sim.similarity != null ? `(${sim.similarity})` : ''}`)
+        errors.push(`${target.id}: ${sim.reason}${sim.fit != null ? `(${sim.fit})` : ''}`)
         if (sim.reason === 'openai_auth' || isFatalOpenAiError(sim.error)) {
           return {
             attempted,
@@ -475,6 +550,12 @@ export async function challengeBotImageMatchups(supabase, opts = {}) {
         await removeBotObject(supabase, objectPath)
         continue
       }
+      await recordPassedBotChallenge(supabase, {
+        matchupId: target.id,
+        fit: sim.fit,
+        description: copy.description,
+        url: publicUrl,
+      })
       challenged += 1
       challengedIds.push(target.id)
       botIdx += 1
@@ -497,7 +578,7 @@ export async function challengeBotImageMatchups(supabase, opts = {}) {
 }
 
 /**
- * 텍스트 NEW는 사람 도전과 같은 유사도 검사를 통과한 뒤에만 도전한다.
+ * 텍스트 NEW는 매치업에 맞춘 B글을 쓰고 봇 전용 엄격 검사를 통과한 뒤에만 도전한다.
  */
 export async function challengeBotTextMatchups(supabase, opts = {}) {
   const remaining = Math.max(0, Number(opts.remaining) || 0)
@@ -523,8 +604,11 @@ export async function challengeBotTextMatchups(supabase, opts = {}) {
     .limit(400)
   if (waitErr) throw waitErr
 
-  const targets = shuffle(waiting || [])
-  if (!targets.length) return { attempted: 0, challenged: 0, skipped: 'no_text_waiting' }
+  const { kept, skipped: duplicateTitleSkipped } = await dropDuplicateBotTitleTargets(supabase, waiting)
+  const targets = shuffle(kept)
+  if (!targets.length) {
+    return { attempted: 0, challenged: 0, skipped: 'no_text_waiting', duplicate_title_skipped: duplicateTitleSkipped }
+  }
 
   let attempted = 0
   let challenged = 0
@@ -542,24 +626,15 @@ export async function challengeBotTextMatchups(supabase, opts = {}) {
     if (!bot) break
     if (bot.id === target.user_id) continue
 
-    const categoryKey = resolveBotCategoryKey(target.category, catalog)
-    const copy = composeBotChallengeCopy({ categoryKey })
-    if (!copy) {
-      errors.push(`${target.id}: unknown_category`)
-      continue
-    }
-
     attempted += 1
     try {
-      const rightText = `${copy.description}\n${copy.bodyText}`.trim()
-      const sim = await assertBotChallengeSimilarity({
+      const copy = await composeCheckedBotChallenge({
         matchup: { ...target, left_type: target.left_type || 'text' },
         categoryLabel: resolveBotCategoryLabel(target.category, catalog),
-        right: { type: 'text', text: rightText },
       })
-      if (!sim.ok) {
-        errors.push(`${target.id}: ${sim.reason}${sim.similarity != null ? `(${sim.similarity})` : ''}`)
-        if (sim.reason === 'openai_auth' || isFatalOpenAiError(sim.error)) {
+      if (!copy.ok) {
+        errors.push(`${target.id}: ${copy.reason}${copy.fit != null ? `(${copy.fit})` : ''}`)
+        if (copy.reason === 'openai_auth' || isFatalOpenAiError(copy.error)) {
           return {
             attempted,
             challenged,
@@ -591,6 +666,12 @@ export async function challengeBotTextMatchups(supabase, opts = {}) {
         .select('id')
       if (uErr) throw new Error(uErr.message)
       if (!updated?.length) continue
+      await recordPassedBotChallenge(supabase, {
+        matchupId: target.id,
+        fit: copy.fit,
+        description: copy.description,
+        text: copy.bodyText,
+      })
       challenged += 1
       challengedIds.push(target.id)
       botIdx += 1

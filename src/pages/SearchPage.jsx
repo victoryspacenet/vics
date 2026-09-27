@@ -18,6 +18,7 @@ const DEFAULT_CAT_OPTIONS = [
   { value: 'balance_game',  label: '밸런스게임' },
   { value: 'food_gourmet',  label: '맛집&맛식' },
   { value: 'fashion',       label: '패션' },
+  { value: 'lifestyle',     label: '라이프 스타일' },
 ]
 
 const PAGE_SIZE = 12
@@ -169,6 +170,7 @@ export function SearchPage() {
 
   return (
     <div className="relative min-h-screen text-[#22282E] -mx-4 -my-6 px-4 py-6 pb-24 sm:pb-8">
+      <div className="mx-auto w-full max-w-xl">
 
       {/* ── 앰비언트 배경 ── */}
       <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden" aria-hidden>
@@ -327,6 +329,7 @@ export function SearchPage() {
           </button>
         </div>
       )}
+      </div>
     </div>
   )
 }

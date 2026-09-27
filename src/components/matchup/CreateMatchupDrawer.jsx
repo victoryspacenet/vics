@@ -96,6 +96,7 @@ const MATCHUP_CATEGORIES_FALLBACK = [
   { value: 'balance_game', label: '밸런스게임' },
   { value: 'food_gourmet', label: '맛집&맛식' },
   { value: 'fashion', label: '패션' },
+  { value: 'lifestyle', label: '라이프 스타일' },
 ]
 
 const DURATIONS = [

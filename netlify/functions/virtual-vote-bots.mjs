@@ -13,6 +13,9 @@ import {
 } from '../lib/botMatchupQuota.mjs'
 import { callRpc, createVirtualBotClient, jsonResponse, readSchedulePayload } from '../lib/virtualBotRuntime.mjs'
 
+// 예약 함수는 30초에서 끊긴다. 새 건은 이 시간 안에만 시작(도전 한 건: 글쓰기 9초 + 검사 9초).
+const TEXT_START_BUDGET_MS = 8_000
+
 export default async (req) => {
   await readSchedulePayload(req)
 
@@ -60,7 +63,7 @@ export default async (req) => {
         remaining: planned.textCreate,
         intervalHours: settings.intervalHours,
         started,
-        budgetMs: 48_000,
+        budgetMs: TEXT_START_BUDGET_MS,
       })
     } catch (e) {
       textCreates = { attempted: 0, created: 0, error: e?.message || String(e) }
@@ -72,7 +75,7 @@ export default async (req) => {
         remaining: planned.textChallenge,
         intervalHours: settings.intervalHours,
         started,
-        budgetMs: 48_000,
+        budgetMs: TEXT_START_BUDGET_MS,
       })
     } catch (e) {
       textChallenges = { attempted: 0, challenged: 0, error: e?.message || String(e) }

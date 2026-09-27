@@ -2,7 +2,7 @@
  * 운영 카테고리 id(cat_xxx) → 관전봇 멘트/이미지 풀 키, 표시 라벨.
  * JS가 id만 보고 eternal_quest로 떨어지면 맛집·패션 매치업에 무관한 도전이 붙는다.
  */
-const PROMPT_KEYS = new Set(['eternal_quest', 'fashion', '맛집', '맛식'])
+const PROMPT_KEYS = new Set(['eternal_quest', 'fashion', '맛집', '맛식', 'lifestyle', 'romance'])
 
 export function promptKeyFromBlob(...parts) {
   const blob = parts
@@ -13,6 +13,8 @@ export function promptKeyFromBlob(...parts) {
   if (!blob) return null
   if (PROMPT_KEYS.has(String(parts[0] || '').trim())) return String(parts[0]).trim()
   if (blob.includes('eternal') || blob.includes('영원한')) return 'eternal_quest'
+  if (blob.includes('romance') || blob.includes('연애')) return 'romance'
+  if (blob.includes('lifestyle') || blob.includes('라이프')) return 'lifestyle'
   if (blob.includes('fashion') || blob.includes('패션')) return 'fashion'
   if (blob.includes('맛식') || blob.includes('food_taste')) return '맛식'
   if (blob.includes('맛집') || blob.includes('food_place') || blob.includes('food_gourmet')) return '맛집'

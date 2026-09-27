@@ -433,8 +433,8 @@ BEGIN
 END;
 $$;
 
--- 운영 활성 카테고리 id(예: cat_wpxy=맛집) → 주제 풀 키(eternal_quest/fashion/맛집/맛식)
--- 맛집=장소·탐방, 맛식=음식 맛, 영원한 난제=연애·라이프(정치·종교·젠더 금지)
+-- 운영 활성 카테고리 id(예: cat_wpxy=맛집) → 주제 풀 키(eternal_quest/fashion/맛집/맛식/lifestyle)
+-- 맛집=장소·탐방, 맛식=음식 맛, 영원한 난제=일상 난제(연애 제외, 정치·종교·젠더 금지)
 CREATE OR REPLACE FUNCTION public.bot_admin_category_prompt_key(p_admin_id text)
 RETURNS text
 LANGUAGE plpgsql
@@ -451,7 +451,7 @@ BEGIN
     RETURN NULL;
   END IF;
 
-  IF trim(p_admin_id) IN ('eternal_quest', 'fashion', '맛집', '맛식') THEN
+  IF trim(p_admin_id) IN ('eternal_quest', 'fashion', '맛집', '맛식', 'lifestyle', 'romance') THEN
     RETURN trim(p_admin_id);
   END IF;
 
@@ -467,6 +467,12 @@ BEGIN
 
   v_blob := lower(trim(both FROM concat_ws(' ', p_admin_id, v_label, v_slug)));
 
+  IF v_blob LIKE '%romance%' OR v_blob ~ '연애' THEN
+    RETURN 'romance';
+  END IF;
+  IF v_blob LIKE '%lifestyle%' OR v_blob ~ '라이프' THEN
+    RETURN 'lifestyle';
+  END IF;
   IF v_blob ~ '영원한' OR v_blob LIKE '%eternal%' THEN
     RETURN 'eternal_quest';
   END IF;

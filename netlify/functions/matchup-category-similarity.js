@@ -97,6 +97,20 @@ function categoryHintKo(categoryLabel) {
       `맛집에 가까운 매장 사진이라도 음식·외식 주제면 거부 사유가 아닙니다.\n\n`
     )
   }
+  if (categoryLabel === '연애') {
+    return (
+      `참고: "연애"는 두 사람 사이의 호감, 사랑, 썸, 사귐, 이별, 그 고민을 비교하는 분야입니다.\n` +
+      `연락·데이트·질투·경계·미래처럼 연애 이야기면 세부 상황이 달라도 같은 대분야로 통과 수준의 점수를 주세요.\n` +
+      `음식 맛, 옷, 매장 탐방, 생활 습관만 다루는 글은 이 분야가 아닙니다.\n\n`
+    )
+  }
+  if (categoryLabel === '라이프 스타일') {
+    return (
+      `참고: "라이프 스타일"은 일상 취향, 상황, 선택, 트렌드를 비교하는 분야입니다.\n` +
+      `사는 방식·소비·시간·습관·작은 선택처럼 생활 속 취향이면 세부 소재가 달라도 같은 대분야로 통과 수준의 점수를 주세요.\n` +
+      `음식 맛 자체만 겨루거나, 옷·매장만 다루는 글은 이 분야가 아닙니다.\n\n`
+    )
+  }
   return ''
 }
 
@@ -214,6 +228,48 @@ async function scoreWithOpenAI(payload) {
   }
 }
 
+/** 영원한 난제는 자유 주제이되, 연애 이야기는 연애 카테고리로만 올린다. */
+async function eternalQuestHasRomance({ title, description, left }) {
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) return { error: 'no_openai_key' }
+  const text =
+    `제목: ${title || '(없음)'}\n설명: ${description || '(없음)'}\n` +
+    (left?.type === 'text' ? `본문: ${String(left.text || '').slice(0, 1500)}\n` : '본문: 사진 또는 영상.\n')
+  const timeoutMs = 12000
+  const ac = new AbortController()
+  const kill = setTimeout(() => ac.abort(), timeoutMs)
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      signal: ac.signal,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: process.env.OPENAI_CATEGORY_SIMILARITY_MODEL || process.env.OPENAI_SIMILARITY_MODEL || 'gpt-4o-mini',
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Decide if this Korean matchup is mainly about romantic relationships: crush, dating, couple, confession, breakup, jealousy between partners, or whether to date. ' +
+              'Friendships, family, money, habits, work, and general manners are not romance. ' +
+              'Output JSON only: {"romance":bool,"reason_ko":"한국어 한 문장"}',
+          },
+          { role: 'user', content: text },
+        ],
+      }),
+    })
+    if (!res.ok) throw new Error(`OpenAI ${res.status}`)
+    const data = await res.json()
+    const parsed = JSON.parse(data?.choices?.[0]?.message?.content || '{}')
+    return { romance: parsed.romance === true, reason_ko: String(parsed.reason_ko || '') }
+  } catch (e) {
+    return { error: e?.message || String(e) }
+  } finally {
+    clearTimeout(kill)
+  }
+}
+
 exports.handler = withIpRateLimit(async (event) => {
   if (event.httpMethod === 'OPTIONS') {
     return json(204, {})
@@ -265,9 +321,21 @@ exports.handler = withIpRateLimit(async (event) => {
     return json(401, { error: '세션이 유효하지 않아요' })
   }
 
-  // "영원한 난제"는 소재 제한이 없는 자유 주제 카테고리라 카테고리·콘텐츠 유사도 검사 대상에서 제외.
-  // (도전자(B) vs A 콘텐츠 유사도 검사는 matchup-challenge-similarity.js에서 그대로 유지됨)
+  // "영원한 난제"는 자유 주제다. 연애 이야기만 막고, 나머지는 통과시킨다.
   if (CATEGORY_SIMILARITY_EXEMPT_IDS.has(category) || categoryLabelIsExempt(body.categoryLabel)) {
+    const romance = await eternalQuestHasRomance({ title, description, left })
+    if (romance.error) {
+      return json(502, { ok: false, error: '유사도 검사를 수행하지 못했어요. 잠시 후 다시 시도해 주세요.' })
+    }
+    if (romance.romance) {
+      return json(200, {
+        ok: false,
+        skipped: false,
+        similarity: 0,
+        reason_ko: romance.reason_ko,
+        message: '연애 이야기는 연애 카테고리에 올려 주세요.',
+      })
+    }
     return json(200, { ok: true, skipped: false, similarity: 100, exempt: true })
   }
 

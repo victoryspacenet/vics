@@ -2,7 +2,9 @@
  * 화면용 투표 수 Display Offset.
  * DB·정산은 실제 표(+봇 표)를 쓰고, UI 숫자·막대·비율은 같은 표시값으로 맞춘다.
  *
- * shownTotal = max(30, raw * 5 + offset(matchupId))
+ * shownTotal = 30 + raw * 5 + rankOffset(matchupId)  (rankOffset 0~4)
+ * rankOffset < 5 이라 표시값 순서가 실제 표 순서를 뒤집지 않는다.
+ * 같은 표 수끼리는 id 첫 글자로 정해져, DB `total_votes desc, id desc` 정렬과 화면 순서가 같다.
  * 좌/우 분할은 실제 비율을 따르되, 한쪽이 0표이면 매치업마다 다른 소수 비율로 누그러뜨린다.
  */
 
@@ -30,6 +32,16 @@ function hashSeed(value) {
 /** 매치업마다 고정되는 랜덤 오프셋 (8~26) */
 export function voteDisplayOffset(matchupId) {
   return OFFSET_MIN + (hashSeed(matchupId) % OFFSET_SPAN)
+}
+
+/**
+ * 표시 총합용 오프셋 (0~4). uuid 첫 16진 글자에 대해 단조 증가 →
+ * `order('id', { ascending: false })` 와 같은 순서.
+ */
+export function voteRankOffset(matchupId) {
+  const d = parseInt(String(matchupId ?? '').charAt(0), 16)
+  if (Number.isFinite(d)) return Math.floor((d * VOTE_DISPLAY_MULTIPLIER) / 16)
+  return hashSeed(matchupId) % VOTE_DISPLAY_MULTIPLIER
 }
 
 function rawVoteInt(value) {
@@ -72,11 +84,7 @@ export function displayLeftShare(leftRaw, rightRaw, matchupId) {
  */
 export function displayVoteTotal(rawTotal, matchupId) {
   const raw = rawVoteInt(rawTotal)
-  const offset = voteDisplayOffset(matchupId)
-  if (raw <= 0) {
-    return VOTE_DISPLAY_MIN + (offset % 12)
-  }
-  return Math.max(VOTE_DISPLAY_MIN, raw * VOTE_DISPLAY_MULTIPLIER + offset)
+  return VOTE_DISPLAY_MIN + raw * VOTE_DISPLAY_MULTIPLIER + voteRankOffset(matchupId)
 }
 
 /**
