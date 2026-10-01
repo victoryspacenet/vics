@@ -1,10 +1,11 @@
 /**
- * 관전봇 매치업 형식 한도: 텍스트 10% / 이미지 90%.
- * 한 틱 슬롯을 나눈 뒤, 전체 active 매치업 믹스가 90% 이미지에 못 미치면 생성은 이미지로만 채운다.
+ * 관전봇 매치업 형식 한도: 텍스트 90% / 이미지 10%.
+ * 텍스트 몫을 실행한 뒤에만 이미지 몫을 연다.
+ * 이미지 생성에 한 번 실패한 봇은 다시 시도하지 않는다.
  */
-export const BOT_TEXT_SHARE = 0.1
-export const BOT_IMAGE_SHARE = 0.9
-export const QUOTA_STALE_MS = 15 * 60 * 1000
+export const BOT_TEXT_SHARE = 0.9
+export const BOT_IMAGE_SHARE = 0.1
+export const TEXT_PHASE_MAX_AGE_MS = 25 * 60 * 1000
 const SETTINGS_KEY = 'virtual_bot_matchups'
 
 function asInt(value, fallback = 0) {
@@ -23,26 +24,15 @@ export function splitShareQuota(max, share, accumulator = 0) {
   return { text, image: cap - text, accumulator: Math.round((next - text) * 1e6) / 1e6 }
 }
 
-export function gateCreatesForMix({ text, image }, mix) {
-  const textN = Math.max(0, asInt(mix?.text, 0))
-  const imageN = Math.max(0, asInt(mix?.image, 0))
-  const usable = textN + imageN
-  const imageShare = usable === 0 ? 0 : imageN / usable
-  const total = Math.max(0, asInt(text, 0) + asInt(image, 0))
-  if (imageShare + 1e-9 < BOT_IMAGE_SHARE) {
-    return { text: 0, image: total, gated: 'fill_image' }
-  }
-  return { text: asInt(text, 0), image: asInt(image, 0), gated: 'maintain' }
+export function imageFailedBotIds(raw) {
+  const list = raw?.image_failed_bot_ids
+  if (!Array.isArray(list)) return []
+  return [...new Set(list.map((id) => String(id || '').trim()).filter(Boolean))]
 }
 
-export function imageQuotaFromTextSlot(max, lastText, lastAt, now = Date.now()) {
-  const cap = Math.max(0, asInt(max, 0))
-  const last = Math.max(0, asInt(lastText, 0))
-  const at = lastAt ? new Date(lastAt).getTime() : 0
-  if (!at || Number.isNaN(at) || now - at > QUOTA_STALE_MS) {
-    return Math.max(0, cap - splitShareQuota(cap, BOT_TEXT_SHARE, 0).text)
-  }
-  return Math.max(0, cap - Math.min(cap, last))
+export function imageFailedBotIdsWith(raw, botId) {
+  const id = String(botId || '').trim()
+  return id ? [...new Set([...imageFailedBotIds(raw), id])] : imageFailedBotIds(raw)
 }
 
 export function parseBotMatchupSettings(value) {
@@ -58,6 +48,7 @@ export function parseBotMatchupSettings(value) {
     lastTextCreate: Math.max(0, asInt(raw.last_text_create, 0)),
     lastTextChallenge: Math.max(0, asInt(raw.last_text_challenge, 0)),
     lastQuotaAt: raw.last_quota_at || null,
+    imageFailedBotIds: imageFailedBotIds(raw),
     raw,
   }
 }
@@ -112,44 +103,29 @@ export async function countActiveMediaMix(supabase) {
   }
 }
 
-export function planTextRunQuota(settings, mix) {
+export function planTextRunQuota(settings) {
   const createSplit = splitShareQuota(settings.maxCreates, BOT_TEXT_SHARE, settings.textCreateAcc)
   const challengeSplit = splitShareQuota(settings.maxChallenges, BOT_TEXT_SHARE, settings.textChallengeAcc)
-  const gated = gateCreatesForMix(createSplit, mix)
   return {
-    textCreate: gated.text,
-    imageCreate: gated.image,
+    textCreate: createSplit.text,
+    imageCreate: createSplit.image,
     textChallenge: challengeSplit.text,
     imageChallenge: challengeSplit.image,
-    createGated: gated.gated,
+    createGated: 'text_first',
     textCreateAcc: createSplit.accumulator,
     textChallengeAcc: challengeSplit.accumulator,
-    mix,
   }
 }
 
-export function planImageRunQuota(settings, mix, now = Date.now()) {
-  const fromSlot = {
-    imageCreate: imageQuotaFromTextSlot(
-      settings.maxCreates,
-      settings.lastTextCreate,
-      settings.lastQuotaAt,
-      now,
-    ),
-    imageChallenge: imageQuotaFromTextSlot(
-      settings.maxChallenges,
-      settings.lastTextChallenge,
-      settings.lastQuotaAt,
-      now,
-    ),
+export function planImageRunQuota(settings, now = Date.now()) {
+  const at = settings.lastQuotaAt ? new Date(settings.lastQuotaAt).getTime() : 0
+  const textReady = Number.isFinite(at) && at > 0 && now - at <= TEXT_PHASE_MAX_AGE_MS
+  if (!textReady) {
+    return { imageCreate: 0, imageChallenge: 0, gated: 'wait_text' }
   }
-  const gated = gateCreatesForMix({ text: 0, image: fromSlot.imageCreate }, mix)
-  if (gated.gated === 'fill_image') {
-    return {
-      imageCreate: settings.maxCreates,
-      imageChallenge: fromSlot.imageChallenge,
-      gated: 'fill_image',
-    }
+  return {
+    imageCreate: Math.max(0, asInt(settings.maxCreates, 0) - asInt(settings.lastTextCreate, 0)),
+    imageChallenge: Math.max(0, asInt(settings.maxChallenges, 0) - asInt(settings.lastTextChallenge, 0)),
+    gated: 'after_text',
   }
-  return { ...fromSlot, gated: 'maintain' }
 }

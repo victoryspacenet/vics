@@ -48,6 +48,10 @@ export default defineConfig({
         'manifest.webmanifest',
       ],
       workbox: {
+        // injectRegister: false 이면 플러그인이 autoUpdate여도 skipWaiting을 넣지 않는다.
+        // 그러면 새 워커가 대기만 하고, 새로고침해도 예전 페이지가 그대로다.
+        skipWaiting: true,
+        clientsClaim: true,
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,webmanifest}'],

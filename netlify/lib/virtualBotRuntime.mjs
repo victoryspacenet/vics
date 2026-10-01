@@ -1,5 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
 
+export function botsPaused() {
+  const value = String(process.env.VICS_PAUSE_BOTS || '').trim().toLowerCase()
+  return value === '1' || value === 'true' || value === 'yes'
+}
+
 export function createVirtualBotClient() {
   const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || ''
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''

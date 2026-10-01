@@ -55,7 +55,7 @@ BEGIN
   END IF;
 
   v_interval := make_interval(hours => GREATEST(1, COALESCE((v_cfg->>'interval_hours')::integer, 48)));
-  -- JS가 넘긴 값이 텍스트 10% 한도. 인자 없으면 텍스트 생성·도전을 하지 않는다(이미지 스케줄이 담당).
+  -- JS가 넘긴 값이 텍스트 90% 한도. 인자 없으면 텍스트 생성·도전을 하지 않는다(이미지 스케줄이 담당).
   v_max_create := GREATEST(0, LEAST(20, COALESCE(p_max_create, 0)));
   v_max_challenge := GREATEST(0, LEAST(20, COALESCE(p_max_challenge, 0)));
 

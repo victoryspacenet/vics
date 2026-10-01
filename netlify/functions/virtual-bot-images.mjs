@@ -1,10 +1,10 @@
 /**
- * 관전봇 이미지 — 10분마다, 투표 스케줄과 5분 어긋나게 호출
+ * 관전봇 이미지 — 30분마다, 투표 스케줄과 15분 어긋나게 호출 (매시 15분, 45분)
  *   예약 함수는 30초 제한이라 사진 한 장(생성 + 유사도)도 끝내지 못한다.
  *   여기서는 백그라운드 함수 virtual-bot-images-background 를 시작시키기만 한다.
  */
 import { BOT_IMAGE_JOB_PATH, botImageJobHeaders } from '../lib/botImageJob.mjs'
-import { jsonResponse, readSchedulePayload } from '../lib/virtualBotRuntime.mjs'
+import { botsPaused, jsonResponse, readSchedulePayload } from '../lib/virtualBotRuntime.mjs'
 
 const TRIGGER_TIMEOUT_MS = 10_000
 
@@ -14,6 +14,7 @@ function siteBaseUrl(context) {
 
 export default async (req, context) => {
   await readSchedulePayload(req)
+  if (botsPaused()) return jsonResponse({ ok: true, skipped: 'paused' })
 
   const base = siteBaseUrl(context)
   if (!base) {

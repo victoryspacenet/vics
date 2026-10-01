@@ -61,7 +61,6 @@ export async function generatePngBytes(scenePrompt, safety = SAFETY) {
         n: 1,
         size: '1024x1024',
         quality: 'standard',
-        response_format: 'b64_json',
       }),
     },
     IMAGE_TIMEOUT_MS,
@@ -458,9 +457,15 @@ export async function challengeBotImageMatchups(supabase, opts = {}) {
     return { attempted: 0, challenged: 0, skipped: 'no_image_waiting', duplicate_title_skipped: duplicateTitleSkipped }
   }
 
+  const failed = new Set((opts.failedBotIds || []).map((id) => String(id)))
+  if (!bots.some((bot) => !failed.has(String(bot.id)))) {
+    return { attempted: 0, challenged: 0, skipped: 'image_failed_no_retry', duplicate_title_skipped: duplicateTitleSkipped }
+  }
+
   let attempted = 0
   let challenged = 0
   const challengedIds = []
+  const failedBotIds = []
   const errors = []
   let botIdx = 0
 
@@ -470,6 +475,7 @@ export async function challengeBotImageMatchups(supabase, opts = {}) {
       errors.push('time_budget')
       break
     }
+    while (bots[botIdx] && failed.has(String(bots[botIdx].id))) botIdx += 1
     const bot = bots[botIdx]
     if (!bot) break
     if (bot.id === target.user_id) continue
@@ -500,9 +506,31 @@ export async function challengeBotImageMatchups(supabase, opts = {}) {
         description: copy.description,
         imagePrompt: copy.imagePrompt,
       })
-      const bytes = await generatePngBytes(scene)
+      let bytes
+      try {
+        bytes = await generatePngBytes(scene)
+      } catch (e) {
+        errors.push(`${target.id}: ${e?.message || e}`)
+        failed.add(String(bot.id))
+        failedBotIds.push(bot.id)
+        botIdx += 1
+        if (isFatalOpenAiError(e)) {
+          return {
+            attempted,
+            challenged,
+            challenged_ids: challengedIds,
+            skipped: 'openai_auth',
+            failedBotIds,
+            errors: errors.slice(0, 6),
+          }
+        }
+        continue
+      }
       if (!bytes?.length) {
         errors.push(`${target.id}: empty_image`)
+        failed.add(String(bot.id))
+        failedBotIds.push(bot.id)
+        botIdx += 1
         continue
       }
       objectPath = `bot/${target.id}/right-${crypto.randomUUID()}.png`
@@ -524,6 +552,7 @@ export async function challengeBotImageMatchups(supabase, opts = {}) {
             errors: errors.slice(0, 6),
           }
         }
+        botIdx += 1
         continue
       }
       const nickname = String(bot.nickname || '').trim() || 'B'
@@ -568,13 +597,14 @@ export async function challengeBotImageMatchups(supabase, opts = {}) {
           challenged,
           challenged_ids: challengedIds,
           skipped: 'openai_auth',
+          failedBotIds,
           errors: errors.slice(0, 6),
         }
       }
     }
   }
 
-  return { attempted, challenged, challenged_ids: challengedIds, errors: errors.slice(0, 6) }
+  return { attempted, challenged, challenged_ids: challengedIds, failedBotIds, errors: errors.slice(0, 6) }
 }
 
 /**
@@ -781,12 +811,17 @@ export async function createBotImageMatchups(supabase, opts = {}) {
   if (!bots.length) return { attempted: 0, created: 0, skipped: 'no_eligible_bots' }
 
   const used = await listUsedCreateFingerprints(supabase)
+  const failed = new Set((opts.failedBotIds || []).map((id) => String(id)))
+  const queue = bots.filter((bot) => !failed.has(bot.id))
+  if (!queue.length) return { attempted: 0, created: 0, skipped: 'image_failed_no_retry' }
+
   let attempted = 0
   let created = 0
   const createdIds = []
+  const failedBotIds = []
   const errors = []
 
-  for (const bot of bots) {
+  for (const bot of queue) {
     if (created >= remaining) break
     if (Date.now() - started > budgetMs) {
       errors.push('time_budget')
@@ -803,9 +838,29 @@ export async function createBotImageMatchups(supabase, opts = {}) {
         errors.push(`${bot.id}: duplicate_prompt`)
         continue
       }
-      const bytes = await generatePngBytes(createScenePrompt(picked.prompt))
+      let bytes
+      try {
+        bytes = await generatePngBytes(createScenePrompt(picked.prompt))
+      } catch (e) {
+        errors.push(`${bot.id}: ${e?.message || e}`)
+        failed.add(String(bot.id))
+        failedBotIds.push(bot.id)
+        if (isFatalOpenAiError(e)) {
+          return {
+            attempted,
+            created,
+            created_ids: createdIds,
+            skipped: 'openai_auth',
+            failedBotIds,
+            errors: errors.slice(0, 6),
+          }
+        }
+        continue
+      }
       if (!bytes?.length) {
         errors.push(`${bot.id}: empty_image`)
+        failed.add(String(bot.id))
+        failedBotIds.push(bot.id)
         continue
       }
 
@@ -840,11 +895,8 @@ export async function createBotImageMatchups(supabase, opts = {}) {
       createdIds.push(id)
     } catch (e) {
       errors.push(`${bot.id}: ${e?.message || e}`)
-      if (isFatalOpenAiError(e)) {
-        return { attempted, created, created_ids: createdIds, skipped: 'openai_auth', errors: errors.slice(0, 6) }
-      }
     }
   }
 
-  return { attempted, created, created_ids: createdIds, errors: errors.slice(0, 6) }
+  return { attempted, created, created_ids: createdIds, failedBotIds, errors: errors.slice(0, 6) }
 }
