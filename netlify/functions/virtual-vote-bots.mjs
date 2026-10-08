@@ -1,15 +1,16 @@
 /**
  * 가상 투표 봇 — 30분마다 호출 (매시 0분, 30분)
  *   1) `run_virtual_vote_bots` 조회/투표 인플레
- *   2) 텍스트 생성·도전은 JS. 같은 제목·본문은 28일 안에 다시 올리지 않음.
+ *   2) 텍스트 생성·도전은 JS. 같은 제목·본문은 15일 안에 다시 올리지 않음.
  *      사진은 virtual-bot-images가 담당.
  */
 import { challengeBotTextMatchups, createBotTextMatchups } from '../lib/botMatchupImage.mjs'
 import { loadBotMatchupSettings, planTextRunQuota, saveBotMatchupQuotaState } from '../lib/botMatchupQuota.mjs'
 import { botsPaused, callRpc, createVirtualBotClient, jsonResponse, readSchedulePayload } from '../lib/virtualBotRuntime.mjs'
 
-// 예약 함수는 30초에서 끊긴다. 새 건은 이 시간 안에만 시작(도전 한 건: 글쓰기 9초 + 검사 9초).
-const TEXT_START_BUDGET_MS = 8_000
+// 예약 함수는 30초에서 끊긴다. 글 생성과 도전을 투표 RPC보다 먼저 끝낸다.
+const TEXT_CREATE_BUDGET_MS = 8_000
+const TEXT_CHALLENGE_BUDGET_MS = 18_000
 
 export default async (req) => {
   await readSchedulePayload(req)
@@ -22,36 +23,19 @@ export default async (req) => {
   }
 
   try {
-    let votes
-    try {
-      votes = await callRpc(supabase, 'run_virtual_vote_bots')
-    } catch (e) {
-      votes = { error: e?.message || String(e) }
-      console.warn('[virtual-vote-bots] votes rpc:', votes)
-    }
     const settings = await loadBotMatchupSettings(supabase)
     if (!settings.enabled) {
-      return jsonResponse({ ok: true, result: { votes, matchups: { skipped: 'disabled' } } })
+      return jsonResponse({ ok: true, result: { matchups: { skipped: 'disabled' } } })
     }
 
     const planned = planTextRunQuota(settings)
-
-    const matchups = await callRpc(supabase, 'run_virtual_bot_matchups', {
-      p_max_create: 0,
-      p_max_challenge: 0,
-    }).catch((e) => {
-      const result = { error: e?.message || String(e) }
-      console.warn('[virtual-vote-bots] matchups rpc:', result)
-      return result
-    })
-    const started = Date.now()
     let textCreates = { attempted: 0, created: 0, skipped: 'none' }
     try {
       textCreates = await createBotTextMatchups(supabase, {
         remaining: planned.textCreate,
         intervalHours: settings.intervalHours,
-        started,
-        budgetMs: TEXT_START_BUDGET_MS,
+        started: Date.now(),
+        budgetMs: TEXT_CREATE_BUDGET_MS,
       })
     } catch (e) {
       textCreates = { attempted: 0, created: 0, error: e?.message || String(e) }
@@ -62,8 +46,8 @@ export default async (req) => {
       textChallenges = await challengeBotTextMatchups(supabase, {
         remaining: planned.textChallenge,
         intervalHours: settings.intervalHours,
-        started,
-        budgetMs: TEXT_START_BUDGET_MS,
+        started: Date.now(),
+        budgetMs: TEXT_CHALLENGE_BUDGET_MS,
       })
     } catch (e) {
       textChallenges = { attempted: 0, challenged: 0, error: e?.message || String(e) }
@@ -78,9 +62,16 @@ export default async (req) => {
       last_quota_at: new Date().toISOString(),
     })
 
+    let votes
+    try {
+      votes = await callRpc(supabase, 'run_virtual_vote_bots')
+    } catch (e) {
+      votes = { error: e?.message || String(e) }
+      console.warn('[virtual-vote-bots] votes rpc:', votes)
+    }
+
     const result = {
       votes,
-      matchups,
       textCreates,
       textChallenges,
       quota: {

@@ -14,7 +14,7 @@ import {
 } from './botChallengeWriter.mjs'
 
 const BUCKET = 'matchup-media'
-const CREATE_DEDUP_DAYS = 28
+const CREATE_DEDUP_DAYS = 15
 const IMAGE_TIMEOUT_MS = 22_000
 export const PHASE_BUDGET_MS = 50_000
 const SAFETY =
@@ -282,41 +282,21 @@ function addCreateFingerprints(rows, used) {
   }
 }
 
-async function fetchMatchupsByColumnIn(supabase, column, values, since) {
-  const rows = []
-  const size = 40
-  for (let i = 0; i < values.length; i += size) {
-    const slice = values.slice(i, i + size)
-    if (!slice.length) continue
+async function listUsedCreateFingerprints(supabase) {
+  const used = { titles: new Set(), bodies: new Set() }
+  const since = new Date(Date.now() - CREATE_DEDUP_DAYS * 24 * 3600 * 1000).toISOString()
+  const page = 400
+  for (let from = 0; ; from += page) {
     const { data, error } = await supabase
       .from('matchups')
       .select('title, left_text')
       .not('is_demo', 'eq', true)
       .gte('created_at', since)
-      .in(column, slice)
+      .range(from, from + page - 1)
     if (error) throw error
-    rows.push(...(data || []))
+    addCreateFingerprints(data || [], used)
+    if (!data || data.length < page) break
   }
-  return rows
-}
-
-async function listUsedCreateFingerprints(supabase) {
-  const used = { titles: new Set(), bodies: new Set() }
-  const { data: prompts, error: promptErr } = await supabase
-    .from('virtual_bot_matchup_prompts')
-    .select('title, body_text')
-  if (promptErr) throw promptErr
-  const titles = [
-    ...new Set((prompts || []).map((row) => String(row.title || '').trim()).filter(Boolean)),
-  ]
-  const bodies = [
-    ...new Set((prompts || []).map((row) => String(row.body_text || '').trim()).filter(Boolean)),
-  ]
-  const since = new Date(Date.now() - CREATE_DEDUP_DAYS * 24 * 3600 * 1000).toISOString()
-  const byTitle = await fetchMatchupsByColumnIn(supabase, 'title', titles, since)
-  const byBody = await fetchMatchupsByColumnIn(supabase, 'left_text', bodies, since)
-  addCreateFingerprints(byTitle, used)
-  addCreateFingerprints(byBody, used)
   return used
 }
 
@@ -402,11 +382,11 @@ async function dropDuplicateBotTitleTargets(supabase, targets) {
   if (!titles.length) return { kept: list, skipped: 0 }
 
   const botPostsByTitle = new Map()
-  for (let i = 0; i < titles.length; i += 40) {
+  for (let i = 0; i < titles.length; i += 8) {
     const { data, error } = await supabase
       .from('matchups')
       .select('id, title, user_id')
-      .in('title', titles.slice(i, i + 40))
+      .in('title', titles.slice(i, i + 8))
       .or('status.eq.active,status.is.null')
       .not('is_demo', 'eq', true)
     if (error) throw error
@@ -740,10 +720,14 @@ export async function createBotTextMatchups(supabase, opts = {}) {
   if (!bots.length) return { attempted: 0, created: 0, skipped: 'no_eligible_bots' }
 
   const used = await listUsedCreateFingerprints(supabase)
+  const first = await pickCreatePrompt(supabase, used)
+  if (!first?.prompt) return { attempted: 0, created: 0, skipped: 'prompts_exhausted' }
+
   let attempted = 0
   let created = 0
   const createdIds = []
   const errors = []
+  let pending = first
 
   for (const bot of bots) {
     if (created >= remaining) break
@@ -754,13 +738,11 @@ export async function createBotTextMatchups(supabase, opts = {}) {
 
     attempted += 1
     try {
-      let picked = null
-      for (let n = 0; n < 4 && !picked; n += 1) {
-        picked = await pickCreatePrompt(supabase, used)
-      }
+      const picked = pending || (await pickCreatePrompt(supabase, used))
+      pending = null
       if (!picked?.prompt) {
-        errors.push(`${bot.id}: duplicate_prompt`)
-        continue
+        errors.push('prompts_exhausted')
+        break
       }
       const nickname = String(bot.nickname || '').trim() || 'A'
       const tags = Array.isArray(picked.prompt.tags) ? picked.prompt.tags.filter(Boolean) : []

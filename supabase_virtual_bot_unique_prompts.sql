@@ -28,7 +28,7 @@ BEGIN
             AND m.left_text = p.body_text
           )
         )
-        AND m.created_at > now() - interval '28 days'
+        AND m.created_at > now() - interval '15 days'
     )
   ORDER BY random()
   LIMIT 1;
@@ -50,7 +50,7 @@ BEGIN
           AND m.left_text = p.body_text
         )
       )
-      AND m.created_at > now() - interval '28 days'
+      AND m.created_at > now() - interval '15 days'
   )
   ORDER BY random()
   LIMIT 1;
@@ -60,7 +60,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.bot_pick_prompt(text) IS
-  '관전봇 생성 주제. 28일 안에 같은 제목·본문이 있으면 고르지 않음. 없으면 빈 행(생성 생략).';
+  '관전봇 생성 주제. 15일 안에 같은 제목·본문이 있으면 고르지 않음. 없으면 빈 행(생성 생략).';
 
 REVOKE ALL ON FUNCTION public.bot_pick_prompt(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.bot_pick_prompt(text) FROM anon;

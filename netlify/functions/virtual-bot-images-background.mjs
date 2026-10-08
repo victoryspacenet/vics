@@ -15,7 +15,7 @@ import {
 import { stripBorrowedBotChallengeMedia } from '../lib/botChallengeCopy.mjs'
 import { reviewBotChallenges } from '../lib/botChallengeRepair.mjs'
 import {
-  imageFailedBotIdsWith,
+  imageFailedAtWith,
   loadBotMatchupSettings,
   planImageRunQuota,
   saveBotMatchupQuotaState,
@@ -80,14 +80,19 @@ export default async (req) => {
     }
 
     let raw = settings.raw
+    if (Array.isArray(raw?.image_failed_bot_ids) && raw.image_failed_bot_ids.length) {
+      raw = await saveBotMatchupQuotaState(supabase, raw, { image_failed_bot_ids: [] })
+    }
     let blockedBotIds = settings.imageFailedBotIds
     const rememberFailures = async (botIds) => {
       const list = (botIds || []).map((id) => String(id || '').trim()).filter(Boolean)
       if (!list.length) return
-      const ids = list.reduce((acc, id) => imageFailedBotIdsWith({ image_failed_bot_ids: acc }, id), blockedBotIds)
-      if (ids.length === blockedBotIds.length) return
-      raw = await saveBotMatchupQuotaState(supabase, raw, { image_failed_bot_ids: ids })
-      blockedBotIds = ids
+      const map = imageFailedAtWith(raw, list)
+      raw = await saveBotMatchupQuotaState(supabase, raw, {
+        image_failed_at: map,
+        image_failed_bot_ids: [],
+      })
+      blockedBotIds = Object.keys(map)
     }
 
     let creates = { attempted: 0, created: 0, skipped: 'none' }

@@ -185,7 +185,7 @@ BEGIN
     IF EXISTS (
       SELECT 1 FROM public.matchups m
       WHERE COALESCE(m.is_demo, false) = false
-        AND m.created_at > now() - interval '28 days'
+        AND m.created_at > now() - interval '15 days'
         AND (
           m.title = v_prompt.title
           OR (

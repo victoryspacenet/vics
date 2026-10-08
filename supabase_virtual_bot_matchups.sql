@@ -386,7 +386,7 @@ AS $$
 DECLARE
   v_row public.virtual_bot_matchup_prompts;
 BEGIN
-  -- 28일 안에 같은 제목·본문이 있으면 다시 쓰지 않는다.
+  -- 15일 안에 같은 제목·본문이 있으면 다시 쓰지 않는다.
   -- 풀이 소진되면 빈 행을 돌려 생성을 건너뛴다. 중복 폴백 없음.
   SELECT * INTO v_row
   FROM public.virtual_bot_matchup_prompts p
@@ -402,7 +402,7 @@ BEGIN
             AND m.left_text = p.body_text
           )
         )
-        AND m.created_at > now() - interval '28 days'
+        AND m.created_at > now() - interval '15 days'
     )
   ORDER BY random()
   LIMIT 1;
@@ -424,7 +424,7 @@ BEGIN
           AND m.left_text = p.body_text
         )
       )
-      AND m.created_at > now() - interval '28 days'
+      AND m.created_at > now() - interval '15 days'
   )
   ORDER BY random()
   LIMIT 1;
@@ -716,7 +716,7 @@ BEGIN
     IF EXISTS (
       SELECT 1 FROM public.matchups m
       WHERE COALESCE(m.is_demo, false) = false
-        AND m.created_at > now() - interval '28 days'
+        AND m.created_at > now() - interval '15 days'
         AND (
           m.title = v_prompt.title
           OR (

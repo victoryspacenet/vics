@@ -1,7 +1,7 @@
 /**
  * 관전봇 매치업 형식 한도: 텍스트 90% / 이미지 10%.
  * 텍스트 몫을 실행한 뒤에만 이미지 몫을 연다.
- * 이미지 생성에 한 번 실패한 봇은 다시 시도하지 않는다.
+ * 이미지 생성에 실패한 봇은 48시간 동안만 빠지고, 그 사이 다른 봇이 이어서 시도한다.
  */
 export const BOT_TEXT_SHARE = 0.9
 export const BOT_IMAGE_SHARE = 0.1
@@ -24,15 +24,35 @@ export function splitShareQuota(max, share, accumulator = 0) {
   return { text, image: cap - text, accumulator: Math.round((next - text) * 1e6) / 1e6 }
 }
 
-export function imageFailedBotIds(raw) {
-  const list = raw?.image_failed_bot_ids
-  if (!Array.isArray(list)) return []
-  return [...new Set(list.map((id) => String(id || '').trim()).filter(Boolean))]
+export const IMAGE_FAIL_COOLDOWN_MS = 48 * 3600 * 1000
+
+function imageFailedAtMap(raw) {
+  const map = raw?.image_failed_at
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return {}
+  return map
 }
 
-export function imageFailedBotIdsWith(raw, botId) {
-  const id = String(botId || '').trim()
-  return id ? [...new Set([...imageFailedBotIds(raw), id])] : imageFailedBotIds(raw)
+export function activeImageFailedBotIds(raw, now = Date.now()) {
+  return Object.entries(imageFailedAtMap(raw))
+    .filter(([, at]) => {
+      const time = new Date(at).getTime()
+      return Number.isFinite(time) && now - time < IMAGE_FAIL_COOLDOWN_MS
+    })
+    .map(([id]) => id)
+}
+
+export function imageFailedAtWith(raw, botIds, now = Date.now()) {
+  const map = { ...imageFailedAtMap(raw) }
+  const iso = new Date(now).toISOString()
+  for (const id of botIds || []) {
+    const key = String(id || '').trim()
+    if (key) map[key] = iso
+  }
+  for (const [id, at] of Object.entries(map)) {
+    const time = new Date(at).getTime()
+    if (!Number.isFinite(time) || now - time >= IMAGE_FAIL_COOLDOWN_MS) delete map[id]
+  }
+  return map
 }
 
 export function parseBotMatchupSettings(value) {
@@ -48,7 +68,7 @@ export function parseBotMatchupSettings(value) {
     lastTextCreate: Math.max(0, asInt(raw.last_text_create, 0)),
     lastTextChallenge: Math.max(0, asInt(raw.last_text_challenge, 0)),
     lastQuotaAt: raw.last_quota_at || null,
-    imageFailedBotIds: imageFailedBotIds(raw),
+    imageFailedBotIds: activeImageFailedBotIds(raw),
     raw,
   }
 }
