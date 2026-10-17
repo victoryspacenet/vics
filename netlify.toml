@@ -133,6 +133,10 @@ schedule = "@hourly"
   schedule = "0,30 * * * *"
   included_files = ["netlify/lib/matchupChallengeSimilarityCore.cjs"]
 
+# 관전봇 댓글 — 투표·사진과 어긋나게. 봇 한 명당 48시간에 하나
+[functions."virtual-bot-comments"]
+  schedule = "5,35 * * * *"
+
 # 관전봇 사진 — 투표와 15분 어긋나게. 사진 잠금(14분)과 겹치지 않게 함
 [functions."virtual-bot-images"]
   schedule = "15,45 * * * *"
