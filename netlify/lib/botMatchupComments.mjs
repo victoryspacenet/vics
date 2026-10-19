@@ -1,7 +1,8 @@
 /**
  * 관전봇 매치업 댓글.
  * 봇 한 명당 48시간에 댓글 하나. 본인 글(왼쪽·오른쪽)에는 쓰지 않는다.
- * 내용은 그 매치업의 단어가 들어가고, 물어보는 문장은 올리지 않는다.
+ * 내용은 그 매치업의 단어를 쓰되 설명 문장은 베끼지 않는다.
+ * 물어보는 문장은 올리지 않는다. 감정 표현은 일부 댓글에만 넣는다.
  */
 const INTERVAL_MS = 48 * 3600 * 1000
 const MAX_PER_RUN = 2
@@ -9,7 +10,9 @@ const BOT_ATTEMPTS = 4
 const WRITE_TRIES = 2
 const OPENAI_TIMEOUT_MS = 7_000
 const COMMENT_MIN = 16
-const COMMENT_MAX = 90
+const COMMENT_MAX = 110
+const COPY_RUN = 12
+const TONE_MARKS = ['ㅋㅋ', 'ㅎㅎ', '~', '!', ':)', '!~!', '~~!!', 'ㅉㅉ', 'ㄷㄷ', 'ㅠㅠ', '…', 'ㅇㅇ']
 const STOP_WORDS = new Set([
   '매치업', '이거', '그거', '나는', '내가', '우리', '진짜', '정말', '그냥', '생각', '사람',
   '오늘', '이게', '하는', '하면', '있어', '없어', '같아', '같은', '이거', '저기',
@@ -34,10 +37,6 @@ function shuffle(list) {
     ;[arr[i], arr[j]] = [arr[j], arr[i]]
   }
   return arr
-}
-
-function clipChars(value, max) {
-  return [...String(value || '').replace(/\s+/g, ' ').trim()].slice(0, max).join('')
 }
 
 export function isAskingComment(text) {
@@ -72,6 +71,58 @@ export function mentionsMatchup(comment, needles) {
   return (needles || []).some((word) => word && text.includes(word))
 }
 
+function plainText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[ㅋㅎㅠㅜㄷㅉㅇ~!?.…,:;^'"`()[\]{}<>+\-_/\\]/g, '')
+    .replace(/\s+/g, '')
+}
+
+function longestRun(a, b) {
+  let best = 0
+  const prev = new Array(b.length + 1).fill(0)
+  for (let i = 1; i <= a.length; i += 1) {
+    let diagonal = 0
+    for (let j = 1; j <= b.length; j += 1) {
+      const saved = prev[j]
+      if (a[i - 1] === b[j - 1]) {
+        prev[j] = diagonal + 1
+        if (prev[j] > best) best = prev[j]
+      } else {
+        prev[j] = 0
+      }
+      diagonal = saved
+    }
+  }
+  return best
+}
+
+export function copiesMatchupSentence(comment, matchup) {
+  const body = plainText(comment)
+  if (body.length < 8) return false
+  const sources = [matchup?.description, matchup?.left_text, matchup?.right_text, matchup?.title]
+  for (const source of sources) {
+    const chunks = String(source || '')
+      .split(/[\n.!?。]+/)
+      .map((part) => plainText(part))
+      .filter((part) => part.length >= 8)
+    for (const sentence of chunks) {
+      const run = longestRun(body, sentence)
+      if (run >= COPY_RUN) return true
+      if (sentence.length >= 8 && run >= Math.ceil(sentence.length * 0.72)) return true
+    }
+  }
+  return false
+}
+
+function toneHint() {
+  if (Math.random() < 0.5) {
+    return '이번 댓글은 ㅋㅋ, ㅎㅎ, ~, !, :), ㅉㅉ 같은 기호 없이 말로만 써라.'
+  }
+  const mark = TONE_MARKS[Math.floor(Math.random() * TONE_MARKS.length)]
+  return `이번 댓글에만 "${mark}" 를 자연스럽게 한 번 넣어라.`
+}
+
 function matchupBrief(matchup) {
   const side = (label, body) => {
     const a = String(label || '').trim()
@@ -89,11 +140,15 @@ function matchupBrief(matchup) {
 
 const WRITER_SYSTEM =
   'You write one short spectator comment on a Korean 1:1 matchup. ' +
-  'Voice: a Korean in their early-to-mid 20s, casual 반말, a firm opinion or reaction. ' +
-  'Use at least one concrete word that already appears in the title, description, or side text. ' +
+  'Voice: a Korean in their early-to-mid 20s, casual 반말, like a real person in a comment section. ' +
+  'Borrow one concrete word from the title, description, or side text, then say your own opinion. ' +
+  'Never copy or lightly paraphrase a sentence from the description or either side. ' +
+  'A shared word is fine. A reused clause is not. ' +
+  'Emotion marks such as ~, !, ㅋㅋ, ㅎㅎ, :), !~!, ~~!!, ㅉㅉ are optional. ' +
+  'Many comments should be plain speech with none of them. Follow the per-comment instruction. ' +
   'Never ask a question. No question marks. Do not ask which side is better, what others think, or for an explanation. ' +
-  'Do not write as the author. No emoji, no hashtags, no insults, no profanity. ' +
-  'Length 20 to 80 Korean characters. ' +
+  'Do not write as the author. No hashtags, no insults, no profanity. ' +
+  'Length 20 to 90 Korean characters. ' +
   'If there is no topic to react to, return {"skip":true,"reason_ko":"..."}. ' +
   'Otherwise return JSON only: {"skip":false,"comment":"..."}.'
 
@@ -203,15 +258,17 @@ async function writeComment(matchup, extra) {
   const hint = extra ? `\n다시 써라. ${extra}` : ''
   const parsed = await chatJson({
     system: WRITER_SYSTEM,
-    userText: `${matchupBrief(matchup)}\n반드시 이 단어 중 하나를 문장 안에 넣어라: ${needles.slice(0, 12).join(', ')}${hint}`,
+    userText: `${matchupBrief(matchup)}\n단어만 빌려라. 설명이나 본문 문장을 그대로 쓰지 마라. 이 단어 중 하나: ${needles.slice(0, 12).join(', ')}\n${toneHint()}${hint}`,
     timeoutMs: OPENAI_TIMEOUT_MS,
   })
   if (!parsed) return { ok: false, reason: 'no_openai_key' }
   if (parsed.skip) return { ok: false, reason: 'skipped_topic' }
-  const comment = clipChars(parsed.comment, COMMENT_MAX)
+  const comment = String(parsed.comment || '').replace(/\s+/g, ' ').trim()
   if ([...comment].length < COMMENT_MIN) return { ok: false, reason: 'too_short' }
+  if ([...comment].length > COMMENT_MAX) return { ok: false, reason: 'too_long' }
   if (isAskingComment(comment)) return { ok: false, reason: 'question' }
   if (!mentionsMatchup(comment, needles)) return { ok: false, reason: 'unrelated' }
+  if (copiesMatchupSentence(comment, matchup)) return { ok: false, reason: 'copied' }
   return { ok: true, comment }
 }
 
@@ -228,7 +285,7 @@ async function commentAsBot(supabase, bot, matchups, usedThisRun, started, budge
     try {
       draft = await writeComment(
         matchup,
-        attempt === 0 ? '' : '물음표와 질문 없이, 위 단어가 들어간 의견만.',
+        attempt === 0 ? '' : '설명 문장을 베끼지 마라. 단어만 남기고 네 말로 써라. 질문은 넣지 마라.',
       )
     } catch (error) {
       if (isFatalOpenAiError(error)) return { posted: false, fatal: true, reason: 'openai_auth' }
