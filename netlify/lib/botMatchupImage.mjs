@@ -364,42 +364,76 @@ async function listEligibleChallengeBots(supabase, intervalHours) {
   return listEligibleBots(supabase, intervalHours, 'right_user_id')
 }
 
-/** 같은 제목의 다른 봇 글이 공개 중이면 그 봇 글에는 도전하지 않는다. */
+function botTitleVisibility(row, nowMs) {
+  if (!row?.right_type) return 'waiting'
+  const exp = new Date(row.expires_at || 0).getTime()
+  if (Number.isFinite(exp) && exp > nowMs) return 'live'
+  return 'ended'
+}
+
+/**
+ * 같은 제목의 봇 글이 아직 투표 중이면 그 제목에는 도전하지 않는다.
+ * 끝난 글은 세지 않는다. 도전자를 기다리는 글이 여러 개면 가장 최근 글 하나만 남긴다.
+ */
 async function dropDuplicateBotTitleTargets(supabase, targets) {
   const list = targets || []
   if (!list.length) return { kept: list, skipped: 0 }
   const { data: bots, error: botErr } = await supabase.from('profiles').select('id').eq('is_bot', true)
   if (botErr) throw botErr
   const botIds = new Set((bots || []).map((b) => b.id))
-  const titles = [
-    ...new Set(
-      list
-        .filter((t) => botIds.has(t.user_id))
-        .map((t) => String(t.title || '').trim())
-        .filter(Boolean),
-    ),
-  ]
-  if (!titles.length) return { kept: list, skipped: 0 }
+  if (!list.some((t) => botIds.has(t.user_id))) return { kept: list, skipped: 0 }
 
-  const botPostsByTitle = new Map()
-  for (let i = 0; i < titles.length; i += 8) {
-    const { data, error } = await supabase
-      .from('matchups')
-      .select('id, title, user_id')
-      .in('title', titles.slice(i, i + 8))
-      .or('status.eq.active,status.is.null')
-      .not('is_demo', 'eq', true)
-    if (error) throw error
-    for (const row of data || []) {
-      if (!botIds.has(row.user_id)) continue
-      const title = String(row.title || '').trim()
-      botPostsByTitle.set(title, (botPostsByTitle.get(title) || 0) + 1)
+  const nowMs = Date.now()
+  const byTitle = new Map()
+  const ids = [...botIds]
+  for (let i = 0; i < ids.length; i += 40) {
+    let afterId = ''
+    for (let page = 0; page < 20; page += 1) {
+      let query = supabase
+        .from('matchups')
+        .select('id, title, user_id, right_type, expires_at, created_at')
+        .in('user_id', ids.slice(i, i + 40))
+        .or('status.eq.active,status.is.null')
+        .not('is_demo', 'eq', true)
+        .order('id', { ascending: true })
+        .limit(500)
+      if (afterId) query = query.gt('id', afterId)
+      const { data, error } = await query
+      if (error) throw error
+      const rows = data || []
+      for (const row of rows) {
+        if (!botIds.has(row.user_id)) continue
+        const kind = botTitleVisibility(row, nowMs)
+        if (kind === 'ended') continue
+        const title = String(row.title || '').trim()
+        if (!title) continue
+        let info = byTitle.get(title)
+        if (!info) {
+          info = { live: false, newestWaitingId: null, newestWaitingAt: '' }
+          byTitle.set(title, info)
+        }
+        if (kind === 'live') info.live = true
+        if (kind === 'waiting') {
+          const at = String(row.created_at || '')
+          if (!info.newestWaitingId || at > info.newestWaitingAt) {
+            info.newestWaitingId = row.id
+            info.newestWaitingAt = at
+          }
+        }
+      }
+      if (rows.length < 500) break
+      const nextId = String(rows[rows.length - 1]?.id || '')
+      if (!nextId || nextId === afterId) break
+      afterId = nextId
     }
   }
 
   const kept = list.filter((t) => {
     if (!botIds.has(t.user_id)) return true
-    return (botPostsByTitle.get(String(t.title || '').trim()) || 0) <= 1
+    const info = byTitle.get(String(t.title || '').trim())
+    if (!info) return true
+    if (info.live) return false
+    return info.newestWaitingId === t.id
   })
   return { kept, skipped: list.length - kept.length }
 }
@@ -455,10 +489,9 @@ export async function challengeBotImageMatchups(supabase, opts = {}) {
       errors.push('time_budget')
       break
     }
-    while (bots[botIdx] && failed.has(String(bots[botIdx].id))) botIdx += 1
+    while (bots[botIdx] && (failed.has(String(bots[botIdx].id)) || bots[botIdx].id === target.user_id)) botIdx += 1
     const bot = bots[botIdx]
     if (!bot) break
-    if (bot.id === target.user_id) continue
 
     const categoryKey = resolveBotCategoryKey(target.category, catalog)
     const categoryLabel = resolveBotCategoryLabel(target.category, catalog)
@@ -632,9 +665,9 @@ export async function challengeBotTextMatchups(supabase, opts = {}) {
       errors.push('time_budget')
       break
     }
+    while (bots[botIdx] && bots[botIdx].id === target.user_id) botIdx += 1
     const bot = bots[botIdx]
     if (!bot) break
-    if (bot.id === target.user_id) continue
 
     attempted += 1
     try {

@@ -8,7 +8,7 @@ import { challengeBotTextMatchups, createBotTextMatchups } from '../lib/botMatch
 import { loadBotMatchupSettings, planTextRunQuota, saveBotMatchupQuotaState } from '../lib/botMatchupQuota.mjs'
 import { botsPaused, callRpc, createVirtualBotClient, jsonResponse, readSchedulePayload } from '../lib/virtualBotRuntime.mjs'
 
-// 예약 함수는 30초에서 끊긴다. 글 생성과 도전을 투표 RPC보다 먼저 끝낸다.
+// 예약 함수는 30초에서 끊긴다. 도전을 글 생성·투표보다 먼저 끝낸다.
 const TEXT_CREATE_BUDGET_MS = 8_000
 const TEXT_CHALLENGE_BUDGET_MS = 18_000
 
@@ -29,18 +29,7 @@ export default async (req) => {
     }
 
     const planned = planTextRunQuota(settings)
-    let textCreates = { attempted: 0, created: 0, skipped: 'none' }
-    try {
-      textCreates = await createBotTextMatchups(supabase, {
-        remaining: planned.textCreate,
-        intervalHours: settings.intervalHours,
-        started: Date.now(),
-        budgetMs: TEXT_CREATE_BUDGET_MS,
-      })
-    } catch (e) {
-      textCreates = { attempted: 0, created: 0, error: e?.message || String(e) }
-      console.warn('[virtual-vote-bots] text creates:', textCreates)
-    }
+    // 글 생성의 제목 조회가 길어도, 도전 저장이 먼저 끝나게 한다.
     let textChallenges = { attempted: 0, challenged: 0, skipped: 'none' }
     try {
       textChallenges = await challengeBotTextMatchups(supabase, {
@@ -52,6 +41,18 @@ export default async (req) => {
     } catch (e) {
       textChallenges = { attempted: 0, challenged: 0, error: e?.message || String(e) }
       console.warn('[virtual-vote-bots] text challenges:', textChallenges)
+    }
+    let textCreates = { attempted: 0, created: 0, skipped: 'none' }
+    try {
+      textCreates = await createBotTextMatchups(supabase, {
+        remaining: planned.textCreate,
+        intervalHours: settings.intervalHours,
+        started: Date.now(),
+        budgetMs: TEXT_CREATE_BUDGET_MS,
+      })
+    } catch (e) {
+      textCreates = { attempted: 0, created: 0, error: e?.message || String(e) }
+      console.warn('[virtual-vote-bots] text creates:', textCreates)
     }
 
     await saveBotMatchupQuotaState(supabase, settings.raw, {
