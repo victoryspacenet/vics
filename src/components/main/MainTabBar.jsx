@@ -5,6 +5,18 @@ import { cn } from '../../lib/utils'
 
 const FEED_TABS = [
   {
+    id: 'new',
+    label: 'NEW',
+    tag: 'FRESH',
+    icon: Zap,
+    path: '/feed/new',
+    active:
+      'bg-gradient-to-br from-emerald-400 via-teal-500 to-cyan-500 text-white shadow-[0_6px_24px_-4px_rgba(20,184,166,0.5),inset_0_1px_0_rgba(255,255,255,0.35)] ring-[1.5px] ring-white/40',
+    idle:
+      'border-teal-200/80 bg-gradient-to-br from-emerald-50/90 to-cyan-50/45 text-teal-900/85 shadow-sm shadow-teal-200/25 hover:border-teal-300 hover:from-emerald-50 hover:to-cyan-50 hover:shadow-teal-200/40',
+    idleIcon: 'bg-teal-100/90 text-teal-600 group-hover:bg-teal-100 group-hover:text-teal-700',
+  },
+  {
     id: 'best',
     label: '베스트',
     tag: 'TOP',
@@ -27,18 +39,6 @@ const FEED_TABS = [
     idle:
       'border-fuchsia-200/75 bg-gradient-to-br from-fuchsia-50/90 to-violet-50/50 text-violet-900/85 shadow-sm shadow-fuchsia-200/25 hover:border-fuchsia-300 hover:from-fuchsia-50 hover:to-violet-50 hover:shadow-fuchsia-200/40',
     idleIcon: 'bg-fuchsia-100/90 text-fuchsia-600 group-hover:bg-fuchsia-100 group-hover:text-fuchsia-700',
-  },
-  {
-    id: 'new',
-    label: 'NEW',
-    tag: 'FRESH',
-    icon: Zap,
-    path: '/feed/new',
-    active:
-      'bg-gradient-to-br from-emerald-400 via-teal-500 to-cyan-500 text-white shadow-[0_6px_24px_-4px_rgba(20,184,166,0.5),inset_0_1px_0_rgba(255,255,255,0.35)] ring-[1.5px] ring-white/40',
-    idle:
-      'border-teal-200/80 bg-gradient-to-br from-emerald-50/90 to-cyan-50/45 text-teal-900/85 shadow-sm shadow-teal-200/25 hover:border-teal-300 hover:from-emerald-50 hover:to-cyan-50 hover:shadow-teal-200/40',
-    idleIcon: 'bg-teal-100/90 text-teal-600 group-hover:bg-teal-100 group-hover:text-teal-700',
   },
 ]
 

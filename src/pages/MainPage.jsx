@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronRight, Flame, Sparkles } from 'lucide-react'
-import { fetchMainMatchupsQuick, enrichMainFeedCreatorRanks, MAIN_FEED_BEST_LIMIT, MAIN_FEED_HOT_LIMIT } from '../lib/mainFeed'
+import { ChevronRight, Flame, Sparkles, Zap } from 'lucide-react'
+import { fetchMainMatchupsQuick, enrichMainFeedCreatorRanks, MAIN_FEED_BEST_LIMIT, MAIN_FEED_HOT_LIMIT, MAIN_FEED_NEW_LIMIT } from '../lib/mainFeed'
 import { fetchActiveMainSpotlightMatchup } from '../lib/mainSpotlight'
 import { runWhenIdle } from '../lib/runDeferred'
 import { useAuthStore } from '../store/authStore'
@@ -136,6 +136,52 @@ export function MainPage() {
         </p>
       )}
 
+      {/* ── NEW 매치업 (매치업 생성이 투표보다 앞) ── */}
+      <section className="mb-10">
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 via-teal-500 to-cyan-500 shadow-[0_4px_14px_-2px_rgba(20,184,166,0.5)]">
+              <Zap size={18} className="text-white" strokeWidth={2.5} />
+            </span>
+            <div>
+              <h2 className="text-base font-black leading-none bg-gradient-to-r from-emerald-600 via-teal-500 to-cyan-500 bg-clip-text text-transparent tracking-tight">
+                NEW 매치업
+              </h2>
+              <p className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-500/80">JUST ARRIVED</p>
+            </div>
+          </div>
+          <span className="rounded-full border border-emerald-200/80 bg-gradient-to-r from-emerald-50 to-cyan-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-700 shadow-sm">
+            ⚡ NEW
+          </span>
+        </div>
+        <MatchupCarousel>
+          {quickLoading
+            ? Array.from({ length: MAIN_FEED_NEW_LIMIT }).map((_, i) => (
+                <MainCardSkeleton key={`sk-new-${i}`} compact staticLcp={i === 0} />
+              ))
+            : data.new.slice(0, MAIN_FEED_NEW_LIMIT).map((m, i) => (
+                <div
+                  key={m.id}
+                  className="animate-fade-in-feed-stagger"
+                  style={{ '--stagger-delay': `${Math.min(i, 11) * 52}ms` }}
+                >
+                  <MainMatchupCard matchup={m} variant="new" eagerMedia={i < 2} />
+                </div>
+              ))}
+        </MatchupCarousel>
+        {!quickLoading && data.new.length >= MAIN_FEED_NEW_LIMIT && (
+          <div className="mt-3 flex justify-end px-4">
+            <Link
+              to="/feed/new"
+              className="inline-flex flex-row items-center gap-1 whitespace-nowrap rounded-full border border-emerald-200/80 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-100"
+            >
+              더보기
+              <ChevronRight size={14} strokeWidth={2.5} aria-hidden />
+            </Link>
+          </div>
+        )}
+      </section>
+
       {/* ── 베스트 매치업 ── */}
       <section className="mb-10">
         <div className="flex items-center justify-between mb-5">
@@ -157,7 +203,7 @@ export function MainPage() {
         <MatchupCarousel>
           {quickLoading
             ? Array.from({ length: MAIN_FEED_BEST_LIMIT }).map((_, i) => (
-                <MainCardSkeleton key={`sk-${i}`} compact staticLcp={i === 0} />
+                <MainCardSkeleton key={`sk-best-${i}`} compact />
               ))
             : data.best.slice(0, MAIN_FEED_BEST_LIMIT).map((m, i) => (
                 <div
@@ -203,7 +249,7 @@ export function MainPage() {
         <MatchupCarousel>
           {quickLoading
             ? Array.from({ length: MAIN_FEED_HOT_LIMIT }).map((_, i) => (
-                <MainCardSkeleton key={`sk-${i}`} compact staticLcp={i === 0} />
+                <MainCardSkeleton key={`sk-hot-${i}`} compact />
               ))
             : data.hot.length === 0
               ? (
@@ -243,7 +289,7 @@ export function MainPage() {
           </div>
         }
       >
-        <MainPageLowerSections quickLoading={quickLoading} newItems={data.new} />
+        <MainPageLowerSections />
       </Suspense>
     </div>
   )
